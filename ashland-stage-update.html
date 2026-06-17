@@ -450,17 +450,6 @@ textarea:focus{outline:none;border-color:var(--green)}
       <div class="arow" style="margin-top:8px"><div><div style="font-weight:600">Override Log CSV</div><div style="font-size:12px;color:var(--muted)">Predecessor overrides</div></div><button class="abtn abtn-gold" onclick="exportCSV('overrides')">Export</button></div>
     </div>
 
-    <!-- API Key -->
-    <div class="acard">
-      <div class="arow">
-        <div>
-          <div style="font-weight:600">API Key (Clean Up Notes)</div>
-          <div style="font-size:12px;color:var(--muted)" id="admin-api-status">Not set</div>
-        </div>
-        <button class="abtn abtn-g" onclick="setApiKey()">Set Key</button>
-      </div>
-    </div>
-
     <!-- Reset week -->
     <div class="acard">
       <div class="arow" style="flex-direction:column;align-items:flex-start;gap:8px">
@@ -665,17 +654,6 @@ textarea:focus{outline:none;border-color:var(--green)}
       <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">Exports</div>
       <div class="arow"><div><div style="font-weight:600">Submissions CSV</div><div style="font-size:12px;color:var(--muted)" id="admin-sub-count">0 submissions</div></div><button class="abtn abtn-gold" onclick="exportCSV('submissions')">Export</button></div>
       <div class="arow" style="margin-top:8px"><div><div style="font-weight:600">Override Log CSV</div><div style="font-size:12px;color:var(--muted)">Predecessor overrides</div></div><button class="abtn abtn-gold" onclick="exportCSV('overrides')">Export</button></div>
-    </div>
-
-    <!-- API Key -->
-    <div class="acard">
-      <div class="arow">
-        <div>
-          <div style="font-weight:600">API Key (Clean Up Notes)</div>
-          <div style="font-size:12px;color:var(--muted)" id="admin-api-status">Not set</div>
-        </div>
-        <button class="abtn abtn-g" onclick="setApiKey()">Set Key</button>
-      </div>
     </div>
 
     <!-- Reset week -->
@@ -2606,49 +2584,24 @@ async function cleanupNote() {
   const input = document.getElementById('walk-note-input');
   const raw = input.value.trim();
   if (!raw) return;
-  // Require API key stored in settings
-  if (!S.apiKey) {
-    const key = prompt('Enter your Anthropic API key to use Clean Up.\n\nThis is stored only on your device and never transmitted elsewhere.\n\nGet your key at console.anthropic.com');
-    if (!key || !key.trim()) return;
-    S.apiKey = key.trim();
-    saveS();
-  }
   const btn = document.getElementById('note-cleanup-btn');
   btn.disabled = true;
   btn.textContent = '✨ Cleaning…';
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/.netlify/functions/cleanup', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': S.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-calls': 'true',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: 'You are a construction field notes editor. Clean up the following voice-dictated walk note from a residential home builder. Fix grammar, punctuation, and organization. Keep it concise and factual. Preserve all specific details (lot numbers, trade names, measurements, observations). Return only the cleaned note text — no preamble, no explanation.\n\nRaw note:\n' + raw
-        }]
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawText: raw })
     });
     const data = await resp.json();
     if (data.error) {
-      if (data.error.type === 'authentication_error') {
-        S.apiKey = null; saveS();
-        toast('API key invalid — re-enter in Settings');
-      } else {
-        toast('Cleanup error: ' + data.error.message);
-      }
+      toast('Cleanup error: ' + data.error);
       btn.disabled = false;
       btn.textContent = '✨ Clean Up';
       return;
     }
-    const cleaned = data.content?.map(c=>c.text||'').join('').trim();
-    if (cleaned) {
-      input.value = cleaned;
+    if (data.cleaned) {
+      input.value = data.cleaned;
       onNoteInput();
       toast('✨ Cleaned up');
     } else {
