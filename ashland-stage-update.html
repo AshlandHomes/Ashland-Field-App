@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Ashland Homes — Stage Update</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00A9D1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ashland Field Ops">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -2806,6 +2814,56 @@ renderAdmin();
 // Always show login screen — builder must authenticate each session
 // (builderName persists for display but login is required on each app open)
 showLoginScreen();
+</script>
+
+<script>
+// Register service worker for PWA installability
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js').then(function(reg) {
+      console.log('Service worker registered:', reg.scope);
+    }).catch(function(err) {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+
+// iOS install hint — Safari doesn't support beforeinstallprompt
+// Show a one-time tip for iOS users since "Add to Home Screen" must be manual there
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+function isInStandaloneMode() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+if (isIOS() && !isInStandaloneMode() && !localStorage.getItem('ah_ios_install_hint_shown')) {
+  setTimeout(function() {
+    showConfirm(
+      '📲 Install This App',
+      'Tap the Share button below, then "Add to Home Screen" to install Ashland Field Ops as an app icon on your phone.',
+      'Got It',
+      function() {
+        localStorage.setItem('ah_ios_install_hint_shown', '1');
+      }
+    );
+  }, 2000);
+}
+
+// Android/Chrome install prompt — capture and offer via a button if desired
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+});
+async function triggerInstallPrompt() {
+  if (!deferredInstallPrompt) {
+    toast('App already installed or not available on this browser');
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+}
 </script>
 </body>
 </html>
