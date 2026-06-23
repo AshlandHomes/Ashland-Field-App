@@ -163,6 +163,11 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify({ ok: true, status: r.status }) };
       }
 
+      case 'deleteBuilder': {
+        await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
       case 'upsertBuilderRecord': {
         const r = await supabaseRequest('POST', 'field_ops_builders?on_conflict=name', {
           ...payload,
