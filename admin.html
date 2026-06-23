@@ -194,9 +194,15 @@ tr:hover td{background:#f9fafb}
                 <option value="Dennis Duncan">Dennis Duncan</option>
               </select>
               <select class="filter-select" id="filter-update" onchange="renderLotsTable()">
-                <option value="">All Status</option>
+                <option value="">All Update Status</option>
                 <option value="pending">⚠️ Not Updated This Week</option>
                 <option value="updated">✓ Updated This Week</option>
+              </select>
+              <select class="filter-select" id="filter-close" onchange="renderLotsTable()">
+                <option value="">All Close Status</option>
+                <option value="scheduled">📅 Scheduled</option>
+                <option value="ready">⚠️ Ready to Schedule</option>
+                <option value="notyet">Not Yet</option>
               </select>
               <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
             </div>
@@ -505,11 +511,15 @@ function renderLotsTable() {
   const search = document.getElementById('lot-search').value.toLowerCase();
 
   const filterUpdate = document.getElementById('filter-update').value;
+  const filterClose = document.getElementById('filter-close').value;
   let filtered = lots.filter(l => {
     if (filterSub && l.subdivision !== filterSub) return false;
     if (filterBuilder && l.assigned_builder !== filterBuilder) return false;
     if (filterUpdate === 'pending' && l.updated_this_week) return false;
     if (filterUpdate === 'updated' && !l.updated_this_week) return false;
+    if (filterClose === 'scheduled' && !l.scheduled_close_date) return false;
+    if (filterClose === 'ready' && (l.scheduled_close_date || parseFloat(l.stage) < 6)) return false;
+    if (filterClose === 'notyet' && parseFloat(l.stage) >= 6) return false;
     if (search && !l.number.toLowerCase().includes(search) && !l.address.toLowerCase().includes(search) && !l.plan.toLowerCase().includes(search)) return false;
     return true;
   });
@@ -537,21 +547,16 @@ function renderLotsTable() {
       ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span>'
       : '<span class="badge" style="background:#fee2e2;color:var(--red);font-weight:700">⚠️ Not Updated</span>';
 
-    // Closing status
-    const isComplete = lot.stage === '9.5';
+    // Closing status — 3 states
     const hasCloseDate = !!lot.scheduled_close_date;
     const closeDate = hasCloseDate ? fmtDate(lot.scheduled_close_date) : '—';
     let closeBadge;
-    if (isComplete) {
-      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Construction Complete</span>';
-    } else if (lot.stage === '9') {
-      closeBadge = '<span class="badge" style="background:#e0f2fe;color:#0369a1">Trade Punch</span>';
-    } else if (hasCloseDate) {
-      closeBadge = '<span class="badge" style="background:#f0fdf4;color:#1E8449">📅 Close Scheduled</span>';
+    if (hasCloseDate) {
+      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">📅 Scheduled</span>';
     } else if (parseFloat(lot.stage) >= 6) {
-      closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22">⚠️ Not Scheduled</span>';
+      closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready to Schedule</span>';
     } else {
-      closeBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">In Progress</span>';
+      closeBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">Not Yet</span>';
     }
 
     return `<tr>
@@ -574,7 +579,7 @@ function renderLotsTable() {
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>SD</th><th>Lot / Plan</th><th>Address</th><th>Stage</th>
-      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Close Date</th><th>Updated?</th><th></th>
+      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Close Date</th><th>Update Status</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -631,9 +636,9 @@ function renderSubdivisionsTable() {
         ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ All updated</span>`
         : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">No active lots</span>`;
     const closeScheduled = subLots.filter(l=>l.scheduled_close_date).length;
-    const notScheduled = subLots.filter(l=>parseFloat(l.stage)>=6 && l.stage!=='9.5' && !l.scheduled_close_date).length;
-    const closeStatus = notScheduled > 0
-      ? `<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ ${notScheduled} need scheduling</span>`
+    const readyToSchedule = subLots.filter(l=>parseFloat(l.stage)>=6 && !l.scheduled_close_date).length;
+    const closeStatus = readyToSchedule > 0
+      ? `<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ ${readyToSchedule} ready to schedule</span>`
       : closeScheduled > 0
         ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ ${closeScheduled} scheduled</span>`
         : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">—</span>`;
