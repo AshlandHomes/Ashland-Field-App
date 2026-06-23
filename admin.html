@@ -197,6 +197,7 @@ tr:hover td{background:#f9fafb}
               </select>
               <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
             </div>
+            <button class="btn btn-secondary" onclick="autoAssignBuilders()" title="Auto-assign builders to lots based on subdivision">⚡ Auto-Assign Builders</button>
             <button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
           </div>
         </div>
@@ -583,7 +584,7 @@ function renderBuildersTable() {
   }).join('');
 
   document.getElementById('builders-table-body').innerHTML = `<table>
-    <thead><tr><th>Name</th><th>Subdivisions</th><th>PIN Status</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Subdivisions</th><th>Lots</th><th>PIN Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -596,7 +597,10 @@ function renderSubdivisionsTable() {
     const active = subLots.filter(l=>l.stage!=='9.5').length;
     const complete = subLots.filter(l=>l.stage==='9.5').length;
     const updated = subLots.filter(l=>l.updated_this_week).length;
-    const assignedBuilders = [...new Set(subLots.map(l=>l.assigned_builder).filter(Boolean))].join(', ') || '—';
+    // Get builders assigned to this subdivision from builders table
+    const assignedBuilders = builders
+      .filter(b => (b.subdivisions||[]).includes(code) && !b.is_admin)
+      .map(b=>b.name).join(', ') || '—';
     return `<tr>
       <td><span class="badge-sub ${SUB_COLORS[code]}">${code}</span></td>
       <td><strong>${SUB_NAMES[code]}</strong></td>
@@ -609,7 +613,7 @@ function renderSubdivisionsTable() {
   }).join('');
 
   document.getElementById('subdivisions-table-body').innerHTML = `<table>
-    <thead><tr><th>Code</th><th>Name</th><th>Lots</th><th>Active</th><th>Complete</th><th>Updated This Week</th><th>Builders</th></tr></thead>
+    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Complete</th><th>Update Status</th><th>Builders</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -710,6 +714,41 @@ async function submitSetPin() {
     renderBuildersTable();
     alert((isTemp ? 'Temporary PIN' : 'PIN') + ' set for ' + name);
   }
+}
+
+// Builder subdivision map
+const BUILDER_SUBS = {
+  'Matt Hines': ['CO','TB','TE'],
+  'Brendon Connor': ['RC','CW'],
+  'Dennis Duncan': ['CT','CW'],
+};
+
+async function autoAssignBuilders() {
+  // For CW (shared), Dennis gets primary assignment
+  // For each lot, assign builder based on subdivision
+  const assignments = {};
+  lots.forEach(l => {
+    if (l.assigned_builder) return; // skip already assigned
+    for (const [builder, subs] of Object.entries(BUILDER_SUBS)) {
+      if (subs.includes(l.subdivision)) {
+        // CW: if already assigned to Brendon, also give Dennis — use first match
+        if (!assignments[l.id]) assignments[l.id] = builder;
+      }
+    }
+  });
+  const unassigned = Object.keys(assignments);
+  if (!unassigned.length) { alert('All lots are already assigned.'); return; }
+  if (!confirm('Auto-assign ' + unassigned.length + ' unassigned lots to their default builders based on subdivision?')) return;
+  // Update each lot
+  let done = 0;
+  for (const [lotId, builder] of Object.entries(assignments)) {
+    await sbCall('updateLot', {id: lotId, assigned_builder: builder});
+    done++;
+  }
+  await loadLots();
+  renderStats();
+  renderLotsTable();
+  alert('Done — ' + done + ' lots assigned.');
 }
 
 async function deleteBuilder(name) {
