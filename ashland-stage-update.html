@@ -1538,7 +1538,147 @@ function loadS() {
     if (!l.scheduledCloseDateLockedAt) l.scheduledCloseDateLockedAt = null;
   });
 }
-// On load, silently catch up any lots whose tasks qualify for a higher stage
+// ══════════════════════════════════════
+// SUPABASE API
+// ══════════════════════════════════════
+async function sbCall(action, payload) {
+  try {
+    const resp = await fetch('/.netlify/functions/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payload })
+    });
+    const data = await resp.json();
+    if (data && data.error) {
+      console.error('Supabase error:', data.error);
+      return null;
+    }
+    return data;
+  } catch(e) {
+    console.error('sbCall failed:', e);
+    return null;
+  }
+}
+
+// Convert app lot format to Supabase row format
+function lotToRow(lot) {
+  return {
+    id: lot.id,
+    number: lot.number,
+    address: lot.address || '',
+    plan: lot.plan || '',
+    subdivision: lot.subdivision || '',
+    community: lot.community || '',
+    stage: lot.stage || '1.1',
+    completed_tasks: lot.completedTasks || [],
+    task_overrides: lot.taskOverrides || {},
+    utilities: lot.utilities || {gas:false,power:false,water:false},
+    start_date: lot.startDate || null,
+    scheduled_close_date: lot.scheduledCloseDate || null,
+    scheduled_close_date_note: lot.scheduledCloseDateNote || '',
+    scheduled_close_date_locked_at: lot.scheduledCloseDateLockedAt || null,
+    updated_this_week: lot.updatedThisWeek || false,
+    assigned_builder: lot.assignedBuilder || '',
+  };
+}
+
+// Convert Supabase row format back to app lot format
+function rowToLot(row) {
+  return {
+    id: row.id,
+    number: row.number,
+    address: row.address || '',
+    plan: row.plan || '',
+    subdivision: row.subdivision || '',
+    community: row.community || '',
+    stage: row.stage || '1.1',
+    completedTasks: row.completed_tasks || [],
+    taskOverrides: row.task_overrides || {},
+    utilities: row.utilities || {gas:false,power:false,water:false},
+    startDate: row.start_date || '',
+    scheduledCloseDate: row.scheduled_close_date || null,
+    scheduledCloseDateNote: row.scheduled_close_date_note || '',
+    scheduledCloseDateLockedAt: row.scheduled_close_date_locked_at || null,
+    updatedThisWeek: row.updated_this_week || false,
+    assignedBuilder: row.assigned_builder || '',
+  };
+}
+
+// Save a single lot to Supabase (and local cache)
+async function saveLot(lot) {
+  localStorage.setItem('lot_' + lot.id, JSON.stringify(lot));
+  await sbCall('updateLot', lotToRow(lot));
+}
+
+// Save all state to localStorage cache
+function saveS() {
+  localStorage.setItem('sav15', JSON.stringify({
+    builderName: S.builderName,
+    isAdmin: S.isAdmin,
+    currentLotId: S.currentLotId,
+    currentSubdivision: S.currentSubdivision,
+    submissions: S.submissions,
+    overrides: S.overrides,
+    walkNotes: S.walkNotes,
+  }));
+}
+
+// Load from Supabase — called on app init
+async function loadFromSupabase() {
+  const rows = await sbCall('getLots', {});
+  if (rows && Array.isArray(rows)) {
+    if (rows.length === 0) {
+      // First time — seed all lots from local defaults
+      await seedLotsToSupabase();
+    } else {
+      S.lots = rows.map(rowToLot);
+      S.lots.forEach(function(l) {
+        if (!l.taskOverrides) l.taskOverrides = {};
+        if (!l.utilities) l.utilities = {gas:false,power:false,water:false};
+        if (!l.scheduledCloseDate) l.scheduledCloseDate = null;
+      });
+      localStorage.setItem('sav15_lots', JSON.stringify(S.lots));
+    }
+  } else {
+    const cached = localStorage.getItem('sav15_lots');
+    if (cached) S.lots = JSON.parse(cached);
+  }
+  catchUpStages();
+  renderHome();
+  renderAdmin();
+}
+
+async function seedLotsToSupabase() {
+  toast('Setting up lots…');
+  const rows = S.lots.map(lotToRow);
+  // Seed in batches of 10
+  for (let i = 0; i < rows.length; i += 10) {
+    const batch = rows.slice(i, i+10);
+    await sbCall('upsertLots', batch);
+  }
+  toast('Lots loaded ✓');
+}
+
+// Load non-lot state from localStorage cache
+function loadS() {
+  try {
+    const d = localStorage.getItem('sav15');
+    if (d) {
+      const cached = JSON.parse(d);
+      S.builderName = cached.builderName || '';
+      S.isAdmin = cached.isAdmin || false;
+      S.currentLotId = cached.currentLotId || null;
+      S.currentSubdivision = cached.currentSubdivision || null;
+      S.submissions = cached.submissions || [];
+      S.overrides = cached.overrides || [];
+      S.walkNotes = cached.walkNotes || {};
+    }
+    // Load cached lots for immediate render while Supabase loads
+    const cachedLots = localStorage.getItem('sav15_lots');
+    if (cachedLots) S.lots = JSON.parse(cachedLots);
+  } catch(e) {}
+}
+
 function catchUpStages() {
   let changed = false;
   S.lots.forEach(function(l) {
@@ -1546,7 +1686,6 @@ function catchUpStages() {
     let safety = 0;
     while (advanced && safety < 25) {
       safety++;
-      // Hard stop at 5.9 if utilities not all confirmed
       if (l.stage === '5.9') {
         const utils = l.utilities || {};
         if (!utils.gas || !utils.power || !utils.water) break;
@@ -1555,10 +1694,7 @@ function catchUpStages() {
       if (advanced) changed = true;
     }
   });
-  if (changed) saveS();
 }
-
-function saveS() { localStorage.setItem('sav15', JSON.stringify(S)); }
 
 // ══════════════════════════════════════
 // HELPERS
@@ -2017,6 +2153,16 @@ function confirmOverride() {
     trackingOnly: isTrackingOnly,
   };
   applyAutoStage(lot);
+  saveLot(lot);
+  sbCall('addOverride', {
+    lot_id: lot.id,
+    task_id: taskId,
+    task_name: task ? task.name : '#'+taskId,
+    builder_name: S.builderName,
+    note: note||'',
+    missing_preds: predNames.join(', '),
+    is_tracking_only: isTrackingOnly,
+  });
   S.overrides.push({
     id:uuid(), lotId:lot.id, lotNumber:lot.number, builderName:S.builderName,
     taskId, taskName:task?task.name:'#'+taskId,
@@ -2090,7 +2236,36 @@ function submitUpdate() {
     commentFlags:document.getElementById('cmt-flags').value,
   };
   S.submissions.push(submission);
-  lot.updatedThisWeek=true; saveS();
+  lot.updatedThisWeek=true;
+  saveS();
+  saveLot(lot);
+  sbCall('addSubmission', {
+    id: submission.id,
+    lot_id: lot.id,
+    lot_number: submission.lotNumber,
+    subdivision: lot.subdivision,
+    builder_name: submission.builderName,
+    week_ending: submission.weekEnding,
+    stage: submission.stage,
+    stage_desc: submission.stageDesc,
+    phase: submission.phase,
+    weeks_remaining: submission.weeksRemaining,
+    projected_close: submission.projectedClose,
+    scheduled_close_date: submission.scheduledCloseDate || '',
+    scheduled_close_date_note: submission.scheduledCloseDateNote || '',
+    start_date: submission.startDate || '',
+    schedule_health: submission.scheduleHealth || '',
+    days_ahead_behind: submission.daysAheadBehind || 0,
+    utilities_status: submission.utilitiesStatus || '',
+    utilities_all_confirmed: submission.utilitiesAllConfirmed === 'Yes',
+    tasks_completed_this_phase: submission.tasksCompletedThisPhase || 0,
+    total_tasks_complete: submission.totalTasksComplete || 0,
+    override_count: submission.overrideCount || 0,
+    outstanding_items: submission.outstandingItems || '',
+    comment_this_week: submission.commentThisWeek || '',
+    comment_next_week: submission.commentNextWeek || '',
+    comment_flags: submission.commentFlags || '',
+  });
   postToSheets(submission);
   toast('✓ Submitted — '+lot.number);
   showScreen('home');
@@ -2245,6 +2420,7 @@ function updateLotStartDate(lotId, date) {
   if (!lot) return;
   lot.startDate = date;
   saveS();
+  saveLot(lot);
   toast('Start date updated');
 }
 
@@ -2276,15 +2452,19 @@ function addLot(){
   const num=document.getElementById('new-num').value.trim();
   const addr=document.getElementById('new-addr').value.trim();
   const comm=document.getElementById('new-comm').value.trim();
+  const sub=document.getElementById('new-sub').value;
   const stage=document.getElementById('new-stage').value;
-  if(!num||!addr||!stage||!startDate){toast('Fill in required fields including start date');return;}
-  S.lots.push({id:uuid(),number:num,address:addr,community:comm,stage,completedTasks:[],taskOverrides:{},updatedThisWeek:false});
-  saveS();closeSheet('sheet-add');renderHome();toast('Added: '+num);
+  const startDate=document.getElementById('new-start').value;
+  if(!num||!addr||!stage){toast('Fill in all fields');return;}
+  if(!startDate){toast('Select a construction start date');return;}
+  const newLot={id:uuid(),number:num,address:addr,plan:'',subdivision:sub,community:comm,stage,completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate,utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null};
+  S.lots.push(newLot);
+  saveS();
+  sbCall('upsertLot', lotToRow(newLot));
+  closeSheet('sheet-add');renderHome();toast('Added: '+num);
 }
 
-// ══════════════════════════════════════
-// CSV EXPORT
-// ══════════════════════════════════════
+
 function exportCSV(type){
   let headers,rows;
   if(type==='submissions'){
@@ -2363,8 +2543,9 @@ function confirmUtility(key) {
       showConfirm('Remove Utility Confirmation?', msg, 'Yes, Remove', function(ok) {
         if (!ok) return;
         lot.utilities[key] = false;
-        recalcStage(lot); // recalcStage already clears scheduledCloseDate if dropped below 6
+        recalcStage(lot);
         saveS();
+        saveLot(lot);
         renderUtilityCard(lot);
         updateDetHeader(lot);
         buildStageGrid(lot);
@@ -2396,6 +2577,7 @@ function confirmUtility(key) {
       lot.utilities[key] = true;
       const advanced = applyAutoStage(lot);
       saveS();
+      saveLot(lot);
       renderUtilityCard(lot);
       updateDetHeader(lot);
       buildStageGrid(lot);
@@ -2465,6 +2647,7 @@ function promptLockCloseDate(lot) {
       lot.scheduledCloseDate = y+'-'+m+'-'+d;
       lot.scheduledCloseDateLockedAt = new Date().toISOString();
       saveS();
+      saveLot(lot);
       renderCloseDateCard(lot);
       updateDetHeader(lot);
       toast('📅 Closing date locked — ' + dateStr);
@@ -2496,6 +2679,7 @@ function confirmCloseDateOverride() {
   lot.scheduledCloseDateNote = note;
   lot.scheduledCloseDateLockedAt = new Date().toISOString();
   saveS();
+  saveLot(lot);
   document.getElementById('modal-closedate').classList.remove('open');
   renderCloseDateCard(lot);
   updateDetHeader(lot);
@@ -2573,54 +2757,24 @@ function addWalkNote() {
   if (!text) { toast('Type or dictate a note first'); return; }
   const lot = S.lots.find(l=>l.id===S.currentLotId);
   if (!lot) return;
+  const noteId = uuid();
+  const ts = new Date().toISOString();
   if (!S.walkNotes[lot.id]) S.walkNotes[lot.id] = [];
-  S.walkNotes[lot.id].push({
-    id: uuid(),
-    text,
-    createdAt: new Date().toISOString(),
-    lotId: lot.id,
-    builderName: S.builderName,
-  });
+  S.walkNotes[lot.id].push({id:noteId, text, ts});
   saveS();
+  sbCall('addWalkNote', {
+    id: noteId,
+    lot_id: lot.id,
+    builder_name: S.builderName,
+    note_text: text,
+    created_at: ts
+  });
   input.value = '';
   document.getElementById('note-cleanup-btn').disabled = true;
   renderWalkNotes(lot);
   toast('Note saved');
 }
 
-async function cleanupNote() {
-  const input = document.getElementById('walk-note-input');
-  const raw = input.value.trim();
-  if (!raw) return;
-  const btn = document.getElementById('note-cleanup-btn');
-  btn.disabled = true;
-  btn.textContent = '✨ Cleaning…';
-  try {
-    const resp = await fetch('/.netlify/functions/cleanup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawText: raw })
-    });
-    const data = await resp.json();
-    if (data.error) {
-      toast('Cleanup error: ' + data.error);
-      btn.disabled = false;
-      btn.textContent = '✨ Clean Up';
-      return;
-    }
-    if (data.cleaned) {
-      input.value = data.cleaned;
-      onNoteInput();
-      toast('✨ Cleaned up');
-    } else {
-      toast('No response — try again');
-    }
-  } catch(e) {
-    toast('Cleanup failed — check connection');
-  }
-  btn.disabled = false;
-  btn.textContent = '✨ Clean Up';
-}
 
 function openNoteFullscreen(noteId, lotId) {
   const notes = S.walkNotes[lotId] || [];
@@ -2808,12 +2962,13 @@ async function loginWithBiometric() {
 // ══════════════════════════════════════
 // INIT
 // ══════════════════════════════════════
-loadS(); catchUpStages();
-renderHome();
-renderAdmin();
-// Always show login screen — builder must authenticate each session
-// (builderName persists for display but login is required on each app open)
+loadS();
+// Render with cached data immediately for fast load
+if (S.lots.length) { catchUpStages(); renderHome(); renderAdmin(); }
+// Always show login screen
 showLoginScreen();
+// Then load fresh data from Supabase in background
+loadFromSupabase();
 </script>
 
 <script>
