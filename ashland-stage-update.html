@@ -273,7 +273,7 @@ textarea:focus{outline:none;border-color:var(--green)}
     </div>
     <div class="week-badge">Week ending <strong id="week-end-disp"></strong></div>
   </div>
-  <div id="debug-msg" style="padding:8px 16px;font-size:11px;font-family:monospace;color:#c0392b;word-break:break-all"></div><div class="sec-hdr">Subdivisions</div>
+  <div class="sec-hdr">Subdivisions</div>
   <div class="lot-list" id="lot-list"></div>
   <div style="text-align:center;padding:12px 16px 4px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:#bbb">Ashland Homes · Field Operations</div>
 </div>
@@ -1551,20 +1551,15 @@ async function sbCall(action, payload) {
     const text = await resp.text();
     let data;
     try { data = JSON.parse(text); } catch(e) { 
-      const dbgEl = document.getElementById('debug-msg');
-      if (dbgEl) dbgEl.textContent = 'Parse error: ' + text.substring(0,100);
+      console.error('Parse error:', text.substring(0,100));
       return null; 
     }
     if (data && data.error) {
-      const dbgEl = document.getElementById('debug-msg');
-      if (dbgEl) dbgEl.textContent = 'SB error: ' + data.error;
       console.error('Supabase error:', data.error);
       return null;
     }
     return data;
   } catch(e) {
-    const dbgEl = document.getElementById('debug-msg');
-    if (dbgEl) dbgEl.textContent = 'Fetch error: ' + e.message;
     console.error('sbCall failed:', e);
     return null;
   }
@@ -1636,11 +1631,7 @@ function saveS() {
 // Load from Supabase — called on app init
 async function loadFromSupabase() {
   const rows = await sbCall('getLots', {});
-  const rowType = typeof rows;
-  const rowInfo = rows === null ? 'null' : rows === undefined ? 'undefined' : Array.isArray(rows) ? rows.length + ' rows' : rowType + ':' + JSON.stringify(rows).substring(0,50);
-  // Show persistent debug message
-  const dbgEl = document.getElementById('debug-msg');
-  if (dbgEl) dbgEl.textContent = 'Supabase: ' + rowInfo;
+
   if (rows && Array.isArray(rows)) {
     if (rows.length === 0) {
       // First time — seed all lots from local defaults
