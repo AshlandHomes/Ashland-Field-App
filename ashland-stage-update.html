@@ -1626,6 +1626,7 @@ function saveS() {
 // Load from Supabase — called on app init
 async function loadFromSupabase() {
   const rows = await sbCall('getLots', {});
+  toast('Supabase: ' + (rows ? rows.length + ' lots' : 'no response'));
   if (rows && Array.isArray(rows)) {
     if (rows.length === 0) {
       // First time — seed all lots from local defaults
@@ -1644,8 +1645,14 @@ async function loadFromSupabase() {
     if (cached) S.lots = JSON.parse(cached);
   }
   catchUpStages();
+  // Always re-render when data arrives, regardless of login state
   renderHome();
   renderAdmin();
+  // If login screen is not showing, we need to update the lot list
+  const loginScreen = document.getElementById('login-screen');
+  if (loginScreen && !loginScreen.classList.contains('open')) {
+    renderHome();
+  }
 }
 
 async function seedLotsToSupabase() {
@@ -2832,9 +2839,11 @@ function loginAsBuilder(name) {
   hideLoginScreen();
   renderHome();
   renderAdmin();
-  // Re-render after short delay to catch any Supabase data that just loaded
-  setTimeout(function() { renderHome(); }, 500);
-  setTimeout(function() { renderHome(); }, 1500);
+  // Re-render repeatedly to catch Supabase data as it arrives
+  setTimeout(function() { renderHome(); }, 300);
+  setTimeout(function() { renderHome(); }, 800);
+  setTimeout(function() { renderHome(); }, 2000);
+  setTimeout(function() { renderHome(); }, 4000);
   // Offer biometric setup after first login
   setTimeout(function() { offerBiometricSetup(name); }, 2500);
 }
@@ -2848,8 +2857,9 @@ function loginAsAdmin() {
     hideLoginScreen();
     renderHome();
     renderAdmin();
-    setTimeout(function() { renderHome(); }, 500);
-    setTimeout(function() { renderHome(); }, 1500);
+    setTimeout(function() { renderHome(); }, 300);
+    setTimeout(function() { renderHome(); }, 800);
+    setTimeout(function() { renderHome(); }, 2000);
     toast('🔑 Admin mode');
   } else {
     document.getElementById('login-error').textContent = 'Incorrect PIN';
