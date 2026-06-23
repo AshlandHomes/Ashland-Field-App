@@ -219,6 +219,7 @@ tr:hover td{background:#f9fafb}
       <div class="table-wrap">
         <div class="table-header">
           <h2>Subdivisions</h2>
+          <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
         </div>
         <div id="subdivisions-table-body">
           <div class="loading">Loading…</div>
@@ -319,19 +320,54 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<!-- ADD SUBDIVISION MODAL -->
+<div class="modal-overlay" id="modal-add-sub">
+  <div class="modal">
+    <h2>Add Subdivision</h2>
+    <div class="modal-sub">New subdivision will appear in the field app and admin console immediately</div>
+    <div class="field"><label>Subdivision Code (2-3 letters)</label>
+      <input id="sub-code" type="text" maxlength="4" placeholder="e.g. WB" style="text-transform:uppercase">
+    </div>
+    <div class="field"><label>Full Name</label>
+      <input id="sub-name" type="text" placeholder="e.g. Willowbrook">
+    </div>
+    <div class="field"><label>Color Theme</label>
+      <select id="sub-color">
+        <option value="blue">Blue</option>
+        <option value="green">Green</option>
+        <option value="gold">Gold</option>
+        <option value="purple">Purple</option>
+        <option value="red">Red</option>
+        <option value="teal">Teal</option>
+      </select>
+    </div>
+    <div class="field"><label>Assign Builders (optional)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="sub-builder-checks">
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="Matt Hines"> Matt Hines</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="Brendon Connor"> Brendon Connor</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="Dennis Duncan"> Dennis Duncan</label>
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-sub')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddSubdivision()">Add Subdivision →</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADD BUILDER MODAL -->
 <div class="modal-overlay" id="modal-add-builder">
   <div class="modal">
     <h2>Add Builder</h2>
     <div class="field"><label>Full Name</label><input id="builder-name" type="text" placeholder="First Last"></div>
     <div class="field"><label>Subdivisions (check all that apply)</label>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-        <label style="text-transform:none;font-weight:400;display:flex;align-items:center;gap:8px"><input type="checkbox" value="RC"> RC — Ruby Creek</label>
-        <label style="text-transform:none;font-weight:400;display:flex;align-items:center;gap:8px"><input type="checkbox" value="CO"> CO — Chimney Oaks</label>
-        <label style="text-transform:none;font-weight:400;display:flex;align-items:center;gap:8px"><input type="checkbox" value="TB"> TB — Traditions of Braselton</label>
-        <label style="text-transform:none;font-weight:400;display:flex;align-items:center;gap:8px"><input type="checkbox" value="CT"> CT — Clocktower</label>
-        <label style="text-transform:none;font-weight:400;display:flex;align-items:center;gap:8px"><input type="checkbox" value="TE"> TE — Thurgood Estates</label>
-        <label style="text-transform:none;font-weight:400;display:flex;align-items:center;gap:8px"><input type="checkbox" value="CW"> CW — Carrington Walk</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="builder-sub-checkboxes">
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="RC"> RC — Ruby Creek</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CO"> CO — Chimney Oaks</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="TB"> TB — Traditions</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CT"> CT — Clocktower</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="TE"> TE — Thurgood Estates</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CW"> CW — Carrington Walk</label>
       </div>
     </div>
     <div class="field"><label>Initial PIN (4 digits)</label>
@@ -699,6 +735,52 @@ function showSection(name) {
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('section-'+name).classList.add('active');
   event.target.classList.add('active');
+}
+
+// ── ADD SUBDIVISION ──
+function openAddSubModal() {
+  document.getElementById('sub-code').value = '';
+  document.getElementById('sub-name').value = '';
+  document.getElementById('sub-color').value = 'blue';
+  document.querySelectorAll('#sub-builder-checks input').forEach(cb=>cb.checked=false);
+  document.getElementById('modal-add-sub').classList.add('open');
+}
+
+async function submitAddSubdivision() {
+  const code = document.getElementById('sub-code').value.trim().toUpperCase();
+  const name = document.getElementById('sub-name').value.trim();
+  if (!code || !name) { alert('Code and name are required'); return; }
+  if (!/^[A-Z]{2,4}$/.test(code)) { alert('Code must be 2-4 letters only'); return; }
+
+  const colorMap = {
+    blue:['#D6E4F7','#1A5276'], green:['#D5F5E3','#1E8449'],
+    gold:['#FEF9E7','#7D6608'], purple:['#F5EEF8','#6C3483'],
+    red:['#FDEDEC','#922B21'], teal:['#EBF5FB','#0E6655']
+  };
+  const [bg, color] = colorMap[document.getElementById('sub-color').value];
+
+  // Update builders that are assigned to this subdivision
+  const assignedBuilders = [...document.querySelectorAll('#sub-builder-checks input:checked')].map(cb=>cb.value);
+  
+  // Add sub to each assigned builder's subdivisions array
+  for (const bname of assignedBuilders) {
+    const builder = builders.find(b=>b.name===bname);
+    if (builder) {
+      const newSubs = [...new Set([...(builder.subdivisions||[]), code])];
+      await sbCall('updateBuilderPin', {name: bname, subdivisions: newSubs});
+    }
+  }
+
+  // Update local SUBDIVISIONS config — note this only persists in memory
+  // until next deploy; the field app's SUBDIVISIONS array needs manual update
+  SUB_NAMES[code] = name;
+  SUB_COLORS[code] = 'sub-' + code;
+
+  closeModal('modal-add-sub');
+  await loadBuilders();
+  renderBuildersTable();
+  renderSubdivisionsTable();
+  alert('Subdivision ' + code + ' — ' + name + ' added. Note: you will also need to add this to the SUBDIVISIONS array in the field app code for it to appear for builders.');
 }
 
 // ── EXPORT TO EXCEL ──
