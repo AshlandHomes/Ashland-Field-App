@@ -1548,13 +1548,20 @@ async function sbCall(action, payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload })
     });
-    const data = await resp.json();
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch(e) { 
+      toast('Parse error: ' + text.substring(0,50));
+      return null; 
+    }
     if (data && data.error) {
+      toast('SB error: ' + data.error.substring(0,60));
       console.error('Supabase error:', data.error);
       return null;
     }
     return data;
   } catch(e) {
+    toast('Fetch error: ' + e.message.substring(0,60));
     console.error('sbCall failed:', e);
     return null;
   }
