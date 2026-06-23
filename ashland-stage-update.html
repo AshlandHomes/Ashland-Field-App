@@ -560,18 +560,37 @@ textarea:focus{outline:none;border-color:var(--green)}
   </div>
 </div>
 
-<!-- SCHEDULE ADVANCE MODAL -->
+<!-- SCHEDULE IMPACT MODAL -->
 <div class="modal-overlay" id="modal-advance">
   <div class="modal">
-    <div class="modal-icon">📅</div>
-    <div class="modal-title">Update Schedule?</div>
-    <div class="modal-body">Should this advance your completion date?</div>
-    <div style="display:flex;gap:8px;margin-bottom:16px">
-      <button onclick="selectAdvance(true)" style="flex:1;padding:14px 8px;border-radius:10px;border:2px solid var(--green);background:var(--gl);color:var(--green);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;line-height:1.4;text-align:center">📅 Yes, pull<br>schedule forward</button>
-      <button onclick="selectAdvance(false)" style="flex:1;padding:14px 8px;border-radius:10px;border:2px solid var(--rule);background:var(--cream);color:var(--muted);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;line-height:1.4;text-align:center">📋 No,<br>tracking only</button>
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">This will delay your schedule.</div>
+    <div class="modal-body" style="margin-bottom:16px">This is a critical path task. Completing it late impacts your completion date.</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+      <button onclick="selectAdvance(false)" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--brand);background:#e0f7fc;color:var(--brand);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;text-align:left">
+        ✅ Override — I have a plan to make up the time
+      </button>
+      <button onclick="selectAdvance(true)" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--red);background:#fdf0ef;color:var(--red);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;text-align:left">
+        ⚠️ Understood — this will cause a delay
+      </button>
     </div>
     <div class="modal-btns">
       <button class="mbtn mbtn-cancel" onclick="cancelOverride()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- OVERRIDE RECOVERY MODAL -->
+<div class="modal-overlay" id="modal-override-recovery">
+  <div class="modal">
+    <div class="modal-icon">✅</div>
+    <div class="modal-title">What's your recovery plan?</div>
+    <div class="modal-body" style="margin-bottom:14px">How will you make up the time to stay on schedule?</div>
+    <div class="modal-note-label">Recovery plan <span id="recovery-char-count" style="color:var(--muted);font-weight:400">(0/150)</span></div>
+    <textarea id="recovery-note-input" class="modal-textarea" placeholder="e.g. Doubling up framing crew tomorrow, materials already on site…" maxlength="150" oninput="updateRecoveryCharCount()" style="min-height:80px"></textarea>
+    <div class="modal-btns">
+      <button class="mbtn mbtn-cancel" onclick="cancelOverride()">Cancel</button>
+      <button class="mbtn mbtn-override" onclick="submitRecoveryPlan()">Submit →</button>
     </div>
   </div>
 </div>
@@ -580,8 +599,8 @@ textarea:focus{outline:none;border-color:var(--green)}
 <div class="modal-overlay" id="modal-delay-reason">
   <div class="modal">
     <div class="modal-icon">⚠️</div>
-    <div class="modal-title">Schedule Delay Reason</div>
-    <div class="modal-body" style="margin-bottom:16px">This critical path task is running behind schedule. Select a reason and add a brief note.</div>
+    <div class="modal-title">Why is this delayed?</div>
+    <div class="modal-body" style="margin-bottom:16px">Select the reason this critical path task is running behind schedule.</div>
     <div style="margin-bottom:14px">
       <div class="modal-note-label">Reason for Delay</div>
       <select id="delay-reason-select" class="modal-textarea" style="padding:10px 12px;height:auto;font-size:14px">
@@ -2155,6 +2174,8 @@ function cancelOverride() {
   pendingAdvance=null;
   document.getElementById('modal-override').classList.remove('open');
   document.getElementById('modal-advance').classList.remove('open');
+  document.getElementById('modal-override-recovery').classList.remove('open');
+  document.getElementById('modal-delay-reason').classList.remove('open');
 }
 
 function onOverrideNoteInput() {
@@ -2170,21 +2191,43 @@ function resetAdvanceButtons() {
 }
 
 function selectAdvance(advance) {
+  // advance=false means "Override — I have a plan" (no schedule impact)
+  // advance=true means "Understood — this causes a delay" (schedule moves back)
   pendingAdvance = advance;
   document.getElementById('modal-advance').classList.remove('open');
 
-  // If builder says YES this backs up schedule AND it's a CP task, require delay reason
-  if (advance && pendingOverride) {
-    const taskId = pendingOverride.taskId;
-    if (CP_IDS.has(taskId)) {
-      // Show delay reason modal before completing
-      document.getElementById('delay-reason-select').value = '';
-      document.getElementById('delay-note-input').value = '';
-      document.getElementById('delay-char-count').textContent = '(0/150)';
-      document.getElementById('modal-delay-reason').classList.add('open');
-      return;
-    }
+  if (!advance) {
+    // Override path — ask for recovery plan
+    document.getElementById('recovery-note-input').value = '';
+    document.getElementById('recovery-char-count').textContent = '(0/150)';
+    document.getElementById('modal-override-recovery').classList.add('open');
+    return;
   }
+
+  // Delay path — require reason for CP tasks
+  if (advance && pendingOverride && CP_IDS.has(pendingOverride.taskId)) {
+    document.getElementById('delay-reason-select').value = '';
+    document.getElementById('delay-note-input').value = '';
+    document.getElementById('delay-char-count').textContent = '(0/150)';
+    document.getElementById('modal-delay-reason').classList.add('open');
+    return;
+  }
+
+  confirmOverride();
+}
+
+function updateRecoveryCharCount() {
+  const len = document.getElementById('recovery-note-input').value.length;
+  const el = document.getElementById('recovery-char-count');
+  el.textContent = '(' + len + '/150)';
+  el.style.color = len > 130 ? 'var(--red)' : 'var(--muted)';
+}
+
+function submitRecoveryPlan() {
+  const note = document.getElementById('recovery-note-input').value.trim();
+  if (!note) { toast('Please describe your recovery plan'); return; }
+  document.getElementById('modal-override-recovery').classList.remove('open');
+  pendingOverride.recoveryPlan = note;
   confirmOverride();
 }
 
@@ -2229,7 +2272,7 @@ function confirmOverride() {
   const {taskId, missingPreds} = pendingOverride;
   const task = TASKS.find(t=>t.id===taskId);
   const predNames = missingPreds.map(pid=>{const pt=TASKS.find(t=>t.id===pid);return pt?pt.name:'#'+pid;});
-  const isTrackingOnly = (pendingAdvance === false);
+  const isTrackingOnly = (pendingAdvance === true); // true = delay acknowledged, false = override with plan
 
   lot.completedTasks.push(taskId);
   lot.taskOverrides[taskId] = {
@@ -2264,20 +2307,38 @@ function confirmOverride() {
   saveS();
   saveLot(lot);
 
-  // Save delay event to Supabase if builder confirmed schedule impact + CP task
-  if (!isTrackingOnly && delayReason && CP_IDS.has(taskId)) {
-    sbCall('addDelay', {
-      lot_id: lot.id,
-      lot_number: lot.number,
-      subdivision: lot.subdivision,
-      builder_name: S.builderName,
-      task_id: taskId,
-      task_name: task ? task.name : '#'+taskId,
-      reason: delayReason,
-      note: delayNote,
-      days_impact: 0, // calculated server-side in future
-      created_at: new Date().toISOString()
-    });
+  // Save delay or recovery event to Supabase for CP tasks
+  const recoveryPlan = pendingOverride ? pendingOverride.recoveryPlan : null;
+  if (CP_IDS.has(taskId)) {
+    if (isTrackingOnly && delayReason) {
+      // Delay confirmed — log it
+      sbCall('addDelay', {
+        lot_id: lot.id,
+        lot_number: lot.number,
+        subdivision: lot.subdivision,
+        builder_name: S.builderName,
+        task_id: taskId,
+        task_name: task ? task.name : '#'+taskId,
+        reason: delayReason,
+        note: delayNote,
+        days_impact: 0,
+        created_at: new Date().toISOString()
+      });
+    } else if (!isTrackingOnly && recoveryPlan) {
+      // Override with recovery plan — log as override type
+      sbCall('addDelay', {
+        lot_id: lot.id,
+        lot_number: lot.number,
+        subdivision: lot.subdivision,
+        builder_name: S.builderName,
+        task_id: taskId,
+        task_name: task ? task.name : '#'+taskId,
+        reason: 'Override — recovery plan',
+        note: recoveryPlan,
+        days_impact: 0,
+        created_at: new Date().toISOString()
+      });
+    }
   }
 
   pendingOverride=null;
