@@ -197,8 +197,7 @@ tr:hover td{background:#f9fafb}
               </select>
               <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
             </div>
-            <button class="btn btn-secondary" onclick="autoAssignBuilders()" title="Auto-assign builders to lots based on subdivision">⚡ Auto-Assign Builders</button>
-            <button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
+<button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
           </div>
         </div>
         <div id="lots-table-body">
@@ -566,19 +565,22 @@ function renderBuildersTable() {
     return;
   }
   const rows = builders.map(b => {
-    const subs = (b.subdivisions||[]).map(s=>`<span class="badge-sub ${SUB_COLORS[s]||''}" style="margin-right:3px">${s}</span>`).join('');
-    const hasPin = b.pin_hash || b.temp_pin;
+    const subs = (b.subdivisions||[]).map(s=>`<span class="badge-sub ${SUB_COLORS[s]||''}" style="margin-right:3px">${s}</span>`).join('') || '<span style="color:var(--muted)">None</span>';
     const pinStatus = b.temp_pin 
       ? '<span class="badge" style="background:#fef9e7;color:#e67e22">Temp PIN set</span>'
       : b.pin_hash 
         ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">PIN set</span>'
         : '<span class="badge" style="background:#fee2e2;color:var(--red)">No PIN</span>';
+    const lotCount = lots.filter(l=>l.assigned_builder===b.name).length;
+    const deleteBtn = b.is_admin ? '' : `<button class="btn btn-sm" style="background:#fee2e2;color:var(--red);margin-left:6px" onclick="deleteBuilder('${b.name}')">Delete</button>`;
     return `<tr>
       <td><strong>${b.name}</strong>${b.is_admin?'<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-left:6px">Admin</span>':''}</td>
       <td>${subs}</td>
+      <td>${lotCount} lot${lotCount!==1?'s':''}</td>
       <td>${pinStatus}</td>
-      <td>
+      <td style="white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="openSetPinModal('${b.name}')">Set PIN</button>
+        ${deleteBtn}
       </td>
     </tr>`;
   }).join('');
@@ -589,25 +591,30 @@ function renderBuildersTable() {
   </table>`;
 }
 
-// ── SUBDIVISIONS TABLE ──
+
 function renderSubdivisionsTable() {
-  const subs = ['RC','CO','TB','CT','TE','CW'];
+  const subs = Object.keys(SUB_NAMES);
   const rows = subs.map(code => {
     const subLots = lots.filter(l=>l.subdivision===code);
     const active = subLots.filter(l=>l.stage!=='9.5').length;
     const complete = subLots.filter(l=>l.stage==='9.5').length;
     const updated = subLots.filter(l=>l.updated_this_week).length;
-    // Get builders assigned to this subdivision from builders table
+    const pending = active - updated;
     const assignedBuilders = builders
       .filter(b => (b.subdivisions||[]).includes(code) && !b.is_admin)
       .map(b=>b.name).join(', ') || '—';
+    const updateStatus = pending > 0
+      ? `<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ ${pending} pending</span>`
+      : active > 0
+        ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ All updated</span>`
+        : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">No active lots</span>`;
     return `<tr>
-      <td><span class="badge-sub ${SUB_COLORS[code]}">${code}</span></td>
-      <td><strong>${SUB_NAMES[code]}</strong></td>
-      <td>${subLots.length} total</td>
-      <td>${active} active</td>
-      <td>${complete} complete</td>
-      <td>${updated} / ${subLots.length} updated</td>
+      <td><span class="badge-sub ${SUB_COLORS[code]||''}">${code}</span></td>
+      <td><strong>${SUB_NAMES[code]||code}</strong></td>
+      <td>${subLots.length}</td>
+      <td>${active}</td>
+      <td>${complete}</td>
+      <td>${updateStatus}</td>
       <td>${assignedBuilders}</td>
     </tr>`;
   }).join('');
@@ -618,7 +625,7 @@ function renderSubdivisionsTable() {
   </table>`;
 }
 
-// ── MODALS ──
+
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 function openAddLotModal() {
