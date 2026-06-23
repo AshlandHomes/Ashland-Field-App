@@ -2832,8 +2832,11 @@ function loginAsBuilder(name) {
   hideLoginScreen();
   renderHome();
   renderAdmin();
+  // Re-render after short delay to catch any Supabase data that just loaded
+  setTimeout(function() { renderHome(); }, 500);
+  setTimeout(function() { renderHome(); }, 1500);
   // Offer biometric setup after first login
-  setTimeout(function() { offerBiometricSetup(name); }, 800);
+  setTimeout(function() { offerBiometricSetup(name); }, 2500);
 }
 
 function loginAsAdmin() {
@@ -2845,6 +2848,8 @@ function loginAsAdmin() {
     hideLoginScreen();
     renderHome();
     renderAdmin();
+    setTimeout(function() { renderHome(); }, 500);
+    setTimeout(function() { renderHome(); }, 1500);
     toast('🔑 Admin mode');
   } else {
     document.getElementById('login-error').textContent = 'Incorrect PIN';
