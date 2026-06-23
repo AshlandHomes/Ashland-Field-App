@@ -177,6 +177,17 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
+      case 'addDelay': {
+        const r = await supabaseRequest('POST', 'field_ops_delays', payload);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getDelays': {
+        const lotFilter = payload && payload.lotId ? `?lot_id=eq.${payload.lotId}&` : '?';
+        const r = await supabaseRequest('GET', `field_ops_delays${lotFilter}select=*&order=created_at.desc&limit=200`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
