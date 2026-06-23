@@ -244,6 +244,19 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<!-- DELAY LOG MODAL -->
+<div class="modal-overlay" id="modal-delay-log">
+  <div class="modal" style="max-width:600px;width:95vw">
+    <h2>Schedule Delay Log</h2>
+    <div class="modal-sub" id="delay-log-title">Loading…</div>
+    <div id="delay-log-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-delay-log')">Close</button>
+      <button class="btn btn-green btn-sm" onclick="exportDelayLog()">↓ Export CSV</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADD LOT MODAL -->
 <div class="modal-overlay" id="modal-add-lot">
   <div class="modal">
@@ -540,7 +553,7 @@ function renderLotsTable() {
     let healthBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No start date</span>';
     if (delta !== null) {
       if (delta > 3) healthBadge = `<span class="badge badge-health-ahead">+${delta}d ahead</span>`;
-      else if (delta < -3) healthBadge = `<span class="badge badge-health-behind">${Math.abs(delta)}d behind</span>`;
+      else if (delta < -3) healthBadge = `<span class="badge badge-health-behind" style="cursor:pointer" onclick="openDelayLog('${lot.id}','${lot.number} — ${lot.subdivision}')" title="Click to view delay log">${Math.abs(delta)}d behind ↗</span>`;
       else healthBadge = `<span class="badge badge-health-ok">On track</span>`;
     }
     const updBadge = lot.updated_this_week 
@@ -884,6 +897,66 @@ async function submitAddSubdivision() {
   renderBuildersTable();
   renderSubdivisionsTable();
   alert('Subdivision ' + code + ' — ' + name + ' added. Note: you will also need to add this to the SUBDIVISIONS array in the field app code for it to appear for builders.');
+}
+
+// ── DELAY LOG ──
+let currentDelayLotId = null;
+let currentDelays = [];
+
+async function openDelayLog(lotId, lotLabel) {
+  currentDelayLotId = lotId;
+  document.getElementById('delay-log-title').textContent = lotLabel;
+  document.getElementById('delay-log-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">Loading…</div>';
+  document.getElementById('modal-delay-log').classList.add('open');
+
+  const delays = await sbCall('getDelays', {lotId});
+  currentDelays = delays || [];
+
+  if (!currentDelays.length) {
+    document.getElementById('delay-log-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">No delay events recorded for this lot.</div>';
+    return;
+  }
+
+  document.getElementById('delay-log-list').innerHTML = currentDelays.map((d,i) => {
+    const date = new Date(d.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return `<div style="border:1px solid var(--rule);border-radius:10px;overflow:hidden">
+      <div style="padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;background:#f9fafb" onclick="toggleDelayNote(${i})">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--ink)">${d.task_name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${date} · ${d.builder_name} · <strong style="color:var(--red)">${d.reason}</strong></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted)" id="delay-chevron-${i}">▼</div>
+      </div>
+      <div id="delay-note-${i}" style="display:none;padding:10px 14px;background:#fff;border-top:1px solid var(--rule);font-size:13px;color:var(--ink)">
+        ${d.note || '<span style="color:var(--muted);font-style:italic">No note provided</span>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleDelayNote(i) {
+  const noteEl = document.getElementById('delay-note-'+i);
+  const chevEl = document.getElementById('delay-chevron-'+i);
+  const isOpen = noteEl.style.display !== 'none';
+  noteEl.style.display = isOpen ? 'none' : 'block';
+  chevEl.textContent = isOpen ? '▼' : '▲';
+}
+
+function exportDelayLog() {
+  if (!currentDelays.length) return;
+  const headers = ['Date','Lot','Subdivision','Builder','Task','Reason','Note'];
+  const rows = currentDelays.map(d => [
+    new Date(d.created_at).toLocaleDateString(),
+    d.lot_number, d.subdivision, d.builder_name,
+    d.task_name, d.reason, d.note||''
+  ]);
+  const csv = [headers,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('
+');
+  const blob = new Blob([csv],{type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download='delay_log_'+currentDelayLotId+'.csv'; a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── EXPORT TO EXCEL ──

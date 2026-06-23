@@ -576,6 +576,35 @@ textarea:focus{outline:none;border-color:var(--green)}
   </div>
 </div>
 
+<!-- DELAY REASON MODAL -->
+<div class="modal-overlay" id="modal-delay-reason">
+  <div class="modal">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">Schedule Delay Reason</div>
+    <div class="modal-body" style="margin-bottom:16px">This critical path task is running behind schedule. Select a reason and add a brief note.</div>
+    <div style="margin-bottom:14px">
+      <div class="modal-note-label">Reason for Delay</div>
+      <select id="delay-reason-select" class="modal-textarea" style="padding:10px 12px;height:auto;font-size:14px">
+        <option value="">Select a reason…</option>
+        <option value="Trade delay">Trade delay</option>
+        <option value="Material / supply delay">Material / supply delay</option>
+        <option value="Weather delay">Weather delay</option>
+        <option value="Inspection delay">Inspection delay</option>
+        <option value="Owner / design change">Owner / design change</option>
+        <option value="Site condition issue">Site condition issue</option>
+      </select>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="modal-note-label">Brief Note <span id="delay-char-count" style="color:var(--muted);font-weight:400">(0/150)</span></div>
+      <textarea id="delay-note-input" class="modal-textarea" placeholder="Brief explanation…" maxlength="150" oninput="updateDelayCharCount()" style="min-height:70px"></textarea>
+    </div>
+    <div class="modal-btns">
+      <button class="mbtn mbtn-cancel" onclick="cancelDelayReason()">Cancel</button>
+      <button class="mbtn mbtn-override" onclick="submitDelayReason()">Submit →</button>
+    </div>
+  </div>
+</div>
+
 <!-- WALK NOTE FULLSCREEN -->
 <div class="note-fullscreen" id="note-fullscreen">
   <div class="note-fs-header">
@@ -2142,8 +2171,47 @@ function resetAdvanceButtons() {
 
 function selectAdvance(advance) {
   pendingAdvance = advance;
-  // Close advance modal and complete the override
   document.getElementById('modal-advance').classList.remove('open');
+
+  // If builder says YES this backs up schedule AND it's a CP task, require delay reason
+  if (advance && pendingOverride) {
+    const taskId = pendingOverride.taskId;
+    if (CP_IDS.has(taskId)) {
+      // Show delay reason modal before completing
+      document.getElementById('delay-reason-select').value = '';
+      document.getElementById('delay-note-input').value = '';
+      document.getElementById('delay-char-count').textContent = '(0/150)';
+      document.getElementById('modal-delay-reason').classList.add('open');
+      return;
+    }
+  }
+  confirmOverride();
+}
+
+function updateDelayCharCount() {
+  const len = document.getElementById('delay-note-input').value.length;
+  const el = document.getElementById('delay-char-count');
+  el.textContent = '(' + len + '/150)';
+  el.style.color = len > 130 ? 'var(--red)' : 'var(--muted)';
+}
+
+function cancelDelayReason() {
+  document.getElementById('modal-delay-reason').classList.remove('open');
+  // Cancel the whole override
+  cancelOverride();
+}
+
+function submitDelayReason() {
+  const reason = document.getElementById('delay-reason-select').value;
+  const note = document.getElementById('delay-note-input').value.trim();
+  if (!reason) { toast('Please select a reason'); return; }
+
+  document.getElementById('modal-delay-reason').classList.remove('open');
+
+  // Store delay info on pendingOverride so confirmOverride can save it
+  pendingOverride.delayReason = reason;
+  pendingOverride.delayNote = note;
+
   confirmOverride();
 }
 
@@ -2190,7 +2258,28 @@ function confirmOverride() {
   });
 
   const openPhases = pendingOverride.openPhases || new Set();
+  const delayReason = pendingOverride.delayReason || null;
+  const delayNote = pendingOverride.delayNote || '';
+
   saveS();
+  saveLot(lot);
+
+  // Save delay event to Supabase if builder confirmed schedule impact + CP task
+  if (!isTrackingOnly && delayReason && CP_IDS.has(taskId)) {
+    sbCall('addDelay', {
+      lot_id: lot.id,
+      lot_number: lot.number,
+      subdivision: lot.subdivision,
+      builder_name: S.builderName,
+      task_id: taskId,
+      task_name: task ? task.name : '#'+taskId,
+      reason: delayReason,
+      note: delayNote,
+      days_impact: 0, // calculated server-side in future
+      created_at: new Date().toISOString()
+    });
+  }
+
   pendingOverride=null;
   pendingAdvance=null;
   document.getElementById('modal-override').classList.remove('open');
