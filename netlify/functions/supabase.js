@@ -114,10 +114,11 @@ exports.handler = async function(event) {
       }
 
       case 'updateBuilderPin': {
-        const { name, pin_hash, temp_pin } = payload;
+        const { name, pin_hash, temp_pin, subdivisions } = payload;
         const updates = { updated_at: new Date().toISOString() };
         if (pin_hash !== undefined) updates.pin_hash = pin_hash;
         if (temp_pin !== undefined) updates.temp_pin = temp_pin;
+        if (subdivisions !== undefined) updates.subdivisions = subdivisions;
         const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
