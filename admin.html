@@ -945,19 +945,30 @@ function toggleDelayNote(i) {
 function exportDelayLog() {
   if (!currentDelays.length) return;
   const headers = ['Date','Lot','Subdivision','Builder','Task','Reason','Note'];
-  const rows = currentDelays.map(d => [
-    new Date(d.created_at).toLocaleDateString(),
-    d.lot_number, d.subdivision, d.builder_name,
-    d.task_name, d.reason, d.note||''
-  ]);
-  const csv = [headers,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('
-');
-  const blob = new Blob([csv],{type:'text/csv'});
+  const rows = currentDelays.map(function(d) {
+    return [
+      new Date(d.created_at).toLocaleDateString(),
+      d.lot_number, d.subdivision, d.builder_name,
+      d.task_name, d.reason, d.note||''
+    ];
+  });
+  const csvRows = [headers].concat(rows).map(function(r) {
+    return r.map(function(c) {
+      return String(c).indexOf(',') > -1 || String(c).indexOf('"') > -1
+        ? '"' + String(c).replace(/"/g, '""') + '"'
+        : String(c);
+    }).join(',');
+  });
+  const csv = csvRows.join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href=url; a.download='delay_log_'+currentDelayLotId+'.csv'; a.click();
+  a.href = url;
+  a.download = 'delay_log_' + currentDelayLotId + '.csv';
+  a.click();
   URL.revokeObjectURL(url);
 }
+
 
 // ── EXPORT TO EXCEL ──
 function exportToExcel() {
