@@ -2986,13 +2986,15 @@ async function loginWithBiometric() {
 // ══════════════════════════════════════
 // INIT
 // ══════════════════════════════════════
-loadS();
-// Render with cached data immediately for fast load
-if (S.lots.length) { catchUpStages(); renderHome(); renderAdmin(); }
-// Always show login screen
-showLoginScreen();
-// Then load fresh data from Supabase in background
-loadFromSupabase();
+window.addEventListener('DOMContentLoaded', function() {
+  loadS();
+  // Render with cached data immediately for fast load
+  if (S.lots.length) { catchUpStages(); renderHome(); renderAdmin(); }
+  // Always show login screen
+  showLoginScreen();
+  // Load fresh data from Supabase
+  loadFromSupabase();
+});
 </script>
 
 <script>
