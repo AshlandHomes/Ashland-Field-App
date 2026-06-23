@@ -190,6 +190,11 @@ tr:hover td{background:#f9fafb}
                 <option value="Brendon Connor">Brendon Connor</option>
                 <option value="Dennis Duncan">Dennis Duncan</option>
               </select>
+              <select class="filter-select" id="filter-update" onchange="renderLotsTable()">
+                <option value="">All Status</option>
+                <option value="pending">⚠️ Not Updated This Week</option>
+                <option value="updated">✓ Updated This Week</option>
+              </select>
               <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
             </div>
             <button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
@@ -343,9 +348,7 @@ tr:hover td{background:#f9fafb}
     </div>
     <div class="field"><label>Assign Builders (optional)</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="sub-builder-checks">
-        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="Matt Hines"> Matt Hines</label>
-        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="Brendon Connor"> Brendon Connor</label>
-        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="Dennis Duncan"> Dennis Duncan</label>
+        <!-- populated dynamically from builders table -->
       </div>
     </div>
     <div class="modal-btns">
@@ -498,9 +501,12 @@ function renderLotsTable() {
   const filterBuilder = document.getElementById('filter-builder').value;
   const search = document.getElementById('lot-search').value.toLowerCase();
 
+  const filterUpdate = document.getElementById('filter-update').value;
   let filtered = lots.filter(l => {
     if (filterSub && l.subdivision !== filterSub) return false;
     if (filterBuilder && l.assigned_builder !== filterBuilder) return false;
+    if (filterUpdate === 'pending' && l.updated_this_week) return false;
+    if (filterUpdate === 'updated' && !l.updated_this_week) return false;
     if (search && !l.number.toLowerCase().includes(search) && !l.address.toLowerCase().includes(search) && !l.plan.toLowerCase().includes(search)) return false;
     return true;
   });
@@ -706,6 +712,16 @@ async function submitSetPin() {
   }
 }
 
+async function deleteBuilder(name) {
+  if (!confirm('Delete builder ' + name + '? This cannot be undone. Their lots will remain but will be unassigned.')) return;
+  const result = await sbCall('deleteBuilder', {name});
+  if (result !== null) {
+    await loadBuilders();
+    renderBuildersTable();
+    alert(name + ' has been deleted.');
+  }
+}
+
 function openAddBuilderModal() {
   document.getElementById('builder-name').value = '';
   document.getElementById('builder-pin').value = '';
@@ -742,7 +758,13 @@ function openAddSubModal() {
   document.getElementById('sub-code').value = '';
   document.getElementById('sub-name').value = '';
   document.getElementById('sub-color').value = 'blue';
-  document.querySelectorAll('#sub-builder-checks input').forEach(cb=>cb.checked=false);
+  // Populate builder list dynamically
+  const checksContainer = document.getElementById('sub-builder-checks');
+  checksContainer.innerHTML = builders.filter(b=>!b.is_admin).map(b=>
+    `<label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer">
+      <input type="checkbox" value="${b.name}"> ${b.name}
+    </label>`
+  ).join('');
   document.getElementById('modal-add-sub').classList.add('open');
 }
 
