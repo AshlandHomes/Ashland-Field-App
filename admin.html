@@ -537,6 +537,23 @@ function renderLotsTable() {
       ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span>'
       : '<span class="badge" style="background:#fee2e2;color:var(--red);font-weight:700">⚠️ Not Updated</span>';
 
+    // Closing status
+    const isComplete = lot.stage === '9.5';
+    const hasCloseDate = !!lot.scheduled_close_date;
+    const closeDate = hasCloseDate ? fmtDate(lot.scheduled_close_date) : '—';
+    let closeBadge;
+    if (isComplete) {
+      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Construction Complete</span>';
+    } else if (lot.stage === '9') {
+      closeBadge = '<span class="badge" style="background:#e0f2fe;color:#0369a1">Trade Punch</span>';
+    } else if (hasCloseDate) {
+      closeBadge = '<span class="badge" style="background:#f0fdf4;color:#1E8449">📅 Close Scheduled</span>';
+    } else if (parseFloat(lot.stage) >= 6) {
+      closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22">⚠️ Not Scheduled</span>';
+    } else {
+      closeBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">In Progress</span>';
+    }
+
     return `<tr>
       <td><span class="badge-sub ${SUB_COLORS[lot.subdivision]||''}">${lot.subdivision}</span></td>
       <td><strong>${lot.number}</strong>${lot.plan?`<div style="font-size:11px;color:var(--muted)">${lot.plan}</div>`:''}</td>
@@ -545,6 +562,8 @@ function renderLotsTable() {
       <td>${lot.assigned_builder||'<span style="color:var(--muted)">Unassigned</span>'}</td>
       <td>${fmtDate(lot.start_date)}</td>
       <td>${healthBadge}</td>
+      <td>${closeBadge}</td>
+      <td>${closeDate}</td>
       <td>${updBadge}</td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${lot.id}')">Edit</button>
@@ -555,7 +574,7 @@ function renderLotsTable() {
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>SD</th><th>Lot / Plan</th><th>Address</th><th>Stage</th>
-      <th>Builder</th><th>Start Date</th><th>Health</th><th>Updated?</th><th></th>
+      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Close Date</th><th>Updated?</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -611,6 +630,13 @@ function renderSubdivisionsTable() {
       : active > 0
         ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ All updated</span>`
         : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">No active lots</span>`;
+    const closeScheduled = subLots.filter(l=>l.scheduled_close_date).length;
+    const notScheduled = subLots.filter(l=>parseFloat(l.stage)>=6 && l.stage!=='9.5' && !l.scheduled_close_date).length;
+    const closeStatus = notScheduled > 0
+      ? `<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ ${notScheduled} need scheduling</span>`
+      : closeScheduled > 0
+        ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ ${closeScheduled} scheduled</span>`
+        : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">—</span>`;
     return `<tr>
       <td><span class="badge-sub ${SUB_COLORS[code]||''}">${code}</span></td>
       <td><strong>${SUB_NAMES[code]||code}</strong></td>
@@ -618,12 +644,13 @@ function renderSubdivisionsTable() {
       <td>${active}</td>
       <td>${complete}</td>
       <td>${updateStatus}</td>
+      <td>${closeStatus}</td>
       <td>${assignedBuilders}</td>
     </tr>`;
   }).join('');
 
   document.getElementById('subdivisions-table-body').innerHTML = `<table>
-    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Complete</th><th>Update Status</th><th>Builders</th></tr></thead>
+    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Complete</th><th>Update Status</th><th>Close Status</th><th>Builders</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
