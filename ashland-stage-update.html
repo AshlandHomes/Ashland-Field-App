@@ -1633,7 +1633,9 @@ function saveS() {
 // Load from Supabase — called on app init
 async function loadFromSupabase() {
   const rows = await sbCall('getLots', {});
-  toast('Supabase: ' + (rows ? rows.length + ' lots' : 'no response'));
+  const rowType = typeof rows;
+  const rowInfo = rows === null ? 'null' : rows === undefined ? 'undefined' : Array.isArray(rows) ? rows.length + ' rows' : rowType + ':' + JSON.stringify(rows).substring(0,50);
+  toast('SB result: ' + rowInfo);
   if (rows && Array.isArray(rows)) {
     if (rows.length === 0) {
       // First time — seed all lots from local defaults
