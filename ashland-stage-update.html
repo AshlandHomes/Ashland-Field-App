@@ -1323,9 +1323,11 @@ async function postToSheets(row) {
 const ADMIN_PIN = '0570';
 
 const BUILDERS = [
-  {name:'Matt Hines',      subdivisions:['CO','TB','TE']},
-  {name:'Brendon Connor',  subdivisions:['RC','CW']},
-  {name:'Dennis Duncan',          subdivisions:['CT','CW']},
+  {name:'Matt Hines',        subdivisions:['CO','TB','TE']},
+  {name:'Brendon Connor',    subdivisions:['RC','CW']},
+  {name:'Dennis Duncan',     subdivisions:['CT','CW']},
+  {name:'Collin Steinberger',subdivisions:['RC','CO','TB','CT','TE','CW']},
+  {name:'Admin',             subdivisions:['RC','CO','TB','CT','TE','CW']},
 ];
 
 // ══════════════════════════════════════
@@ -1741,15 +1743,18 @@ async function loadFromSupabase() {
     const cached = localStorage.getItem('sav15_lots');
     if (cached) S.lots = JSON.parse(cached);
   }
+  // Rebuild BUILDERS from Supabase data so new builders appear automatically
+  if (typeof builders !== 'undefined' && builders.length) {
+    // builders is loaded by the admin panel — update BUILDERS array
+    builders.forEach(function(b) {
+      if (!BUILDERS.find(function(x) { return x.name === b.name; })) {
+        BUILDERS.push({name: b.name, subdivisions: b.subdivisions || []});
+      }
+    });
+  }
   catchUpStages();
-  // Always re-render when data arrives, regardless of login state
   renderHome();
   renderAdmin();
-  // If login screen is not showing, we need to update the lot list
-  const loginScreen = document.getElementById('login-screen');
-  if (loginScreen && !loginScreen.classList.contains('open')) {
-    renderHome();
-  }
 }
 
 async function seedLotsToSupabase() {
@@ -3082,15 +3087,18 @@ function filterBuilderSuggestions() {
   const input = document.getElementById('login-username').value.toLowerCase().trim();
   const suggestEl = document.getElementById('builder-suggestions');
   if (!input || input.length < 1) { suggestEl.style.display = 'none'; return; }
-  const matches = builders.filter(b => b.name.toLowerCase().includes(input));
+  const matches = builders.filter(function(b) { return b.name.toLowerCase().includes(input); });
   if (!matches.length) { suggestEl.style.display = 'none'; return; }
-  suggestEl.innerHTML = matches.map(b =>
-    '<div class="builder-suggestion-item" onclick="selectBuilderSuggestion('' + b.name.replace(/'/g, "\'") + '')">' + b.name + '</div>'
-  ).join('');
+  suggestEl.innerHTML = matches.map(function(b) {
+    var safeName = b.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return '<div class="builder-suggestion-item" onclick="selectBuilderSuggestion(this.dataset.name)" data-name="' + safeName + '">' + safeName + '</div>';
+  }).join('');
   suggestEl.style.display = 'block';
 }
 
-function selectBuilderSuggestion(name) {
+
+function selectBuilderSuggestion(el) {
+  var name = typeof el === 'string' ? el : el.dataset ? el.dataset.name : el;
   document.getElementById('login-username').value = name;
   document.getElementById('builder-suggestions').style.display = 'none';
   setTimeout(function() { document.getElementById('login-pin-field').focus(); }, 100);
@@ -3442,11 +3450,15 @@ async function loginWithBiometric() {
 // ══════════════════════════════════════
 window.addEventListener('DOMContentLoaded', function() {
   loadS();
-  // Render with cached data immediately for fast load
+  // Clear any stale builder name from previous sessions
+  // Builder must always log in fresh each session for security
+  S.builderName = '';
+  S.isAdmin = false;
+  // Render with cached lot data immediately for fast load behind login screen
   if (S.lots.length) { catchUpStages(); renderHome(); renderAdmin(); }
-  // Always show login screen
+  // Always show login screen — no session persistence
   showLoginScreen();
-  // Load fresh data from Supabase
+  // Load fresh data from Supabase in background
   loadFromSupabase();
 });
 </script>
