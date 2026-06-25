@@ -366,7 +366,7 @@ textarea:focus{outline:none;border-color:var(--green)}
     </div>
   </div>
   <div class="submit-bar">
-    <button class="submit-btn" onclick="submitUpdate()">Submit Weekly Update ✓</button>
+    <button class="submit-btn" onclick="submitUpdate()">Submit Changes ✓</button>
   </div>
 </div>
 
@@ -1532,6 +1532,22 @@ function applyAutoStage(lot) {
       const h = calcHealthDelta(lot);
       lot.scheduleCompletedAt = new Date().toISOString();
       lot.frozenHealthDelta = h ? h.delta : 0;
+      // Auto-prompt close check if close date has passed
+      if (lot.scheduledCloseDate && !lot.isClosed) {
+        var parts = String(lot.scheduledCloseDate).split('-');
+        if (parts.length === 3) {
+          var closeD = new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2]));
+          var today = new Date(); today.setHours(0,0,0,0);
+          if (closeD < today) {
+            setTimeout(function() {
+              S.closePromptLotId = lot.id;
+              document.getElementById('close-prompt-title').textContent = lot.subdivision + ' ' + lot.number + ' — Did this close?';
+              document.getElementById('close-prompt-body').textContent = 'Construction is complete and the scheduled close date has passed. Has this home closed?';
+              document.getElementById('modal-close-prompt').classList.add('open');
+            }, 800);
+          }
+        }
+      }
     }
     return true;
   }
@@ -2961,6 +2977,18 @@ function logout() {
   S.isAdmin = false;
   saveS();
   showLoginScreen();
+}
+
+async function refreshApp() {
+  toast('Refreshing…');
+  await loadFromSupabase();
+  renderHome();
+  if (S.currentSubdivision) renderSubdivisionLots(S.currentSubdivision);
+  toast('✓ Updated');
+  // Re-check overdue closings after refresh
+  if (S.builderName && S.builderName !== 'Admin') {
+    checkOverdueClosings();
+  }
 }
 
 // ── LOT STATUS FILTER ──
