@@ -3057,9 +3057,15 @@ var closePromptQueue = [];
 var closePromptIndex = 0;
 
 function checkOverdueClosings() {
+  // If lots haven't loaded yet, retry in 2 seconds
+  if (!S.lots || S.lots.length === 0) {
+    setTimeout(function() { checkOverdueClosings(); }, 2000);
+    return;
+  }
   var today = new Date();
   today.setHours(0,0,0,0);
-  closePromptQueue = getMyLots().filter(function(l) {
+  var myLots = getMyLots();
+  closePromptQueue = myLots.filter(function(l) {
     if (l.isClosed) return false;
     if (!l.scheduledCloseDate) return false;
     var d = new Date(l.scheduledCloseDate + 'T12:00:00');
