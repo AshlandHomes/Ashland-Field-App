@@ -3126,14 +3126,24 @@ function loginAsBuilder(name) {
   hideLoginScreen();
   renderHome();
   renderAdmin();
-  // Re-render to catch Supabase data
   setTimeout(function() { renderHome(); }, 300);
   setTimeout(function() { renderHome(); }, 800);
   setTimeout(function() { renderHome(); }, 2000);
-  // Check for overdue closings
-  setTimeout(function() { checkOverdueClosings(); }, 2500);
-  // Offer biometric setup
-  setTimeout(function() { offerBiometricSetup(name); }, 3500);
+  // Check overdue closings — retry loop until lots are loaded
+  var closeCheckAttempts = 0;
+  function tryCloseCheck() {
+    closeCheckAttempts++;
+    var myLots = getMyLots();
+    var withDates = myLots.filter(function(l) { return !!l.scheduledCloseDate; });
+    toast('Attempt ' + closeCheckAttempts + ': ' + myLots.length + ' lots, ' + withDates.length + ' with dates');
+    if (myLots.length === 0 && closeCheckAttempts < 5) {
+      setTimeout(tryCloseCheck, 2000);
+      return;
+    }
+    checkOverdueClosings();
+  }
+  setTimeout(tryCloseCheck, 1500);
+  setTimeout(function() { offerBiometricSetup(name); }, 8000);
 }
 
 
