@@ -258,7 +258,10 @@ textarea:focus{outline:none;border-color:var(--green)}
       <div class="topbar-sub" id="topbar-week"></div>
     </div>
   </div>
-  <button class="icon-btn" onclick="showScreen('admin')">⚙</button>
+  <div style="display:flex;align-items:center;gap:6px">
+    <button onclick="refreshApp()" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:20px;cursor:pointer;padding:6px 8px;line-height:1" title="Refresh">↻</button>
+    <button class="icon-btn" onclick="showScreen('admin')">⚙</button>
+  </div>
 </div>
 
 <!-- HOME -->
@@ -3010,9 +3013,12 @@ var closePromptIndex = 0;
 function checkOverdueClosings() {
   var today = new Date();
   today.setHours(0,0,0,0);
-  // Use ALL lots, not just myLots — check assigned_builder instead
+  // Get builder's subdivisions from BUILDERS array
+  var builder = BUILDERS.find(function(b) { return b.name === S.builderName; });
+  var mySubs = builder ? builder.subdivisions : [];
   closePromptQueue = S.lots.filter(function(l) {
-    if (l.assignedBuilder !== S.builderName) return false;
+    // Only show prompts for lots in this builder's subdivisions
+    if (mySubs.length > 0 && mySubs.indexOf(l.subdivision) === -1) return false;
     if (l.isClosed) return false;
     if (!l.scheduledCloseDate) return false;
     var parts = String(l.scheduledCloseDate).split('-');
