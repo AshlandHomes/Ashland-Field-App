@@ -1756,6 +1756,13 @@ async function seedLotsToSupabase() {
 // Load non-lot state from localStorage cache
 function loadS() {
   try {
+    // Cache version — bump this to force clear old cached data
+    const CACHE_VERSION = '3';
+    if (localStorage.getItem('ah_cache_version') !== CACHE_VERSION) {
+      localStorage.removeItem('sav15');
+      localStorage.removeItem('sav15_lots');
+      localStorage.setItem('ah_cache_version', CACHE_VERSION);
+    }
     const d = localStorage.getItem('sav15');
     if (d) {
       const cached = JSON.parse(d);
@@ -3134,8 +3141,6 @@ function loginAsBuilder(name) {
   function tryCloseCheck() {
     closeCheckAttempts++;
     var myLots = getMyLots();
-    var withDates = myLots.filter(function(l) { return !!l.scheduledCloseDate; });
-    toast('Attempt ' + closeCheckAttempts + ': ' + myLots.length + ' lots, ' + withDates.length + ' with dates');
     if (myLots.length === 0 && closeCheckAttempts < 5) {
       setTimeout(tryCloseCheck, 2000);
       return;
