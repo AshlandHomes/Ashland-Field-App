@@ -1734,13 +1734,11 @@ async function loadFromSupabase() {
     if (cached) S.lots = JSON.parse(cached);
   }
   catchUpStages();
-  // Always re-render when data arrives, regardless of login state
   renderHome();
   renderAdmin();
-  // If login screen is not showing, we need to update the lot list
-  const loginScreen = document.getElementById('login-screen');
-  if (loginScreen && !loginScreen.classList.contains('open')) {
-    renderHome();
+  // Check for overdue closings after data loads, if builder is logged in
+  if (S.builderName && S.builderName !== '' && S.builderName !== 'Admin') {
+    setTimeout(function() { checkOverdueClosings(); }, 300);
   }
 }
 
