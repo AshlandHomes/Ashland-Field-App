@@ -605,12 +605,8 @@ textarea:focus{outline:none;border-color:var(--green)}
     <div class="modal-title" id="close-prompt-title">Has this lot closed?</div>
     <div class="modal-body" id="close-prompt-body" style="margin-bottom:20px"></div>
     <div style="display:flex;flex-direction:column;gap:10px">
-      <button onclick="markLotClosed()" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--green);background:var(--gl);color:var(--green);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
-        ✅ Yes — Mark Closed
-      </button>
-      <button onclick="updateCloseDate()" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--amber);background:var(--amberbg);color:var(--amber);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
-        📅 Not Yet — Update Close Date
-      </button>
+      <button onclick="markLotClosed()" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--green);background:var(--gl);color:var(--green);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">✅ Yes — Mark Closed</button>
+      <button onclick="updateCloseDateFromPrompt()" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--amber);background:var(--amberbg);color:var(--amber);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">📅 Not Yet — Update Close Date</button>
     </div>
     <div class="modal-btns" style="margin-top:16px">
       <button class="mbtn mbtn-cancel" onclick="dismissClosePrompt()">Ask Me Later</button>
@@ -1546,78 +1542,7 @@ let S = {builderName:'', lots:[], submissions:[], overrides:[], walkNotes:{}, ap
 let pendingOverride = null;
 let pendingAdvance = null; // null = not yet chosen, true = advance date, false = tracking only
 
-function loadS() {
-  try { const d=localStorage.getItem('sav15'); if(d) S={...S,...JSON.parse(d)}; } catch(e){}
-  if (!S.builderName) S.builderName = 'Builder';
-  if (!S.overrides) S.overrides = [];
-  if (!S.walkNotes) S.walkNotes = {};
-  if (!S.lots.length) {
-    S.lots = [
-      {id:'rc6',number:'Lot 6',address:'',plan:'Newburgh C',subdivision:'RC',community:'RC',stage:'4',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-28',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'rc7',number:'Lot 7',address:'',plan:'Brookdale H',subdivision:'RC',community:'RC',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'rc17',number:'Lot 17',address:'',plan:'BROOKDALE G',subdivision:'RC',community:'RC',stage:'4',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-28',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'rc18',number:'Lot 18',address:'',plan:'BROOKDALE B',subdivision:'RC',community:'RC',stage:'7',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-14',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'rc19',number:'Lot 19',address:'',plan:'WENDELL C',subdivision:'RC',community:'RC',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'rc20',number:'Lot 20',address:'',plan:'Rochester E',subdivision:'RC',community:'RC',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-04',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'rc25',number:'Lot 25',address:'',plan:'Grayson C',subdivision:'RC',community:'RC',stage:'9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:true,power:true,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'co5',number:'Lot 5',address:'',plan:'HARRISON B',subdivision:'CO',community:'CO',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-02',utilities:{gas:false,power:false,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'co6',number:'Lot 6',address:'',plan:'ELLINGTON B',subdivision:'CO',community:'CO',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'co7',number:'Lot 7',address:'',plan:'HARRISON B',subdivision:'CO',community:'CO',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-02',utilities:{gas:false,power:false,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'co13',number:'Lot 13',address:'',plan:'HARRISON B',subdivision:'CO',community:'CO',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-01-23',utilities:{gas:false,power:true,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'co16',number:'Lot 16',address:'',plan:'CHESIRE C',subdivision:'CO',community:'CO',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:true,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'tb38U',number:'Lot 38-U',address:'',plan:'BROOKMONT C',subdivision:'TB',community:'TB',stage:'5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-07-19',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'tb39U',number:'Lot 39-U',address:'',plan:'CARRINGTON',subdivision:'TB',community:'TB',stage:'2.1',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-31',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct30',number:'Lot 30',address:'',plan:'SAVANNAH B',subdivision:'CT',community:'CT',stage:'9.5',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:true,power:true,water:true},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct1',number:'Lot 1',address:'',plan:'HANSON B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct2',number:'Lot 2',address:'',plan:'SAVANNAH B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct3',number:'Lot 3',address:'',plan:'HANSON B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct4',number:'Lot 4',address:'',plan:'SAVANNAH B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct5',number:'Lot 5',address:'',plan:'HANSON B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct6',number:'Lot 6',address:'',plan:'SAVANNAH B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct7',number:'Lot 7',address:'',plan:'HANSON B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct8',number:'Lot 8',address:'',plan:'HANSON B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct9',number:'Lot 9',address:'',plan:'SAVANNAH B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct10',number:'Lot 10',address:'',plan:'SAVANNAH B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct11',number:'Lot 11',address:'',plan:'HANSON B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct12',number:'Lot 12',address:'',plan:'SAVANNAH B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct13',number:'Lot 13',address:'',plan:'HANSON B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct14',number:'Lot 14',address:'',plan:'SAVANNAH B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct15',number:'Lot 15',address:'',plan:'HANSON B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct16',number:'Lot 16',address:'',plan:'SAVANNAH B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct17',number:'Lot 17',address:'',plan:'HANSON B',subdivision:'CT',community:'CT',stage:'2.2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-06-17',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct31',number:'Lot 31',address:'',plan:'HANSON B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct32',number:'Lot 32',address:'',plan:'SAVANNAH B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct33',number:'Lot 33',address:'',plan:'HANSON B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct34',number:'Lot 34',address:'',plan:'SAVANNAH B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct35',number:'Lot 35',address:'',plan:'HANSON B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct36',number:'Lot 36',address:'',plan:'HANSON B4',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'ct37',number:'Lot 37',address:'',plan:'SAVANNAH B3',subdivision:'CT',community:'CT',stage:'0.3',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw1',number:'Lot 1',address:'',plan:'LANDON C5',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw2',number:'Lot 2',address:'',plan:'PARKLAND C5',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw25',number:'Lot 25',address:'',plan:'PARKLAND C2',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw26',number:'Lot 26',address:'',plan:'LANDON C5',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw27',number:'Lot 27',address:'',plan:'PARKLAND C3',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw28',number:'Lot 28',address:'',plan:'LANDON B4',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'cw29',number:'Lot 29',address:'',plan:'PARKLAND C5',subdivision:'CW',community:'CW',stage:'2',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'te7',number:'Lot 7',address:'',plan:'IRONDALE B3',subdivision:'TE',community:'TE',stage:'1.9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'te8',number:'Lot 8',address:'',plan:'IRONDALE B2',subdivision:'TE',community:'TE',stage:'1.9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'te9',number:'Lot 9',address:'',plan:'IRONDALE B4',subdivision:'TE',community:'TE',stage:'1.9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'te10',number:'Lot 10',address:'',plan:'IRONDALE B3',subdivision:'TE',community:'TE',stage:'1.9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'te11',number:'Lot 11',address:'',plan:'IRONDALE B2',subdivision:'TE',community:'TE',stage:'1.9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-      {id:'te12',number:'Lot 12',address:'',plan:'IRONDALE B4',subdivision:'TE',community:'TE',stage:'1.9',completedTasks:[],taskOverrides:{},updatedThisWeek:false,assignedBuilder:'',startDate:'2026-05-24',utilities:{gas:false,power:false,water:false},scheduledCloseDate:null,scheduledCloseDateNote:'',scheduledCloseDateLockedAt:null},
-    ];
-  }
-  S.lots.forEach(l => {
-    if (!l.taskOverrides) l.taskOverrides = {};
-    if (!l.assignedBuilder) l.assignedBuilder = '';
-    if (!l.startDate) l.startDate = '';
-    if (!l.utilities) l.utilities = {gas:false, power:false, water:false};
-    if (!l.subdivision) l.subdivision = '';
-    if (!l.scheduledCloseDate) l.scheduledCloseDate = null;
-    if (!l.scheduledCloseDateNote) l.scheduledCloseDateNote = '';
-    if (!l.scheduledCloseDateLockedAt) l.scheduledCloseDateLockedAt = null;
-  });
-}
+
 // ══════════════════════════════════════
 // SUPABASE API
 // ══════════════════════════════════════
@@ -1734,11 +1659,13 @@ async function loadFromSupabase() {
     if (cached) S.lots = JSON.parse(cached);
   }
   catchUpStages();
+  // Always re-render when data arrives, regardless of login state
   renderHome();
   renderAdmin();
-  // Check for overdue closings after data loads, if builder is logged in
-  if (S.builderName && S.builderName !== '' && S.builderName !== 'Admin') {
-    setTimeout(function() { checkOverdueClosings(); }, 300);
+  // If login screen is not showing, we need to update the lot list
+  const loginScreen = document.getElementById('login-screen');
+  if (loginScreen && !loginScreen.classList.contains('open')) {
+    renderHome();
   }
 }
 
@@ -1756,13 +1683,6 @@ async function seedLotsToSupabase() {
 // Load non-lot state from localStorage cache
 function loadS() {
   try {
-    // Cache version — bump this to force clear old cached data
-    const CACHE_VERSION = '3';
-    if (localStorage.getItem('ah_cache_version') !== CACHE_VERSION) {
-      localStorage.removeItem('sav15');
-      localStorage.removeItem('sav15_lots');
-      localStorage.setItem('ah_cache_version', CACHE_VERSION);
-    }
     const d = localStorage.getItem('sav15');
     if (d) {
       const cached = JSON.parse(d);
@@ -1908,25 +1828,22 @@ function openSubdivision(code) {
 function renderSubdivisionLots(code) {
   const list = document.getElementById('sub-lot-list');
   const sub = SUBDIVISIONS.find(s=>s.code===code);
-  // Render filter buttons
+  // Filter bar
   const filterBar = document.getElementById('lot-filter-bar');
   if (filterBar) {
     var filters = [{val:'active',label:'Active'},{val:'closed',label:'Closed'},{val:'',label:'All'}];
     filterBar.innerHTML = filters.map(function(f) {
       var isActive = lotStatusFilter === f.val;
-      var bg = isActive ? 'var(--brand)' : 'var(--card)';
-      var col = isActive ? '#fff' : 'var(--muted)';
-      return '<button class="lot-filter-btn" data-filter="' + f.val + '" onclick="setLotStatusFilter(this.dataset.filter)" style="padding:5px 12px;border-radius:20px;border:1px solid var(--rule);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;background:' + bg + ';color:' + col + '">' + f.label + '</button>';
+      return '<button class="lot-filter-btn" data-filter="' + f.val + '" onclick="setLotStatusFilter(this.dataset.filter)" style="padding:5px 12px;border-radius:20px;border:1px solid var(--rule);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;background:' + (isActive?'var(--brand)':'var(--card)') + ';color:' + (isActive?'#fff':'var(--muted)') + '">' + f.label + '</button>';
     }).join('');
   }
-  // Get filtered lots, closed at bottom
-  var allLots = getMyLots().filter(function(l) { return l.subdivision===code; });
-  var myLots = (lotStatusFilter === 'active' ? allLots.filter(function(l){return !l.isClosed;}) :
-                lotStatusFilter === 'closed' ? allLots.filter(function(l){return l.isClosed;}) : allLots)
-    .sort(function(a,b) {
-      if (a.isClosed && !b.isClosed) return 1;
-      if (!a.isClosed && b.isClosed) return -1;
-      return a.number.localeCompare(b.number, undefined, {numeric:true});
+  var allLots = getMyLots().filter(function(l){return l.subdivision===code;});
+  var myLots = (lotStatusFilter==='active' ? allLots.filter(function(l){return !l.isClosed;}) :
+                lotStatusFilter==='closed' ? allLots.filter(function(l){return l.isClosed;}) : allLots)
+    .sort(function(a,b){
+      if(a.isClosed&&!b.isClosed) return 1;
+      if(!a.isClosed&&b.isClosed) return -1;
+      return a.number.localeCompare(b.number,undefined,{numeric:true});
     });
   document.getElementById('sub-lots-hdr').textContent = myLots.length + ' Active Lot' + (myLots.length!==1?'s':'');
 
@@ -3064,18 +2981,12 @@ var closePromptQueue = [];
 var closePromptIndex = 0;
 
 function checkOverdueClosings() {
-  if (!S.lots || S.lots.length === 0) {
-    setTimeout(function() { checkOverdueClosings(); }, 2000);
-    return;
-  }
   var today = new Date();
   today.setHours(0,0,0,0);
   var myLots = getMyLots();
-
   closePromptQueue = myLots.filter(function(l) {
     if (l.isClosed) return false;
     if (!l.scheduledCloseDate) return false;
-    // Parse date parts directly to avoid timezone issues
     var parts = String(l.scheduledCloseDate).split('-');
     if (parts.length < 3) return false;
     var d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
@@ -3110,7 +3021,7 @@ function markLotClosed() {
   setTimeout(function() { showNextClosePrompt(); }, 600);
 }
 
-function updateCloseDate() {
+function updateCloseDateFromPrompt() {
   var lot = S.lots.find(function(l) { return l.id === S.closePromptLotId; });
   document.getElementById('modal-close-prompt').classList.remove('open');
   if (lot) {
@@ -3133,24 +3044,14 @@ function loginAsBuilder(name) {
   hideLoginScreen();
   renderHome();
   renderAdmin();
+  // Re-render repeatedly to catch Supabase data as it arrives
   setTimeout(function() { renderHome(); }, 300);
   setTimeout(function() { renderHome(); }, 800);
   setTimeout(function() { renderHome(); }, 2000);
-  // Check overdue closings — retry loop until lots are loaded
-  var closeCheckAttempts = 0;
-  function tryCloseCheck() {
-    closeCheckAttempts++;
-    var myLots = getMyLots();
-    if (myLots.length === 0 && closeCheckAttempts < 5) {
-      setTimeout(tryCloseCheck, 2000);
-      return;
-    }
-    checkOverdueClosings();
-  }
-  setTimeout(tryCloseCheck, 1500);
-  setTimeout(function() { offerBiometricSetup(name); }, 8000);
+  setTimeout(function() { renderHome(); }, 4000);
+  // Offer biometric setup after first login
+  setTimeout(function() { offerBiometricSetup(name); }, 2500);
 }
-
 
 function loginAsAdmin() {
   const pin = document.getElementById('login-pin-input').value;
