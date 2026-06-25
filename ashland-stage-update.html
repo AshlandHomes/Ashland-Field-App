@@ -395,7 +395,10 @@ textarea:focus{outline:none;border-color:var(--green)}
     </div>
     <div class="week-badge">Week ending <strong id="sub-week-disp"></strong></div>
   </div>
-  <div class="sec-hdr" id="sub-lots-hdr">Lots</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px;margin-bottom:4px">
+    <div class="sec-hdr" id="sub-lots-hdr" style="margin-bottom:0">Lots</div>
+    <div id="lot-filter-bar" style="display:flex;gap:6px"></div>
+  </div>
   <div class="lot-list" id="sub-lot-list"></div>
 </div>
 
@@ -595,6 +598,26 @@ textarea:focus{outline:none;border-color:var(--green)}
   </div>
 </div>
 
+<!-- LOT CLOSE PROMPT MODAL -->
+<div class="modal-overlay" id="modal-close-prompt">
+  <div class="modal">
+    <div class="modal-icon">🏠</div>
+    <div class="modal-title" id="close-prompt-title">Has this lot closed?</div>
+    <div class="modal-body" id="close-prompt-body" style="margin-bottom:20px"></div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button onclick="markLotClosed()" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--green);background:var(--gl);color:var(--green);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
+        ✅ Yes — Mark Closed
+      </button>
+      <button onclick="updateCloseDate()" style="width:100%;padding:14px 16px;border-radius:10px;border:2px solid var(--amber);background:var(--amberbg);color:var(--amber);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
+        📅 Not Yet — Update Close Date
+      </button>
+    </div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="mbtn mbtn-cancel" onclick="dismissClosePrompt()">Ask Me Later</button>
+    </div>
+  </div>
+</div>
+
 <!-- DELAY REASON MODAL -->
 <div class="modal-overlay" id="modal-delay-reason">
   <div class="modal">
@@ -649,7 +672,10 @@ textarea:focus{outline:none;border-color:var(--green)}
     </div>
     <div class="week-badge">Week ending <strong id="sub-week-disp"></strong></div>
   </div>
-  <div class="sec-hdr" id="sub-lots-hdr">Lots</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px;margin-bottom:4px">
+    <div class="sec-hdr" id="sub-lots-hdr" style="margin-bottom:0">Lots</div>
+    <div id="lot-filter-bar" style="display:flex;gap:6px"></div>
+  </div>
   <div class="lot-list" id="sub-lot-list"></div>
 </div>
 
@@ -1638,6 +1664,8 @@ function lotToRow(lot) {
     scheduled_close_date_locked_at: lot.scheduledCloseDateLockedAt || null,
     updated_this_week: lot.updatedThisWeek || false,
     assigned_builder: lot.assignedBuilder || '',
+    is_closed: lot.isClosed || false,
+    closed_date: lot.closedDate || null,
   };
 }
 
@@ -1660,6 +1688,8 @@ function rowToLot(row) {
     scheduledCloseDateLockedAt: row.scheduled_close_date_locked_at || null,
     updatedThisWeek: row.updated_this_week || false,
     assignedBuilder: row.assigned_builder || '',
+    isClosed: row.is_closed || false,
+    closedDate: row.closed_date || null,
   };
 }
 
@@ -1873,7 +1903,26 @@ function openSubdivision(code) {
 function renderSubdivisionLots(code) {
   const list = document.getElementById('sub-lot-list');
   const sub = SUBDIVISIONS.find(s=>s.code===code);
-  const myLots = getMyLots().filter(l=>l.subdivision===code);
+  // Render filter buttons
+  const filterBar = document.getElementById('lot-filter-bar');
+  if (filterBar) {
+    var filters = [{val:'active',label:'Active'},{val:'closed',label:'Closed'},{val:'',label:'All'}];
+    filterBar.innerHTML = filters.map(function(f) {
+      var isActive = lotStatusFilter === f.val;
+      var bg = isActive ? 'var(--brand)' : 'var(--card)';
+      var col = isActive ? '#fff' : 'var(--muted)';
+      return '<button class="lot-filter-btn" data-filter="' + f.val + '" onclick="setLotStatusFilter(this.dataset.filter)" style="padding:5px 12px;border-radius:20px;border:1px solid var(--rule);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;background:' + bg + ';color:' + col + '">' + f.label + '</button>';
+    }).join('');
+  }
+  // Get filtered lots, closed at bottom
+  var allLots = getMyLots().filter(function(l) { return l.subdivision===code; });
+  var myLots = (lotStatusFilter === 'active' ? allLots.filter(function(l){return !l.isClosed;}) :
+                lotStatusFilter === 'closed' ? allLots.filter(function(l){return l.isClosed;}) : allLots)
+    .sort(function(a,b) {
+      if (a.isClosed && !b.isClosed) return 1;
+      if (!a.isClosed && b.isClosed) return -1;
+      return a.number.localeCompare(b.number, undefined, {numeric:true});
+    });
   document.getElementById('sub-lots-hdr').textContent = myLots.length + ' Active Lot' + (myLots.length!==1?'s':'');
 
   if (!myLots.length) {
@@ -2993,6 +3042,76 @@ function logout() {
   showLoginScreen();
 }
 
+// ── LOT STATUS FILTER ──
+var lotStatusFilter = 'active';
+
+function setLotStatusFilter(val) {
+  lotStatusFilter = val;
+  document.querySelectorAll('.lot-filter-btn').forEach(function(btn) {
+    btn.style.background = btn.dataset.filter === val ? 'var(--brand)' : 'var(--card)';
+    btn.style.color = btn.dataset.filter === val ? '#fff' : 'var(--muted)';
+  });
+  if (S.currentSubdivision) renderSubdivisionLots(S.currentSubdivision);
+}
+
+// ── CLOSE PROMPT ──
+var closePromptQueue = [];
+var closePromptIndex = 0;
+
+function checkOverdueClosings() {
+  var today = new Date();
+  today.setHours(0,0,0,0);
+  closePromptQueue = getMyLots().filter(function(l) {
+    if (l.isClosed) return false;
+    if (!l.scheduledCloseDate) return false;
+    var d = new Date(l.scheduledCloseDate + 'T12:00:00');
+    return d < today;
+  });
+  closePromptIndex = 0;
+  if (closePromptQueue.length > 0) {
+    setTimeout(function() { showNextClosePrompt(); }, 500);
+  }
+}
+
+function showNextClosePrompt() {
+  if (closePromptIndex >= closePromptQueue.length) return;
+  var lot = closePromptQueue[closePromptIndex];
+  document.getElementById('close-prompt-title').textContent = lot.subdivision + ' ' + lot.number + ' — Did this close?';
+  document.getElementById('close-prompt-body').textContent = 'Scheduled close date was ' + fmtDate(lot.scheduledCloseDate) + '. Has this home closed?';
+  S.closePromptLotId = lot.id;
+  document.getElementById('modal-close-prompt').classList.add('open');
+}
+
+function markLotClosed() {
+  var lot = S.lots.find(function(l) { return l.id === S.closePromptLotId; });
+  if (!lot) return;
+  lot.isClosed = true;
+  lot.closedDate = new Date().toISOString().split('T')[0];
+  saveS();
+  saveLot(lot);
+  document.getElementById('modal-close-prompt').classList.remove('open');
+  toast('🏠 ' + lot.number + ' marked closed');
+  renderHome();
+  closePromptIndex++;
+  setTimeout(function() { showNextClosePrompt(); }, 600);
+}
+
+function updateCloseDate() {
+  var lot = S.lots.find(function(l) { return l.id === S.closePromptLotId; });
+  document.getElementById('modal-close-prompt').classList.remove('open');
+  if (lot) {
+    S.currentLotId = lot.id;
+    setTimeout(function() { document.getElementById('modal-closedate').classList.add('open'); }, 300);
+  }
+  closePromptIndex++;
+}
+
+function dismissClosePrompt() {
+  document.getElementById('modal-close-prompt').classList.remove('open');
+  closePromptIndex++;
+  setTimeout(function() { showNextClosePrompt(); }, 400);
+}
+
 function loginAsBuilder(name) {
   S.builderName = name;
   S.isAdmin = false;
@@ -3000,14 +3119,16 @@ function loginAsBuilder(name) {
   hideLoginScreen();
   renderHome();
   renderAdmin();
-  // Re-render repeatedly to catch Supabase data as it arrives
+  // Re-render to catch Supabase data
   setTimeout(function() { renderHome(); }, 300);
   setTimeout(function() { renderHome(); }, 800);
   setTimeout(function() { renderHome(); }, 2000);
-  setTimeout(function() { renderHome(); }, 4000);
-  // Offer biometric setup after first login
-  setTimeout(function() { offerBiometricSetup(name); }, 2500);
+  // Check for overdue closings
+  setTimeout(function() { checkOverdueClosings(); }, 2500);
+  // Offer biometric setup
+  setTimeout(function() { offerBiometricSetup(name); }, 3500);
 }
+
 
 function loginAsAdmin() {
   const pin = document.getElementById('login-pin-input').value;
