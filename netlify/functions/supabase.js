@@ -188,6 +188,16 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
       }
 
+      case 'addTaskNote': {
+        const r = await supabaseRequest('POST', 'field_ops_task_notes', payload);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getTaskNotes': {
+        const r = await supabaseRequest('GET', `field_ops_task_notes?lot_id=eq.${payload.lotId}&select=*&order=created_at.asc`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
