@@ -342,14 +342,7 @@ textarea:focus{outline:none;border-color:var(--green)}
       <div class="fcard-hdr"><span>Construction Checklist</span><span class="accent" id="task-progress-lbl"></span></div>
       <div id="accordion-body"></div>
     </div>
-    <div class="fcard">
-      <div class="fcard-hdr">Weekly Notes</div>
-      <div class="fcard-body" style="display:flex;flex-direction:column;gap:12px">
-        <div><div class="field-label">What happened this week?</div><textarea id="cmt-this" placeholder="Progress, completions, notes..."></textarea></div>
-        <div><div class="field-label">What's next week?</div><textarea id="cmt-next" placeholder="Upcoming work, inspections, deliveries..."></textarea></div>
-        <div><div class="field-label">Flags / Issues</div><textarea id="cmt-flags" placeholder="Blockers, concerns, items needing attention..." style="min-height:56px"></textarea></div>
-      </div>
-    </div>
+
 
     <div class="fcard">
       <div class="fcard-hdr">
@@ -1908,9 +1901,7 @@ function openLot(lotId) {
   updateDetHeader(lot);
   buildStageGrid(lot);
   buildAccordion(lot);
-  document.getElementById('cmt-this').value='';
-  document.getElementById('cmt-next').value='';
-  document.getElementById('cmt-flags').value='';
+
   const wni = document.getElementById('walk-note-input');
   const wcb = document.getElementById('note-cleanup-btn');
   if (wni) wni.value='';
@@ -2390,9 +2381,9 @@ function submitUpdate() {
     utilitiesAllConfirmed:(utils.gas&&utils.power&&utils.water)?'Yes':'No',
     tasksCompletedThisPhase:doneThisPhase, totalTasksComplete:done.size,
     overrideCount:ovCount, outstandingItems:outstanding.join('; '),
-    commentThisWeek:document.getElementById('cmt-this').value,
-    commentNextWeek:document.getElementById('cmt-next').value,
-    commentFlags:document.getElementById('cmt-flags').value,
+    commentThisWeek:'',
+    commentNextWeek:'',
+    commentFlags:'',
   };
   S.submissions.push(submission);
   lot.updatedThisWeek=true;
