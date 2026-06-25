@@ -617,18 +617,18 @@ textarea:focus{outline:none;border-color:var(--green)}
 
 <!-- TASK NOTE MODAL -->
 <div class="modal-overlay" id="modal-task-note">
-  <div class="modal" style="max-height:90vh;overflow-y:auto">
+  <div class="modal" style="max-height:95vh;overflow-y:auto;width:95vw;max-width:560px">
     <div class="modal-icon">📝</div>
     <div class="modal-title" id="task-note-title">Task Note</div>
     <div class="modal-body" id="task-note-subtitle" style="margin-bottom:16px;font-size:12px;color:var(--muted)"></div>
 
     <!-- Existing notes (append-only) -->
-    <div id="task-note-history" style="margin-bottom:14px;max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+    <div id="task-note-history" style="margin-bottom:14px;max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
 
     <!-- New note input -->
     <div class="modal-note-label">Add Note <span id="task-note-char" style="color:var(--muted);font-weight:400">(0/300)</span></div>
     <textarea id="task-note-input" class="modal-textarea" placeholder="Dictate or type a note…" maxlength="300"
-      oninput="updateTaskNoteChar()" style="min-height:80px"></textarea>
+      oninput="updateTaskNoteChar()" style="min-height:120px"></textarea>
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:16px">
       <button onclick="cleanupTaskNote()" id="task-note-cleanup-btn" class="mbtn" style="flex:1;background:var(--cream);color:var(--ink);border:1px solid var(--rule)" disabled>✨ Clean Up</button>
     </div>
@@ -3013,7 +3013,7 @@ async function cleanupTaskNote() {
     var resp = await fetch('/.netlify/functions/cleanup', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rawText: raw})
+      body: JSON.stringify({rawText: raw, format: 'bullets'})
     });
     var data = await resp.json();
     if (data.cleaned) {
