@@ -1720,7 +1720,8 @@ function catchUpStages() {
 // ══════════════════════════════════════
 function fmtDate(d) {
   if (!d) return '—';
-  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  var dt = (typeof d === 'string') ? new Date(d.includes('T') ? d : d + 'T12:00:00') : d;
+  return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 }
 function weekEnding() {
   const t=new Date(); const diff=5-t.getDay();
