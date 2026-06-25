@@ -766,66 +766,42 @@ textarea:focus{outline:none;border-color:var(--green)}
   </div>
   <div class="login-title">Field Operations</div>
   <div class="login-sub">ASHLAND HOMES</div>
-
-  <!-- BIOMETRIC FAST LOGIN -->
-  <div id="biometric-section" style="display:none;margin-bottom:16px">
-    <button class="login-biometric-btn" id="biometric-btn" onclick="attemptBiometric()">
-      <span style="font-size:28px">🔑</span>
-      <span>Unlock with Face ID</span>
+  <div class="login-builders" id="builder-list">
+    <button class="login-builder-btn" onclick="loginAsBuilder('Matt Hines')">
+      <div class="login-builder-avatar" style="background:var(--brand)">MH</div>
+      <div class="login-builder-info">
+        <div class="login-builder-name">Matt Hines</div>
+        <div class="login-builder-subs">CO · TB · TE</div>
+      </div>
     </button>
-    <div style="text-align:center;margin-top:10px">
-      <button onclick="showPinLogin()" style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit">Use PIN instead</button>
-    </div>
+    <button class="login-builder-btn" onclick="loginAsBuilder('Brendon Connor')">
+      <div class="login-builder-avatar" style="background:#6C3483">BC</div>
+      <div class="login-builder-info">
+        <div class="login-builder-name">Brendon Connor</div>
+        <div class="login-builder-subs">RC · CW</div>
+      </div>
+    </button>
+    <button class="login-builder-btn" onclick="loginAsBuilder('Dennis Duncan')">
+      <div class="login-builder-avatar" style="background:#1A5276">DD</div>
+      <div class="login-builder-info">
+        <div class="login-builder-name">Dennis Duncan</div>
+        <div class="login-builder-subs">CT · CW</div>
+      </div>
+    </button>
   </div>
-
-  <!-- USERNAME + PIN FORM -->
-  <div id="pin-login-section">
-    <div class="login-field">
-      <input type="text" id="login-username" placeholder="Full name (e.g. Matt Hines)"
-        autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false"
-        oninput="filterBuilderSuggestions()" onkeydown="handleUsernameKey(event)">
-      <div id="builder-suggestions" class="builder-suggestions" style="display:none"></div>
-    </div>
-    <div class="login-field" style="margin-top:10px">
-      <input type="password" id="login-pin-field" placeholder="PIN" maxlength="4"
-        inputmode="numeric" pattern="[0-9]*"
-        onkeydown="if(event.key==='Enter')attemptPinLogin()">
-    </div>
-    <button class="login-pin-btn" onclick="attemptPinLogin()" style="margin-top:12px">Sign In →</button>
+  <div class="login-divider">
+    <div class="login-divider-line"></div>
+    <div class="login-divider-text">ADMIN</div>
+    <div class="login-divider-line"></div>
   </div>
-
+  <div class="login-admin">
+    <input type="password" id="login-pin-input" placeholder="Admin PIN" maxlength="4"
+      inputmode="numeric" onkeydown="if(event.key==='Enter')loginAsAdmin()">
+    <button class="login-pin-btn" onclick="loginAsAdmin()">Enter →</button>
+  </div>
   <div class="login-error" id="login-error"></div>
 </div>
 
-<!-- SET PERMANENT PIN MODAL -->
-<div class="modal-overlay" id="modal-set-permanent-pin">
-  <div class="modal" style="text-align:center">
-    <div class="modal-icon">🔐</div>
-    <div class="modal-title">Create Your PIN</div>
-    <div class="modal-body" style="margin-bottom:16px">Choose a permanent 4-digit PIN. You'll use this to log in going forward.</div>
-    <input type="password" id="new-permanent-pin" maxlength="4" inputmode="numeric"
-      placeholder="••••" style="width:100%;padding:14px;border-radius:10px;border:2px solid var(--rule);font-size:28px;letter-spacing:.4em;text-align:center;font-family:'DM Mono',monospace;outline:none;margin-bottom:10px"
-      onkeydown="if(event.key==='Enter')submitPermanentPin()">
-    <input type="password" id="confirm-permanent-pin" maxlength="4" inputmode="numeric"
-      placeholder="Confirm PIN" style="width:100%;padding:14px;border-radius:10px;border:2px solid var(--rule);font-size:28px;letter-spacing:.4em;text-align:center;font-family:'DM Mono',monospace;outline:none;margin-bottom:16px"
-      onkeydown="if(event.key==='Enter')submitPermanentPin()">
-    <div class="login-error" id="pin-setup-error" style="margin-bottom:12px"></div>
-    <button class="login-pin-btn" onclick="submitPermanentPin()">Save PIN →</button>
-  </div>
-</div>
-
-<!-- FACE ID SETUP MODAL -->
-<div class="modal-overlay" id="modal-face-id-setup">
-  <div class="modal" style="text-align:center">
-    <div class="modal-icon">🔑</div>
-    <div class="modal-title">Enable Face ID?</div>
-    <div class="modal-body" style="margin-bottom:20px">Sign in faster next time using biometrics on this device.</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="login-pin-btn" onclick="setupFaceId()">Yes, Enable Face ID</button>
-      <button onclick="declineFaceId()" style="background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;font-family:inherit;padding:8px">Not Now</button>
-    </div>
-  </div>
-</div>
 
 <div class="nav-bar">
   <button class="nav-item active" onclick="showScreen('home')" id="nav-home"><span class="nav-icon">⊞</span><span>SD</span></button>
@@ -3044,34 +3020,15 @@ function deleteCurrentNote() {
 // ══════════════════════════════════════
 // LOGIN & BIOMETRIC AUTH
 // ══════════════════════════════════════
-// ── PIN LOGIN SYSTEM ──
-
 function showLoginScreen() {
   document.getElementById('login-screen').classList.add('open');
-  document.getElementById('login-username').value = '';
-  document.getElementById('login-pin-field').value = '';
+  document.getElementById('login-pin-input').value = '';
   document.getElementById('login-error').textContent = '';
-  document.getElementById('builder-suggestions').style.display = 'none';
-  // Check for saved biometric credential on this device
-  const savedCred = localStorage.getItem('ah_biometric_user');
-  if (savedCred && window.PublicKeyCredential) {
-    document.getElementById('biometric-section').style.display = 'block';
-    document.getElementById('pin-login-section').style.display = 'none';
-    document.getElementById('biometric-btn').querySelector('span:last-child').textContent = 'Unlock with Face ID (' + savedCred + ')';
-  } else {
-    document.getElementById('biometric-section').style.display = 'none';
-    document.getElementById('pin-login-section').style.display = 'block';
-  }
-}
-
-function showPinLogin() {
-  document.getElementById('biometric-section').style.display = 'none';
-  document.getElementById('pin-login-section').style.display = 'block';
-  setTimeout(function() { document.getElementById('login-username').focus(); }, 100);
 }
 
 function hideLoginScreen() {
   document.getElementById('login-screen').classList.remove('open');
+  document.getElementById('login-pin-input').value = '';
   document.getElementById('login-error').textContent = '';
 }
 
@@ -3082,261 +3039,24 @@ function logout() {
   showLoginScreen();
 }
 
-// Builder name autocomplete
-function filterBuilderSuggestions() {
-  const input = document.getElementById('login-username').value.toLowerCase().trim();
-  const suggestEl = document.getElementById('builder-suggestions');
-  if (!input || input.length < 1) { suggestEl.style.display = 'none'; return; }
-  const matches = builders.filter(function(b) { return b.name.toLowerCase().includes(input); });
-  if (!matches.length) { suggestEl.style.display = 'none'; return; }
-  suggestEl.innerHTML = matches.map(function(b) {
-    var safeName = b.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return '<div class="builder-suggestion-item" onclick="selectBuilderSuggestion(this.dataset.name)" data-name="' + safeName + '">' + safeName + '</div>';
-  }).join('');
-  suggestEl.style.display = 'block';
-}
-
-
-function selectBuilderSuggestion(el) {
-  var name = typeof el === 'string' ? el : el.dataset ? el.dataset.name : el;
-  document.getElementById('login-username').value = name;
-  document.getElementById('builder-suggestions').style.display = 'none';
-  setTimeout(function() { document.getElementById('login-pin-field').focus(); }, 100);
-}
-
-function handleUsernameKey(e) {
-  if (e.key === 'Enter' || e.key === 'Tab') {
-    document.getElementById('builder-suggestions').style.display = 'none';
-    document.getElementById('login-pin-field').focus();
-    e.preventDefault();
-  }
-}
-
-// Attempt PIN login
-async function attemptPinLogin() {
-  const username = document.getElementById('login-username').value.trim();
-  const pin = document.getElementById('login-pin-field').value.trim();
-  const errEl = document.getElementById('login-error');
-
-  if (!username) { errEl.textContent = 'Enter your name'; return; }
-  if (!pin || pin.length !== 4) { errEl.textContent = 'Enter your 4-digit PIN'; return; }
-
-  errEl.textContent = 'Verifying…';
-
-  // Admin shortcut
-  if (username.toLowerCase() === 'admin' && pin === ADMIN_PIN) {
-    errEl.textContent = '';
-    loginAsAdmin();
-    return;
-  }
-
-  // Verify via Supabase
-  const result = await sbCall('verifyPin', {name: username, pin: pin});
-  if (!result || !result.valid) {
-    errEl.textContent = result && result.reason === 'builder_not_found'
-      ? 'Name not found — check spelling'
-      : 'Incorrect PIN';
-    document.getElementById('login-pin-field').value = '';
-    return;
-  }
-
-  errEl.textContent = '';
-
-  if (result.is_temp) {
-    // Temp PIN — force permanent PIN setup
-    S.builderName = username;
-    S.isAdmin = false;
-    document.getElementById('modal-set-permanent-pin').classList.add('open');
-    document.getElementById('new-permanent-pin').value = '';
-    document.getElementById('confirm-permanent-pin').value = '';
-    document.getElementById('pin-setup-error').textContent = '';
-  } else {
-    // Permanent PIN — log in
-    loginAsBuilder(username);
-  }
-}
-
-async function submitPermanentPin() {
-  const pin1 = document.getElementById('new-permanent-pin').value;
-  const pin2 = document.getElementById('confirm-permanent-pin').value;
-  const errEl = document.getElementById('pin-setup-error');
-
-  if (!pin1 || pin1.length !== 4 || !/^\d+$/.test(pin1)) { errEl.textContent = 'PIN must be exactly 4 digits'; return; }
-  if (pin1 !== pin2) { errEl.textContent = 'PINs do not match'; return; }
-
-  errEl.textContent = 'Saving…';
-  const result = await sbCall('updateBuilderPin', {name: S.builderName, pin_hash: pin1, temp_pin: null});
-  if (!result) { errEl.textContent = 'Error saving PIN — try again'; return; }
-
-  document.getElementById('modal-set-permanent-pin').classList.remove('open');
-
-  // Offer Face ID setup
-  const biometricAvailable = window.PublicKeyCredential &&
-    await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(()=>false);
-  const alreadyDeclined = localStorage.getItem('ah_faceid_declined_' + S.builderName);
-
-  if (biometricAvailable && !alreadyDeclined) {
-    document.getElementById('modal-face-id-setup').classList.add('open');
-  } else {
-    loginAsBuilder(S.builderName);
-  }
-}
-
-function declineFaceId() {
-  localStorage.setItem('ah_faceid_declined_' + S.builderName, '1');
-  document.getElementById('modal-face-id-setup').classList.remove('open');
-  loginAsBuilder(S.builderName);
-}
-
-async function setupFaceId() {
-  document.getElementById('modal-face-id-setup').classList.remove('open');
-  try {
-    const cred = await navigator.credentials.create({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: {name: 'Ashland Homes Field Ops'},
-        user: {
-          id: new TextEncoder().encode(S.builderName),
-          name: S.builderName,
-          displayName: S.builderName
-        },
-        pubKeyCredParams: [{alg: -7, type: 'public-key'}],
-        authenticatorSelection: {authenticatorAttachment: 'platform', userVerification: 'required'},
-        timeout: 60000,
-      }
-    });
-    if (cred) {
-      localStorage.setItem('ah_biometric_user', S.builderName);
-      localStorage.setItem('ah_biometric_cred_id', btoa(String.fromCharCode(...new Uint8Array(cred.rawId))));
-      toast('✅ Face ID enabled');
-    }
-  } catch(e) {
-    toast('Face ID setup failed — you can enable it in Settings later');
-  }
-  loginAsBuilder(S.builderName);
-}
-
-async function attemptBiometric() {
-  const savedUser = localStorage.getItem('ah_biometric_user');
-  const savedCredId = localStorage.getItem('ah_biometric_cred_id');
-  if (!savedUser || !savedCredId) { showPinLogin(); return; }
-
-  try {
-    const credId = Uint8Array.from(atob(savedCredId), c => c.charCodeAt(0));
-    const assertion = await navigator.credentials.get({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        allowCredentials: [{id: credId, type: 'public-key'}],
-        userVerification: 'required',
-        timeout: 60000,
-      }
-    });
-    if (assertion) {
-      S.builderName = savedUser;
-      S.isAdmin = savedUser.toLowerCase() === 'admin';
-      saveS();
-      hideLoginScreen();
-      renderHome();
-      renderAdmin();
-      setTimeout(function() { renderHome(); }, 500);
-      setTimeout(function() { renderHome(); }, 1500);
-    }
-  } catch(e) {
-    toast('Face ID failed — enter your PIN');
-    showPinLogin();
-  }
-}
-
-function loginAsBuilder(name) {
-  S.builderName = name;
-  S.isAdmin = false;
-  saveS();
-  hideLoginScreen();
-  renderHome();
-  renderAdmin();
-  setTimeout(function() { renderHome(); }, 300);
-  setTimeout(function() { renderHome(); }, 800);
-  setTimeout(function() { renderHome(); }, 2000);
-  // Check for lots past close date after data loads
-  setTimeout(function() { checkOverdueClosings(); }, 2500);
-  // Offer biometric setup after first login
-  setTimeout(function() { offerBiometricSetup(name); }, 3500);
-}
-
-// ── CLOSE PROMPT LOGIC ──
-let closePromptQueue = [];
-let closePromptIndex = 0;
-
-function checkOverdueClosings() {
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const myLots = getMyLots();
-  closePromptQueue = myLots.filter(function(l) {
-    if (l.isClosed) return false;
-    if (!l.scheduledCloseDate) return false;
-    const closeDate = new Date(l.scheduledCloseDate + 'T12:00:00');
-    return closeDate < today;
-  });
-  closePromptIndex = 0;
-  if (closePromptQueue.length > 0) {
-    setTimeout(function() { showNextClosePrompt(); }, 500);
-  }
-}
-
-function showNextClosePrompt() {
-  if (closePromptIndex >= closePromptQueue.length) return;
-  const lot = closePromptQueue[closePromptIndex];
-  document.getElementById('close-prompt-title').textContent = lot.subdivision + ' ' + lot.number + ' — Did this close?';
-  document.getElementById('close-prompt-body').textContent =
-    'Scheduled close date was ' + fmtDate(lot.scheduledCloseDate) + '. Has this home closed?';
-  S.closePromptLotId = lot.id;
-  document.getElementById('modal-close-prompt').classList.add('open');
-}
-
-function markLotClosed() {
-  const lot = S.lots.find(function(l) { return l.id === S.closePromptLotId; });
-  if (!lot) return;
-  lot.isClosed = true;
-  lot.closedDate = new Date().toISOString().split('T')[0];
-  saveS();
-  saveLot(lot);
-  document.getElementById('modal-close-prompt').classList.remove('open');
-  toast('🏠 ' + lot.number + ' marked closed');
-  renderHome();
-  closePromptIndex++;
-  setTimeout(function() { showNextClosePrompt(); }, 600);
-}
-
-function updateCloseDate() {
-  const lot = S.lots.find(function(l) { return l.id === S.closePromptLotId; });
-  document.getElementById('modal-close-prompt').classList.remove('open');
-  if (lot) {
-    S.currentLotId = lot.id;
-    // Open close date override modal
-    setTimeout(function() {
-      document.getElementById('modal-closedate').classList.add('open');
-    }, 300);
-  }
-  closePromptIndex++;
-}
-
-function dismissClosePrompt() {
-  document.getElementById('modal-close-prompt').classList.remove('open');
-  closePromptIndex++;
-  setTimeout(function() { showNextClosePrompt(); }, 400);
-}
-
 function loginAsAdmin() {
-  S.builderName = 'Admin';
-  S.isAdmin = true;
-  saveS();
-  hideLoginScreen();
-  renderHome();
-  renderAdmin();
-  setTimeout(function() { renderHome(); }, 300);
-  setTimeout(function() { renderHome(); }, 800);
-  setTimeout(function() { renderHome(); }, 2000);
-  toast('🔑 Admin mode');
+  const pin = document.getElementById('login-pin-input').value;
+  if (pin === ADMIN_PIN) {
+    S.builderName = 'Admin';
+    S.isAdmin = true;
+    saveS();
+    hideLoginScreen();
+    renderHome();
+    renderAdmin();
+    setTimeout(function() { renderHome(); }, 300);
+    setTimeout(function() { renderHome(); }, 800);
+    setTimeout(function() { renderHome(); }, 2000);
+    toast('🔑 Admin mode');
+  } else {
+    document.getElementById('login-error').textContent = 'Incorrect PIN';
+    document.getElementById('login-pin-input').value = '';
+    setTimeout(function(){ document.getElementById('login-error').textContent=''; }, 2000);
+  }
 }
 
 // ── WebAuthn / Biometric ──
