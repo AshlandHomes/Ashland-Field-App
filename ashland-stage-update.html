@@ -1680,10 +1680,6 @@ async function loadFromSupabase() {
   catchUpStages();
   renderHome();
   renderAdmin();
-  // Call close check now that lots are confirmed loaded
-  if (S.builderName && S.builderName !== '' && S.builderName !== 'Admin') {
-    checkOverdueClosings();
-  }
 }
 
 async function seedLotsToSupabase() {
@@ -3014,8 +3010,10 @@ function checkOverdueClosings() {
   var today = new Date();
   today.setHours(0,0,0,0);
   // Get builder's subdivisions from BUILDERS array
-  var builder = BUILDERS.find(function(b) { return b.name === S.builderName; });
+  var builder = BUILDERS.find(function(b) { return b.name.trim() === S.builderName.trim(); });
   var mySubs = builder ? builder.subdivisions : [];
+  // If no builder found, don't show any prompts
+  if (!builder) { return; }
   closePromptQueue = S.lots.filter(function(l) {
     // Only show prompts for lots in this builder's subdivisions
     if (mySubs.length > 0 && mySubs.indexOf(l.subdivision) === -1) return false;
@@ -3078,13 +3076,13 @@ function loginAsBuilder(name) {
   hideLoginScreen();
   renderHome();
   renderAdmin();
-  // Re-render repeatedly to catch Supabase data as it arrives
   setTimeout(function() { renderHome(); }, 300);
   setTimeout(function() { renderHome(); }, 800);
   setTimeout(function() { renderHome(); }, 2000);
-  setTimeout(function() { renderHome(); }, 4000);
-  // Offer biometric setup after first login
-  setTimeout(function() { offerBiometricSetup(name); }, 2500);
+  // Check overdue closings after Supabase data is loaded
+  // loadFromSupabase runs in background — wait for it then check
+  setTimeout(function() { checkOverdueClosings(); }, 3000);
+  setTimeout(function() { offerBiometricSetup(name); }, 4000);
 }
 
 function loginAsAdmin() {
