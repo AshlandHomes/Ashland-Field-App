@@ -3009,10 +3009,9 @@ var closePromptIndex = 0;
 function checkOverdueClosings() {
   var today = new Date();
   today.setHours(0,0,0,0);
-  // Get builder's subdivisions from BUILDERS array
   var builder = BUILDERS.find(function(b) { return b.name.trim() === S.builderName.trim(); });
   var mySubs = builder ? builder.subdivisions : [];
-  // If no builder found, don't show any prompts
+  toast('builder=' + (builder?builder.name:'NOT FOUND') + ' subs=' + mySubs.join(','));
   if (!builder) { return; }
   closePromptQueue = S.lots.filter(function(l) {
     // Only show prompts for lots in this builder's subdivisions
