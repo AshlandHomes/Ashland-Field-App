@@ -130,6 +130,11 @@ textarea:focus{outline:none;border-color:var(--green)}
 .modal-body{font-size:14px;color:var(--muted);margin-bottom:16px;text-align:center;line-height:1.5}
 .modal-pred-list{background:var(--orangebg);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-family:'DM Mono',monospace;font-size:12px;color:var(--orange);line-height:1.8}
 .modal-note-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.task-note-btn{background:none;border:none;cursor:pointer;font-size:14px;padding:2px 6px;opacity:0.6;flex-shrink:0}
+.task-note-btn:hover{opacity:1}
+.task-note-entry{background:#f9fafb;border-radius:8px;padding:10px 12px;border:1px solid var(--rule)}
+.task-note-entry-header{font-size:11px;color:var(--muted);margin-bottom:4px;font-family:'DM Mono',monospace}
+.task-note-entry-text{font-size:13px;color:var(--ink)}
 .modal-textarea{width:100%;padding:10px 12px;border:1px solid var(--rule);border-radius:8px;font-family:'Instrument Sans',sans-serif;font-size:14px;color:var(--ink);resize:none;min-height:64px;margin-bottom:14px}
 .modal-textarea:focus{outline:none;border-color:var(--amber)}
 .modal-btns{display:flex;gap:10px}
@@ -606,6 +611,30 @@ textarea:focus{outline:none;border-color:var(--green)}
     </div>
     <div class="modal-btns" style="margin-top:16px">
       <button class="mbtn mbtn-cancel" onclick="dismissClosePrompt()">Ask Me Later</button>
+    </div>
+  </div>
+</div>
+
+<!-- TASK NOTE MODAL -->
+<div class="modal-overlay" id="modal-task-note">
+  <div class="modal" style="max-height:90vh;overflow-y:auto">
+    <div class="modal-icon">📝</div>
+    <div class="modal-title" id="task-note-title">Task Note</div>
+    <div class="modal-body" id="task-note-subtitle" style="margin-bottom:16px;font-size:12px;color:var(--muted)"></div>
+
+    <!-- Existing notes (append-only) -->
+    <div id="task-note-history" style="margin-bottom:14px;max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+
+    <!-- New note input -->
+    <div class="modal-note-label">Add Note <span id="task-note-char" style="color:var(--muted);font-weight:400">(0/300)</span></div>
+    <textarea id="task-note-input" class="modal-textarea" placeholder="Dictate or type a note…" maxlength="300"
+      oninput="updateTaskNoteChar()" style="min-height:80px"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:16px">
+      <button onclick="cleanupTaskNote()" id="task-note-cleanup-btn" class="mbtn" style="flex:1;background:var(--cream);color:var(--ink);border:1px solid var(--rule)" disabled>✨ Clean Up</button>
+    </div>
+    <div class="modal-btns">
+      <button class="mbtn mbtn-cancel" onclick="closeTaskNoteModal()">Close</button>
+      <button class="mbtn mbtn-override" onclick="saveTaskNote()">Save Note →</button>
     </div>
   </div>
 </div>
@@ -1556,7 +1585,7 @@ function applyAutoStage(lot) {
   return false;
 }
 
-let S = {builderName:'', lots:[], submissions:[], overrides:[], walkNotes:{}, apiKey:null, currentLotId:null, currentSubdivision:null, isAdmin:false};
+let S = {builderName:'', lots:[], submissions:[], overrides:[], walkNotes:{}, taskNotes:{}, apiKey:null, currentLotId:null, currentSubdivision:null, isAdmin:false};
 let pendingOverride = null;
 let pendingAdvance = null; // null = not yet chosen, true = advance date, false = tracking only
 
@@ -1637,6 +1666,30 @@ function rowToLot(row) {
 }
 
 // Save a single lot to Supabase (and local cache)
+async function loadTaskNotes(lotId) {
+  var data = await sbCall('getTaskNotes', {lotId: lotId});
+  if (data && Array.isArray(data)) {
+    if (!S.taskNotes[lotId]) S.taskNotes[lotId] = {};
+    data.forEach(function(row) {
+      var tid = row.task_id;
+      if (!S.taskNotes[lotId][tid]) S.taskNotes[lotId][tid] = [];
+      // Avoid duplicates
+      var exists = S.taskNotes[lotId][tid].find(function(n){return n.id===row.id;});
+      if (!exists) {
+        S.taskNotes[lotId][tid].push({
+          id: row.id,
+          text: row.note_text,
+          builder: row.builder_name,
+          ts: row.created_at
+        });
+      }
+    });
+    // Re-render accordion to show note indicators
+    var lot = S.lots.find(function(l){return l.id===lotId;});
+    if (lot) buildAccordion(lot);
+  }
+}
+
 async function saveLot(lot) {
   localStorage.setItem('lot_' + lot.id, JSON.stringify(lot));
   await sbCall('updateLot', lotToRow(lot));
@@ -1909,6 +1962,8 @@ function openLot(lotId) {
   renderWalkNotes(lot);
   renderUtilityCard(lot);
   renderCloseDateCard(lot);
+  // Load task notes for this lot
+  loadTaskNotes(lot.id);
   showScreen('detail');
   document.getElementById('screen-detail').scrollTop=0;
 }
@@ -2899,6 +2954,116 @@ function escHtml(s) {
 function onNoteInput() {
   const val = document.getElementById('walk-note-input').value.trim();
   document.getElementById('note-cleanup-btn').disabled = val.length < 10;
+}
+
+// ── TASK NOTES ──
+var currentTaskNoteData = {lotId:null, taskId:null, taskName:''};
+
+function openTaskNoteModal(lotId, taskId, taskName) {
+  currentTaskNoteData = {lotId:lotId, taskId:taskId, taskName:taskName};
+  document.getElementById('task-note-title').textContent = 'Task Note';
+  document.getElementById('task-note-subtitle').textContent = taskName;
+  document.getElementById('task-note-input').value = '';
+  document.getElementById('task-note-char').textContent = '(0/300)';
+  document.getElementById('task-note-cleanup-btn').disabled = true;
+
+  // Load existing notes for this task
+  renderTaskNoteHistory(lotId, taskId);
+  document.getElementById('modal-task-note').classList.add('open');
+}
+
+function renderTaskNoteHistory(lotId, taskId) {
+  var container = document.getElementById('task-note-history');
+  var notes = (S.taskNotes[lotId] && S.taskNotes[lotId][taskId]) ? S.taskNotes[lotId][taskId] : [];
+  if (!notes.length) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:8px">No notes yet</div>';
+    return;
+  }
+  container.innerHTML = notes.map(function(n) {
+    return '<div class="task-note-entry">' +
+      '<div class="task-note-entry-header">' + fmtDate(n.ts) + ' · ' + n.builder + '</div>' +
+      '<div class="task-note-entry-text">' + n.text + '</div>' +
+    '</div>';
+  }).join('');
+  // Scroll to bottom
+  container.scrollTop = container.scrollHeight;
+}
+
+function updateTaskNoteChar() {
+  var len = document.getElementById('task-note-input').value.length;
+  var el = document.getElementById('task-note-char');
+  el.textContent = '(' + len + '/300)';
+  el.style.color = len > 270 ? 'var(--red)' : 'var(--muted)';
+  document.getElementById('task-note-cleanup-btn').disabled = len === 0;
+}
+
+function closeTaskNoteModal() {
+  document.getElementById('modal-task-note').classList.remove('open');
+}
+
+async function cleanupTaskNote() {
+  var input = document.getElementById('task-note-input');
+  var raw = input.value.trim();
+  if (!raw) return;
+  var btn = document.getElementById('task-note-cleanup-btn');
+  btn.disabled = true;
+  btn.textContent = '✨ Cleaning…';
+  try {
+    var resp = await fetch('/.netlify/functions/cleanup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rawText: raw})
+    });
+    var data = await resp.json();
+    if (data.cleaned) {
+      input.value = data.cleaned;
+      updateTaskNoteChar();
+      toast('✨ Cleaned up');
+    }
+  } catch(e) {
+    toast('Cleanup failed');
+  }
+  btn.disabled = false;
+  btn.textContent = '✨ Clean Up';
+}
+
+async function saveTaskNote() {
+  var text = document.getElementById('task-note-input').value.trim();
+  if (!text) { toast('Add a note first'); return; }
+  var lotId = currentTaskNoteData.lotId;
+  var taskId = currentTaskNoteData.taskId;
+  var taskName = currentTaskNoteData.taskName;
+
+  var note = {
+    id: Math.random().toString(36).substr(2,9),
+    text: text,
+    builder: S.builderName,
+    ts: new Date().toISOString()
+  };
+
+  // Add to local state
+  if (!S.taskNotes[lotId]) S.taskNotes[lotId] = {};
+  if (!S.taskNotes[lotId][taskId]) S.taskNotes[lotId][taskId] = [];
+  S.taskNotes[lotId][taskId].push(note);
+  saveS();
+
+  // Save to Supabase
+  await sbCall('addTaskNote', {
+    lot_id: lotId,
+    task_id: taskId,
+    task_name: taskName,
+    builder_name: S.builderName,
+    note_text: text,
+    created_at: note.ts
+  });
+
+  document.getElementById('task-note-input').value = '';
+  document.getElementById('task-note-cleanup-btn').disabled = true;
+  renderTaskNoteHistory(lotId, taskId);
+  // Rebuild accordion to update note indicator
+  var lot = S.lots.find(function(l){return l.id===lotId;});
+  if (lot) buildAccordion(lot);
+  toast('Note saved');
 }
 
 function addWalkNote() {
