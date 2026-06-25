@@ -3064,17 +3064,14 @@ function checkOverdueClosings() {
   var today = new Date();
   today.setHours(0,0,0,0);
   var myLots = getMyLots();
-  // Debug: find lot 13 CO
-  var lot13 = S.lots.find(function(l) { return l.number === 'Lot 13' && l.subdivision === 'CO'; });
-  if (lot13) {
-    toast('Lot13 closeDate: ' + lot13.scheduledCloseDate + ' isClosed: ' + lot13.isClosed);
-  } else {
-    toast('Lot13 not found in ' + S.lots.length + ' lots');
-  }
+
   closePromptQueue = myLots.filter(function(l) {
     if (l.isClosed) return false;
     if (!l.scheduledCloseDate) return false;
-    var d = new Date(l.scheduledCloseDate + 'T12:00:00');
+    // Parse date parts directly to avoid timezone issues
+    var parts = String(l.scheduledCloseDate).split('-');
+    if (parts.length < 3) return false;
+    var d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
     return d < today;
   });
   closePromptIndex = 0;
