@@ -2099,6 +2099,7 @@ function buildAccordion(lot) {
                 ${isOutstandingPred&&!isDone?`<span class="task-outstanding">● Outstanding — successor already started</span>`:''}
               </div>
             </div>
+            <button class="task-note-btn" data-lot="${lot.id}" data-task="${t.id}" data-name="${t.name}" onclick="event.stopPropagation();openTaskNoteModal(this.dataset.lot,parseInt(this.dataset.task),this.dataset.name)" title="Add note">${(S.taskNotes&&S.taskNotes[lot.id]&&S.taskNotes[lot.id][t.id]&&S.taskNotes[lot.id][t.id].length)?'📝':'💬'}</button>
           </div>`;
         }).join('')}
       </div>
