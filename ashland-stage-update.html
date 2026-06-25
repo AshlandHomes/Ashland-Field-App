@@ -1536,18 +1536,24 @@ function applyAutoStage(lot) {
       lot.scheduleCompletedAt = new Date().toISOString();
       lot.frozenHealthDelta = h ? h.delta : 0;
       // Auto-prompt close check if close date has passed
-      if (lot.scheduledCloseDate && !lot.isClosed) {
-        var parts = String(lot.scheduledCloseDate).split('-');
-        if (parts.length === 3) {
-          var closeD = new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2]));
-          var today = new Date(); today.setHours(0,0,0,0);
-          if (closeD < today) {
-            setTimeout(function() {
-              S.closePromptLotId = lot.id;
-              document.getElementById('close-prompt-title').textContent = lot.subdivision + ' ' + lot.number + ' — Did this close?';
-              document.getElementById('close-prompt-body').textContent = 'Construction is complete and the scheduled close date has passed. Has this home closed?';
-              document.getElementById('modal-close-prompt').classList.add('open');
-            }, 800);
+      // Only prompt if builder is logged in and this lot is in their subdivision
+      if (lot.scheduledCloseDate && !lot.isClosed && S.builderName && S.builderName !== '') {
+        var builderRec = BUILDERS.find(function(b) { return b.name.trim() === S.builderName.trim(); });
+        var inMyArea = builderRec ? builderRec.subdivisions.indexOf(lot.subdivision) !== -1 : false;
+        if (inMyArea) {
+          var parts = String(lot.scheduledCloseDate).split('-');
+          if (parts.length === 3) {
+            var closeD = new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2]));
+            var today95 = new Date(); today95.setHours(0,0,0,0);
+            if (closeD < today95) {
+              var lotRef = lot;
+              setTimeout(function() {
+                S.closePromptLotId = lotRef.id;
+                document.getElementById('close-prompt-title').textContent = lotRef.subdivision + ' ' + lotRef.number + ' — Did this close?';
+                document.getElementById('close-prompt-body').textContent = 'Construction is complete and the scheduled close date has passed. Has this home closed?';
+                document.getElementById('modal-close-prompt').classList.add('open');
+              }, 800);
+            }
           }
         }
       }
@@ -3011,7 +3017,6 @@ function checkOverdueClosings() {
   today.setHours(0,0,0,0);
   var builder = BUILDERS.find(function(b) { return b.name.trim() === S.builderName.trim(); });
   var mySubs = builder ? builder.subdivisions : [];
-  toast('builder=' + (builder?builder.name:'NOT FOUND') + ' subs=' + mySubs.join(','));
   if (!builder) { return; }
   closePromptQueue = S.lots.filter(function(l) {
     // Only show prompts for lots in this builder's subdivisions
