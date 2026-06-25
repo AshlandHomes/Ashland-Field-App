@@ -200,9 +200,11 @@ tr:hover td{background:#f9fafb}
               </select>
               <select class="filter-select" id="filter-close" onchange="renderLotsTable()">
                 <option value="">All Close Status</option>
+                <option value="active">Active Only</option>
                 <option value="scheduled">📅 Scheduled</option>
                 <option value="ready">⚠️ Ready to Schedule</option>
                 <option value="notyet">Not Yet</option>
+                <option value="closed">🏠 Closed</option>
               </select>
               <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
             </div>
@@ -530,9 +532,11 @@ function renderLotsTable() {
     if (filterBuilder && l.assigned_builder !== filterBuilder) return false;
     if (filterUpdate === 'pending' && l.updated_this_week) return false;
     if (filterUpdate === 'updated' && !l.updated_this_week) return false;
-    if (filterClose === 'scheduled' && !l.scheduled_close_date) return false;
-    if (filterClose === 'ready' && (l.scheduled_close_date || parseFloat(l.stage) < 6)) return false;
-    if (filterClose === 'notyet' && parseFloat(l.stage) >= 6) return false;
+    if (filterClose === 'active' && l.is_closed) return false;
+    if (filterClose === 'scheduled' && (!l.scheduled_close_date || l.is_closed)) return false;
+    if (filterClose === 'ready' && (l.scheduled_close_date || parseFloat(l.stage) < 6 || l.is_closed)) return false;
+    if (filterClose === 'notyet' && (parseFloat(l.stage) >= 6 || l.is_closed)) return false;
+    if (filterClose === 'closed' && !l.is_closed) return false;
     if (search && !l.number.toLowerCase().includes(search) && !l.address.toLowerCase().includes(search) && !l.plan.toLowerCase().includes(search)) return false;
     return true;
   });
@@ -556,15 +560,19 @@ function renderLotsTable() {
       else if (delta < -3) healthBadge = `<span class="badge badge-health-behind" style="cursor:pointer" onclick="openDelayLog('${lot.id}','${lot.number} — ${lot.subdivision}')" title="Click to view delay log">${Math.abs(delta)}d behind ↗</span>`;
       else healthBadge = `<span class="badge badge-health-ok">On track</span>`;
     }
+    const lastUpdated = lot.updated_at ? new Date(lot.updated_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + new Date(lot.updated_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
     const updBadge = lot.updated_this_week 
-      ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span>'
+      ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span><div style="font-size:11px;color:var(--muted);margin-top:2px">' + lastUpdated + '</div>'
       : '<span class="badge" style="background:#fee2e2;color:var(--red);font-weight:700">⚠️ Not Updated</span>';
 
-    // Closing status — 3 states
+    // Closing status — 4 states
     const hasCloseDate = !!lot.scheduled_close_date;
     const closeDate = hasCloseDate ? fmtDate(lot.scheduled_close_date) : '—';
     let closeBadge;
-    if (hasCloseDate) {
+    if (lot.is_closed) {
+      const closedOn = lot.closed_date ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.closed_date) + '</div>' : '';
+      closeBadge = '<span class="badge" style="background:#4C4C4C;color:#fff;font-weight:700">🏠 Closed</span>' + closedOn;
+    } else if (hasCloseDate) {
       closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">📅 Scheduled</span>';
     } else if (parseFloat(lot.stage) >= 6) {
       closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready to Schedule</span>';
@@ -973,7 +981,8 @@ function exportDelayLog() {
 // ── EXPORT TO EXCEL ──
 function exportToExcel() {
   const filterSub = document.getElementById('filter-sub').value;
-  let filtered = filterSub ? lots.filter(l=>l.subdivision===filterSub) : lots;
+  // Default export excludes closed lots — they're archived
+  let filtered = filterSub ? lots.filter(l=>l.subdivision===filterSub && !l.is_closed) : lots.filter(l=>!l.is_closed);
   filtered.sort((a,b)=>{
     if(a.subdivision!==b.subdivision) return a.subdivision.localeCompare(b.subdivision);
     return a.number.localeCompare(b.number,undefined,{numeric:true});
