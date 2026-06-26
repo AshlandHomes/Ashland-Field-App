@@ -623,12 +623,12 @@ textarea:focus{outline:none;border-color:var(--green)}
     <div class="modal-body" id="task-note-subtitle" style="margin-bottom:16px;font-size:12px;color:var(--muted)"></div>
 
     <!-- Existing notes (append-only) -->
-    <div id="task-note-history" style="margin-bottom:14px;max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+    <div id="task-note-history" style="margin-bottom:14px;max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
 
     <!-- New note input -->
-    <div class="modal-note-label">Add Note <span id="task-note-char" style="color:var(--muted);font-weight:400">(0/300)</span></div>
-    <textarea id="task-note-input" class="modal-textarea" placeholder="Dictate or type a note…" maxlength="300"
-      oninput="updateTaskNoteChar()" style="min-height:120px"></textarea>
+    <div class="modal-note-label">Add Note <span id="task-note-char" style="color:var(--muted);font-weight:400">(0/500)</span></div>
+    <textarea id="task-note-input" class="modal-textarea" placeholder="Dictate or type a note…" maxlength="500"
+      oninput="updateTaskNoteChar()" style="min-height:160px;font-size:14px;line-height:1.5"></textarea>
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:16px">
       <button onclick="cleanupTaskNote()" id="task-note-cleanup-btn" class="mbtn" style="flex:1;background:var(--cream);color:var(--ink);border:1px solid var(--rule)" disabled>✨ Clean Up</button>
     </div>
@@ -2965,7 +2965,7 @@ function openTaskNoteModal(lotId, taskId, taskName) {
   document.getElementById('task-note-title').textContent = 'Task Note';
   document.getElementById('task-note-subtitle').textContent = taskName;
   document.getElementById('task-note-input').value = '';
-  document.getElementById('task-note-char').textContent = '(0/300)';
+  document.getElementById('task-note-char').textContent = '(0/500)';
   document.getElementById('task-note-cleanup-btn').disabled = true;
 
   // Load existing notes for this task
@@ -2993,8 +2993,8 @@ function renderTaskNoteHistory(lotId, taskId) {
 function updateTaskNoteChar() {
   var len = document.getElementById('task-note-input').value.length;
   var el = document.getElementById('task-note-char');
-  el.textContent = '(' + len + '/300)';
-  el.style.color = len > 270 ? 'var(--red)' : 'var(--muted)';
+  el.textContent = '(' + len + '/500)';
+  el.style.color = len > 470 ? 'var(--red)' : 'var(--muted)';
   document.getElementById('task-note-cleanup-btn').disabled = len === 0;
 }
 
