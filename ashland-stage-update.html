@@ -1611,8 +1611,10 @@ async function sbCall(action, payload) {
       body: JSON.stringify({ action, payload })
     });
     const text = await resp.text();
+    toast('RAW[' + action + ']: ' + text.substring(0,60));
     let data;
     try { data = JSON.parse(text); } catch(e) { 
+      toast('PARSE ERR: ' + text.substring(0,60));
       console.error('Parse error:', text.substring(0,100));
       return null; 
     }
