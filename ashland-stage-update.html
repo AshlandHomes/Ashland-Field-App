@@ -2982,6 +2982,7 @@ async function openTaskNoteModal(lotId, taskId, taskName) {
 
   // Fetch fresh from Supabase every time modal opens
   var data = await sbCall('getTaskNotes', {lotId: lotId});
+  toast('Notes fetch: ' + (data ? data.length + ' rows' : 'null') + ' for ' + lotId);
   if (data && Array.isArray(data)) {
     if (!S.taskNotes[lotId]) S.taskNotes[lotId] = {};
     data.forEach(function(row) {
