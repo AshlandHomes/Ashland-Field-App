@@ -1617,6 +1617,7 @@ async function sbCall(action, payload) {
       return null; 
     }
     if (data && data.error) {
+      toast('SB ERR: ' + JSON.stringify(data.error).substring(0,80));
       console.error('Supabase error:', data.error);
       return null;
     }
