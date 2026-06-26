@@ -4,12 +4,10 @@ exports.handler = async function(event) {
   }
 
   try {
-    const { rawText, format } = JSON.parse(event.body);
+    const { rawText } = JSON.parse(event.body);
     if (!rawText) return { statusCode: 400, body: JSON.stringify({ error: 'No text provided' }) };
 
-    const prompt = format === 'bullets'
-      ? 'You are a construction field notes editor. Clean up the following voice-dictated walk note from a residential home builder. Format the output as concise bullet points using a dash (-) for each bullet. Each bullet should capture one distinct observation, issue, or action item. Fix grammar and spelling. Preserve all specific details (lot numbers, trade names, measurements). Return only the bullet points — no preamble, no explanation.\n\nRaw note:\n' + rawText
-      : 'You are a construction field notes editor. Clean up the following voice-dictated walk note from a residential home builder. Fix grammar, punctuation, and organization. Keep it concise and factual. Preserve all specific details. Return only the cleaned note text — no preamble, no explanation.\n\nRaw note:\n' + rawText;
+    const prompt = 'You are a construction field notes editor. Clean up the following voice-dictated walk note from a residential home builder. Format using bold section headers (e.g. **Electrical**, **Plumbing**, **Action Items**) followed by bullet points using a dash (-). Every piece of content must be a bullet point under a header — never write prose paragraphs. Each bullet should capture one distinct observation, issue, or action item. Fix grammar and spelling. Preserve all specific details (lot numbers, trade names, measurements, inspection results). Return only the formatted note — no preamble, no explanation.\n\nRaw note:\n' + rawText;
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
