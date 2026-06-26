@@ -633,11 +633,11 @@ textarea:focus{outline:none;border-color:var(--green)}
     <!-- Label + char count -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <div class="modal-note-label" style="margin-bottom:0">Add Note</div>
-      <span id="task-note-char" style="color:var(--muted);font-size:12px;font-family:'DM Mono',monospace">(0/500)</span>
+      <span id="task-note-char" style="color:var(--muted);font-size:12px;font-family:'DM Mono',monospace">(0/1000)</span>
     </div>
 
     <!-- Textarea — fills remaining space -->
-    <textarea id="task-note-input" placeholder="Dictate or type a note…" maxlength="500"
+    <textarea id="task-note-input" placeholder="Dictate or type a note…" maxlength="1000"
       oninput="updateTaskNoteChar()"
       style="flex-shrink:0;width:100%;padding:12px;border-radius:10px;border:1.5px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:15px;line-height:1.6;resize:none;outline:none;color:var(--ink);min-height:100px;max-height:200px"></textarea>
 
@@ -2970,29 +2970,39 @@ function onNoteInput() {
 // ── TASK NOTES ──
 var currentTaskNoteData = {lotId:null, taskId:null, taskName:''};
 
+var wakeLock = null;
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch(e) {
+    console.log('Wake lock not available:', e);
+  }
+}
+
+async function releaseWakeLock() {
+  try {
+    if (wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch(e) {}
+}
+
 async function openTaskNoteModal(lotId, taskId, taskName) {
   currentTaskNoteData = {lotId:lotId, taskId:taskId, taskName:taskName};
+  requestWakeLock();
   document.getElementById('task-note-title').textContent = 'Task Note';
   document.getElementById('task-note-subtitle').textContent = taskName;
   document.getElementById('task-note-input').value = '';
-  document.getElementById('task-note-char').textContent = '(0/500)';
+  document.getElementById('task-note-char').textContent = '(0/1000)';
   document.getElementById('task-note-cleanup-btn').disabled = true;
   document.getElementById('task-note-history').innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:13px">Loading…</div>';
   document.getElementById('modal-task-note').classList.add('open');
 
   // Fetch fresh from Supabase every time modal opens
-  // Direct fetch to debug
-  try {
-    var debugResp = await fetch('/.netlify/functions/supabase', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action: 'getTaskNotes', payload: {lotId: lotId}})
-    });
-    var debugText = await debugResp.text();
-    toast('DIRECT: ' + debugText.substring(0, 100));
-  } catch(de) {
-    toast('DIRECT ERR: ' + de.message);
-  }
   var data = await sbCall('getTaskNotes', {lotId: lotId});
   if (data && Array.isArray(data)) {
     if (!S.taskNotes[lotId]) S.taskNotes[lotId] = {};
@@ -3052,13 +3062,14 @@ function renderTaskNoteHistory(lotId, taskId) {
 function updateTaskNoteChar() {
   var len = document.getElementById('task-note-input').value.length;
   var el = document.getElementById('task-note-char');
-  el.textContent = '(' + len + '/500)';
-  el.style.color = len > 470 ? 'var(--red)' : 'var(--muted)';
+  el.textContent = '(' + len + '/1000)';
+  el.style.color = len > 950 ? 'var(--red)' : 'var(--muted)';
   document.getElementById('task-note-cleanup-btn').disabled = len === 0;
 }
 
 function closeTaskNoteModal() {
   document.getElementById('modal-task-note').classList.remove('open');
+  releaseWakeLock();
 }
 
 async function cleanupTaskNote() {
