@@ -1611,21 +1611,17 @@ async function sbCall(action, payload) {
       body: JSON.stringify({ action, payload })
     });
     const text = await resp.text();
-    toast('RAW[' + action + ']: ' + text.substring(0,60));
     let data;
     try { data = JSON.parse(text); } catch(e) { 
-      toast('PARSE ERR: ' + text.substring(0,60));
-      console.error('Parse error:', text.substring(0,100));
+        console.error('Parse error:', text.substring(0,100));
       return null; 
     }
     if (data && data.error) {
-      toast('SB ERR: ' + JSON.stringify(data.error).substring(0,80));
-      console.error('Supabase error:', data.error);
+        console.error('Supabase error:', data.error);
       return null;
     }
     return data;
   } catch(e) {
-    toast('FETCH ERR: ' + e.message.substring(0,80));
     console.error('sbCall failed:', e);
     return null;
   }
@@ -2985,8 +2981,19 @@ async function openTaskNoteModal(lotId, taskId, taskName) {
   document.getElementById('modal-task-note').classList.add('open');
 
   // Fetch fresh from Supabase every time modal opens
+  // Direct fetch to debug
+  try {
+    var debugResp = await fetch('/.netlify/functions/supabase', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'getTaskNotes', payload: {lotId: lotId}})
+    });
+    var debugText = await debugResp.text();
+    toast('DIRECT: ' + debugText.substring(0, 100));
+  } catch(de) {
+    toast('DIRECT ERR: ' + de.message);
+  }
   var data = await sbCall('getTaskNotes', {lotId: lotId});
-  toast('Notes fetch: ' + (data ? data.length + ' rows' : 'null') + ' for ' + lotId);
   if (data && Array.isArray(data)) {
     if (!S.taskNotes[lotId]) S.taskNotes[lotId] = {};
     data.forEach(function(row) {
