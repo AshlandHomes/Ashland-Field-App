@@ -1972,9 +1972,9 @@ function openLot(lotId) {
   renderWalkNotes(lot);
   renderUtilityCard(lot);
   renderCloseDateCard(lot);
-  // Load task notes for this lot
-  loadTaskNotes(lot.id);
+  // Load task notes for this lot — await so notes show before accordion renders
   showScreen('detail');
+  loadTaskNotes(lot.id);
   document.getElementById('screen-detail').scrollTop=0;
 }
 
@@ -2970,17 +2970,30 @@ function onNoteInput() {
 // ── TASK NOTES ──
 var currentTaskNoteData = {lotId:null, taskId:null, taskName:''};
 
-function openTaskNoteModal(lotId, taskId, taskName) {
+async function openTaskNoteModal(lotId, taskId, taskName) {
   currentTaskNoteData = {lotId:lotId, taskId:taskId, taskName:taskName};
   document.getElementById('task-note-title').textContent = 'Task Note';
   document.getElementById('task-note-subtitle').textContent = taskName;
   document.getElementById('task-note-input').value = '';
   document.getElementById('task-note-char').textContent = '(0/500)';
   document.getElementById('task-note-cleanup-btn').disabled = true;
-
-  // Load existing notes for this task
-  renderTaskNoteHistory(lotId, taskId);
+  document.getElementById('task-note-history').innerHTML = '<div style="text-align:center;padding:12px;color:var(--muted);font-size:13px">Loading…</div>';
   document.getElementById('modal-task-note').classList.add('open');
+
+  // Fetch fresh from Supabase every time modal opens
+  var data = await sbCall('getTaskNotes', {lotId: lotId});
+  if (data && Array.isArray(data)) {
+    if (!S.taskNotes[lotId]) S.taskNotes[lotId] = {};
+    data.forEach(function(row) {
+      var tid = row.task_id;
+      if (!S.taskNotes[lotId][tid]) S.taskNotes[lotId][tid] = [];
+      var exists = S.taskNotes[lotId][tid].find(function(n){return n.id===row.id;});
+      if (!exists) {
+        S.taskNotes[lotId][tid].push({id:row.id, text:row.note_text, builder:row.builder_name, ts:row.created_at});
+      }
+    });
+  }
+  renderTaskNoteHistory(lotId, taskId);
 }
 
 function formatNoteText(text) {
