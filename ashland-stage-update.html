@@ -616,25 +616,35 @@ textarea:focus{outline:none;border-color:var(--green)}
 </div>
 
 <!-- TASK NOTE MODAL -->
-<div class="modal-overlay" id="modal-task-note">
-  <div class="modal" style="max-height:95vh;overflow-y:auto;width:95vw;max-width:560px">
-    <div class="modal-icon">📝</div>
-    <div class="modal-title" id="task-note-title">Task Note</div>
-    <div class="modal-body" id="task-note-subtitle" style="margin-bottom:16px;font-size:12px;color:var(--muted)"></div>
-
-    <!-- Existing notes (append-only) -->
-    <div id="task-note-history" style="margin-bottom:14px;max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
-
-    <!-- New note input -->
-    <div class="modal-note-label">Add Note <span id="task-note-char" style="color:var(--muted);font-weight:400">(0/500)</span></div>
-    <textarea id="task-note-input" class="modal-textarea" placeholder="Dictate or type a note…" maxlength="500"
-      oninput="updateTaskNoteChar()" style="min-height:160px;font-size:14px;line-height:1.5"></textarea>
-    <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:16px">
-      <button onclick="cleanupTaskNote()" id="task-note-cleanup-btn" class="mbtn" style="flex:1;background:var(--cream);color:var(--ink);border:1px solid var(--rule)" disabled>✨ Clean Up</button>
+<div class="modal-overlay" id="modal-task-note" style="align-items:stretch;padding:0">
+  <div style="background:#fff;width:100%;height:100%;display:flex;flex-direction:column;padding:env(safe-area-inset-top,16px) 16px 16px 16px">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 8px">
+      <div>
+        <div style="font-family:'DM Serif Display',serif;font-size:20px;font-weight:700" id="task-note-title">Task Note</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px" id="task-note-subtitle"></div>
+      </div>
+      <button onclick="closeTaskNoteModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);padding:4px 8px">✕</button>
     </div>
-    <div class="modal-btns">
-      <button class="mbtn mbtn-cancel" onclick="closeTaskNoteModal()">Close</button>
-      <button class="mbtn mbtn-override" onclick="saveTaskNote()">Save Note →</button>
+
+    <!-- Existing notes -->
+    <div id="task-note-history" style="flex-shrink:0;max-height:25vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+
+    <!-- Label + char count -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div class="modal-note-label" style="margin-bottom:0">Add Note</div>
+      <span id="task-note-char" style="color:var(--muted);font-size:12px;font-family:'DM Mono',monospace">(0/500)</span>
+    </div>
+
+    <!-- Textarea — fills remaining space -->
+    <textarea id="task-note-input" placeholder="Dictate or type a note…" maxlength="500"
+      oninput="updateTaskNoteChar()"
+      style="flex:1;width:100%;padding:12px;border-radius:10px;border:1.5px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:15px;line-height:1.6;resize:none;outline:none;color:var(--ink)"></textarea>
+
+    <!-- Buttons -->
+    <div style="display:flex;gap:10px;margin-top:12px;padding-bottom:env(safe-area-inset-bottom,8px)">
+      <button onclick="cleanupTaskNote()" id="task-note-cleanup-btn" style="flex:1;padding:14px;border-radius:10px;border:1px solid var(--rule);background:var(--cream);color:var(--ink);font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer" disabled>✨ Clean Up</button>
+      <button onclick="saveTaskNote()" style="flex:1;padding:14px;border-radius:10px;border:none;background:var(--brand);color:#fff;font-family:'Instrument Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer">Save Note →</button>
     </div>
   </div>
 </div>
