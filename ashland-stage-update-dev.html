@@ -305,7 +305,7 @@ textarea:focus{outline:none;border-color:var(--green)}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,.08);margin-top:1px">
       <div class="ldh-stat" style="cursor:pointer" onclick="S.isAdmin?adminEditStartDate():null">
         <div class="ldh-stat-val" id="det-start-date" style="font-size:13px;padding-top:2px">—</div>
-        <div class="ldh-stat-lbl">Start Date <span id="det-start-admin-hint" style="display:none;font-size:9px;opacity:.6">✏️</span></div>
+        <div class="ldh-stat-lbl">Start Date </div>
       </div>
       <div class="ldh-stat">
         <div class="ldh-stat-val" id="det-working-days" style="font-size:13px;padding-top:2px">—</div>
@@ -455,7 +455,7 @@ textarea:focus{outline:none;border-color:var(--green)}
       <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--brand);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">🔑 Admin Tools</div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="abtn abtn-g" style="width:100%;padding:10px;text-align:left" onclick="openAddLot()">＋ Add New Lot</button>
-        <button class="abtn" style="width:100%;padding:10px;background:var(--cream);color:var(--ink);border:1px solid var(--rule);text-align:left" onclick="openStartDateEditor()">📅 Edit Start Dates</button>
+        <button class="abtn" style="width:100%;padding:10px;background:var(--cream);color:var(--ink);border:1px solid var(--rule);text-align:left" onclick="openStartDateEditor()" style="display:none">📅 Edit Start Dates</button>
       </div>
     </div>
 
@@ -514,18 +514,6 @@ textarea:focus{outline:none;border-color:var(--green)}
     <div class="modal-btns">
       <button class="mbtn mbtn-cancel" onclick="cancelCloseDateOverride()">Cancel</button>
       <button class="mbtn mbtn-override" onclick="confirmCloseDateOverride()">Lock New Date →</button>
-    </div>
-  </div>
-</div>
-
-<!-- START DATE EDITOR MODAL -->
-<div class="modal-overlay" id="modal-startdate">
-  <div class="modal" style="max-height:80vh;overflow-y:auto">
-    <div class="modal-title">📅 Edit Start Dates</div>
-    <div class="modal-body" style="margin-bottom:14px">Set actual construction start date per lot. This drives the schedule health indicator.</div>
-    <div id="startdate-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
-    <div class="modal-btns">
-      <button class="mbtn mbtn-cancel" onclick="closeStartDateEditor()">Done</button>
     </div>
   </div>
 </div>
@@ -762,7 +750,7 @@ textarea:focus{outline:none;border-color:var(--green)}
       <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--brand);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">🔑 Admin Tools</div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="abtn abtn-g" style="width:100%;padding:10px;text-align:left" onclick="openAddLot()">＋ Add New Lot</button>
-        <button class="abtn" style="width:100%;padding:10px;background:var(--cream);color:var(--ink);border:1px solid var(--rule);text-align:left" onclick="openStartDateEditor()">📅 Edit Start Dates</button>
+        <button class="abtn" style="width:100%;padding:10px;background:var(--cream);color:var(--ink);border:1px solid var(--rule);text-align:left" onclick="openStartDateEditor()" style="display:none">📅 Edit Start Dates</button>
       </div>
     </div>
 
@@ -2605,10 +2593,10 @@ function adminEditStartDate() {
   if (!S.isAdmin) return;
   const lot = S.lots.find(l=>l.id===S.currentLotId);
   if (!lot) return;
+  // Start date is admin-only — show info toast
+  toast('Start dates are set by admin only');
+  return;
   const current = lot.startDate || '';
-  // Reuse start date editor modal but pre-scroll to this lot
-  openStartDateEditor();
-  // Highlight the current lot's row after modal opens
   setTimeout(function() {
     const rows = document.querySelectorAll('#startdate-list > div');
     rows.forEach(function(row) {
@@ -2631,9 +2619,7 @@ function openStartDateEditor() {
         <div style="font-weight:600;font-size:13px">${l.subdivision} — ${l.number}</div>
         <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">${l.plan||''}</div>
       </div>
-      <input type="date" value="${l.startDate||''}"
-        onchange="updateLotStartDate('${l.id}', this.value)"
-        style="padding:6px 8px;border-radius:6px;border:1px solid var(--rule);font-family:'DM Mono',monospace;font-size:12px;background:var(--card)">
+      <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">${l.startDate ? fmtDate(l.startDate) : '—'}</div>
     </div>`;
   }).join('');
   document.getElementById('modal-startdate').classList.add('open');
