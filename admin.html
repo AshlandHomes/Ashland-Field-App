@@ -495,8 +495,11 @@ function calcHealthDelta(lot) {
   if (!lot.start_date) return null;
   const elapsed = calcWorkingDaysSince(lot.start_date);
   const stageIdx = STAGE_ORDER.indexOf(lot.stage);
+  // expectedDay = how far along the schedule the lot SHOULD be based on stage
   const expectedDay = stageIdx >= 0 ? Math.round((stageIdx / (STAGE_ORDER.length-1)) * 99) : 0;
-  return elapsed - expectedDay;
+  // delta: negative = behind (more days elapsed than stage warrants)
+  //        positive = ahead (fewer days elapsed than stage warrants)
+  return expectedDay - elapsed;
 }
 
 function fmtDate(str) {
