@@ -2831,7 +2831,7 @@ function renderCloseDateCard(lot) {
       }
       // Show/hide override button
       const overrideBtnEl = document.getElementById('close-date-override-btn');
-      if (overrideBtnEl) overrideBtnEl.style.display = 'block';
+      if (overrideBtnEl) overrideBtnEl.style.display = S.isAdmin ? 'block' : 'none';
     }
   }
   // Header always shows completion date — close date card handles the locked date
