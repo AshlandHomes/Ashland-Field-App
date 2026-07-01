@@ -1268,17 +1268,21 @@ function countWorkingDays(fromDate, toDate) {
 
 function calcHealthDelta(lot) {
   // Returns {delta, expectedDay, actualDay} or null if no start date
+  // delta negative = behind schedule, positive = ahead
+  if (lot.scheduleCompletedAt) {
+    return lot.frozenHealthDelta !== undefined ? {delta: lot.frozenHealthDelta, expectedDay: 99, actualDay: 99} : null;
+  }
   if (!lot.startDate) return null;
   const start = new Date(lot.startDate);
   const today = new Date();
   today.setHours(0,0,0,0);
   if (today < start) return null;
   const elapsed = countWorkingDays(start, today);
-  const expectedDay = Math.min(elapsed, 99);
+  // Do NOT cap elapsed — if 200 days have passed, that's 200 days
   const {effectiveDay} = calcSchedulePosition(lot);
   const actualDay = effectiveDay;
-  const delta = actualDay - expectedDay;
-  return {delta, expectedDay, actualDay};
+  const delta = actualDay - elapsed;  // negative = behind, positive = ahead
+  return {delta, expectedDay: elapsed, actualDay};
 }
 
 function healthPillHtml(lot) {
