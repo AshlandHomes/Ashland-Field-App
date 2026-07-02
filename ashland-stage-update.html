@@ -1600,7 +1600,7 @@ async function sbCall(action, payload) {
   try {
     const resp = await fetch('/.netlify/functions/supabase', {
       method: 'POST',
-headers: { 'Content-Type': 'application/json', 'X-Api-Secret': '78598028-3321-4150-9ce3-64b39950fc56' },
+headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload })
     });
     const text = await resp.text();
