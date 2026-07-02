@@ -598,6 +598,7 @@ function renderLotsTable() {
       <td>${updBadge}</td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${lot.id}')">Edit</button>
+        <button class="btn btn-sm" onclick="openDeleteLotModal('${lot.id}','${lot.number}','${lot.subdivision}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
   }).join('');
@@ -745,7 +746,6 @@ function openEditLotModal(id) {
 
 async function submitEditLot() {
   const id = document.getElementById('edit-lot-id').value;
-  const closeDateVal = document.getElementById('edit-close-date') ? document.getElementById('edit-close-date').value || null : undefined;
   const updates = {
     id: id,
     address: document.getElementById('edit-addr').value.trim(),
@@ -754,11 +754,6 @@ async function submitEditLot() {
     start_date: document.getElementById('edit-start').value || null,
     stage: document.getElementById('edit-stage').value.trim(),
   };
-  // If admin sets a close date, it overwrites builder's locked date
-  if (closeDateVal !== undefined) {
-    updates.scheduled_close_date = closeDateVal;
-    updates.scheduled_close_date_locked_at = closeDateVal ? new Date().toISOString() : null;
-  }
   const result = await sbCall('updateLot', updates);
   if (result !== null) {
     closeModal('modal-edit-lot');
@@ -1025,6 +1020,64 @@ function exportToExcel() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// ── DELETE LOT ──
+var deleteLotTarget = {id: null, number: null, subdivision: null};
+
+function openDeleteLotModal(id, number, subdivision) {
+  deleteLotTarget = {id: id, number: number, subdivision: subdivision};
+  document.getElementById('delete-lot-desc').textContent =
+    'This will permanently delete ' + subdivision + ' ' + number + ' and all its data. This cannot be undone.';
+  document.getElementById('delete-lot-pin').value = '';
+  document.getElementById('delete-lot-error').textContent = '';
+  document.getElementById('modal-delete-lot').classList.add('open');
+}
+
+function closeDeleteLotModal() {
+  document.getElementById('modal-delete-lot').classList.remove('open');
+  deleteLotTarget = {id: null, number: null, subdivision: null};
+}
+
+async function confirmDeleteLot() {
+  var pin = document.getElementById('delete-lot-pin').value;
+  var errEl = document.getElementById('delete-lot-error');
+  if (pin !== ADMIN_PIN) {
+    errEl.textContent = 'Incorrect PIN';
+    document.getElementById('delete-lot-pin').value = '';
+    return;
+  }
+  errEl.textContent = 'Deleting...';
+  var result = await sbCall('deleteLot', {id: deleteLotTarget.id});
+  if (result !== null) {
+    closeDeleteLotModal();
+    await loadLots();
+    renderStats();
+    renderLotsTable();
+    alert(deleteLotTarget.subdivision + ' ' + deleteLotTarget.number + ' deleted successfully');
+  } else {
+    errEl.textContent = 'Delete failed - try again';
+  }
+}
 </script>
+<!-- DELETE LOT MODAL -->
+<div class="modal-overlay" id="modal-delete-lot">
+  <div class="modal" style="max-width:400px;width:90%">
+    <div style="font-size:32px;text-align:center;margin-bottom:12px">⚠️</div>
+    <h2 style="text-align:center;color:#dc2626;margin-bottom:8px">Delete Lot?</h2>
+    <p id="delete-lot-desc" style="text-align:center;color:var(--muted);margin-bottom:20px;font-size:14px"></p>
+    <div class="field">
+      <label>Enter Admin PIN to confirm</label>
+      <input type="password" id="delete-lot-pin" maxlength="4" inputmode="numeric" placeholder="••••"
+        style="text-align:center;font-size:24px;letter-spacing:.4em"
+        onkeydown="if(event.key==='Enter')confirmDeleteLot()">
+    </div>
+    <div id="delete-lot-error" style="color:#dc2626;font-size:13px;text-align:center;margin-bottom:12px;min-height:18px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeDeleteLotModal()">Cancel</button>
+      <button class="btn" onclick="confirmDeleteLot()" style="background:#dc2626;color:#fff">Delete Permanently</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
