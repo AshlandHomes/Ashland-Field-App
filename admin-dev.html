@@ -124,6 +124,10 @@ tr:hover td{background:#f9fafb}
 </style>
 </head>
 <body>
+<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">
+  ⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠
+</div>
+<div style="height:30px"></div>
 
 <!-- LOGIN -->
 <div class="login-wrap" id="login-wrap">
@@ -1017,7 +1021,7 @@ function exportToExcel() {
 }
 </script>
 <!-- DELETE LOT MODAL -->
-<div class="modal-overlay" id="modal-delete-lot" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center">
+<div class="modal-overlay" id="modal-delete-lot">
   <div class="modal" style="max-width:400px;width:90%">
     <div style="font-size:32px;text-align:center;margin-bottom:12px">⚠️</div>
     <h2 style="text-align:center;color:#dc2626;margin-bottom:8px">Delete Lot?</h2>
