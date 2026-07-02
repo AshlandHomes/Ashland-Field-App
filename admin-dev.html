@@ -757,6 +757,17 @@ async function submitEditLot() {
     start_date: document.getElementById('edit-start').value || null,
     stage: document.getElementById('edit-stage').value.trim(),
   };
+  // Admin close date always wins — clear the builder lock so it can't revert
+  const closeDateEl = document.getElementById('edit-close-date');
+  if (closeDateEl && closeDateEl.value) {
+    updates.scheduled_close_date = closeDateEl.value;
+    updates.scheduled_close_date_locked_at = new Date().toISOString();
+    updates.scheduled_close_date_note = 'Admin override';
+  } else if (closeDateEl && !closeDateEl.value) {
+    updates.scheduled_close_date = null;
+    updates.scheduled_close_date_locked_at = null;
+    updates.scheduled_close_date_note = '';
+  }
   const result = await sbCall('updateLot', updates);
   if (result !== null) {
     closeModal('modal-edit-lot');
@@ -1045,7 +1056,9 @@ async function confirmMarkClosed() {
     id: markClosedTarget.id,
     is_closed: true,
     closed_date: closeDate,
-    scheduled_close_date: closeDate
+    scheduled_close_date: closeDate,
+    scheduled_close_date_locked_at: new Date().toISOString(),
+    scheduled_close_date_note: 'Admin marked closed'
   });
   if (result !== null) {
     closeModal('modal-mark-closed');
