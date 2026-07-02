@@ -1596,11 +1596,20 @@ let pendingAdvance = null; // null = not yet chosen, true = advance date, false 
 // ══════════════════════════════════════
 // SUPABASE API
 // ══════════════════════════════════════
+  let API_SECRET = null;
+async function loadSecret() {
+  if (API_SECRET) return API_SECRET;
+  const r = await fetch('/.netlify/functions/config');
+  const d = await r.json();
+  API_SECRET = d.secret;
+  return API_SECRET;
+}
 async function sbCall(action, payload) {
   try {
+await loadSecret();
     const resp = await fetch('/.netlify/functions/supabase', {
       method: 'POST',
-headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Api-Secret': API_SECRET },
       body: JSON.stringify({ action, payload })
     });
     const text = await resp.text();
