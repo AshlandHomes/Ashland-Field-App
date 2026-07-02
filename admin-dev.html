@@ -571,11 +571,12 @@ function renderLotsTable() {
 
   const rows = filtered.map(lot => {
     const delta = calcHealthDelta(lot);
-    // Estimated completion date — working days from start date
+    // Estimated completion date — 99 working days from start date
     let estCompDate = '<span style="color:var(--muted)">—</span>';
     if (lot.start_date) {
       try {
-        const startD = new Date(lot.start_date + 'T12:00:00');
+        const parts = lot.start_date.split('-');
+        const startD = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
         let d = new Date(startD);
         let wd = 0;
         while (wd < 99) {
@@ -583,7 +584,8 @@ function renderLotsTable() {
           if (d.getDay() !== 0 && d.getDay() !== 6) wd++;
         }
         const isOverdue = d < new Date();
-        estCompDate = '<span style="color:' + (isOverdue ? 'var(--red)' : 'var(--ink)') + ';font-weight:' + (isOverdue ? '700' : '400') + '">' + fmtDate(d) + '</span>';
+        const dateStr = d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+        estCompDate = '<span style="color:' + (isOverdue ? 'var(--red)' : 'var(--ink)') + ';font-weight:' + (isOverdue ? '700' : '400') + '">' + dateStr + '</span>';
       } catch(e) {}
     }
     let healthBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No start date</span>';
