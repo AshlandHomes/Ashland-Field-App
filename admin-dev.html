@@ -324,7 +324,16 @@ tr:hover td{background:#f9fafb}
     </div>
     <div class="field"><label>Construction Start Date</label><input id="edit-start" type="date"></div>
     <div class="field"><label>Stage</label><input id="edit-stage" type="text" placeholder="e.g. 4.9"></div>
-    <div class="field"><label>Close Date <span style="font-size:11px;color:var(--muted)">(Admin override — final)</span></label><input id="edit-close-date" type="date"></div>
+    <div class="field"><label>Scheduled Close Date <span style="font-size:11px;color:var(--muted)">(Admin override — final)</span></label><input id="edit-close-date" type="date"></div>
+    <div class="field" style="border-top:1px solid var(--rule);padding-top:16px;margin-top:4px">
+      <div id="edit-close-status-row" style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--ink)" id="edit-close-status-label">Close Status</div>
+          <div style="font-size:12px;color:var(--muted)" id="edit-close-status-sub"></div>
+        </div>
+        <button id="edit-close-toggle-btn" onclick="toggleLotClosed()" style="padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;border:none"></button>
+      </div>
+    </div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-edit-lot')">Cancel</button>
       <button class="btn btn-primary" onclick="submitEditLot()">Save Changes →</button>
@@ -600,7 +609,7 @@ function renderLotsTable() {
       <td>${updBadge}</td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${lot.id}')">Edit</button>
-        ${!lot.is_closed ? `<button class="btn btn-sm" onclick="openMarkClosedModal('${lot.id}','${lot.number}','${lot.subdivision}')" style="background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf;margin-left:4px">Close</button>` : ''}
+
         <button class="btn btn-sm" onclick="openDeleteLotModal('${lot.id}','${lot.number}','${lot.subdivision}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
@@ -743,6 +752,27 @@ function openEditLotModal(id) {
   document.getElementById('edit-stage').value = lot.stage || '';
   if (document.getElementById('edit-close-date')) {
     document.getElementById('edit-close-date').value = lot.scheduled_close_date || '';
+  }
+  // Populate close status toggle
+  const isClosed = lot.is_closed;
+  const closedDate = lot.closed_date;
+  const statusLabel = document.getElementById('edit-close-status-label');
+  const statusSub = document.getElementById('edit-close-status-sub');
+  const toggleBtn = document.getElementById('edit-close-toggle-btn');
+  if (isClosed) {
+    statusLabel.textContent = '🏠 Closed';
+    statusSub.textContent = closedDate ? 'Closed on ' + fmtDate(closedDate) : 'No close date recorded';
+    toggleBtn.textContent = 'Reverse Close';
+    toggleBtn.style.background = '#fee2e2';
+    toggleBtn.style.color = '#dc2626';
+    toggleBtn.style.border = '1px solid #fca5a5';
+  } else {
+    statusLabel.textContent = 'Not Closed';
+    statusSub.textContent = "Mark this lot as closed with today's date or the date above.";
+    toggleBtn.textContent = 'Mark Closed';
+    toggleBtn.style.background = '#d5f5e3';
+    toggleBtn.style.color = '#1E8449';
+    toggleBtn.style.border = '1px solid #a9dfbf';
   }
   document.getElementById('modal-edit-lot').classList.add('open');
 }
@@ -1033,6 +1063,44 @@ function exportToExcel() {
   a.download = 'Ashland_Stage_Report_' + new Date().toISOString().split('T')[0] + '.csv';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── TOGGLE LOT CLOSED FROM EDIT MODAL ──
+function toggleLotClosed() {
+  const lotId = document.getElementById('edit-lot-id').value;
+  const lot = lots.find(l => l.id === lotId);
+  if (!lot) return;
+
+  if (lot.is_closed) {
+    // Reversing close — warn first
+    if (!confirm('Are you sure you want to reverse the close on ' + lot.subdivision + ' ' + lot.number + '? This will mark it as active again.')) return;
+    sbCall('updateLot', {
+      id: lotId,
+      is_closed: false,
+      closed_date: null
+    }).then(result => {
+      if (result !== null) {
+        closeModal('modal-edit-lot');
+        loadLots().then(() => { renderStats(); renderLotsTable(); });
+      }
+    });
+  } else {
+    // Marking closed — use close date field or today
+    const closeDateVal = document.getElementById('edit-close-date').value || new Date().toISOString().split('T')[0];
+    sbCall('updateLot', {
+      id: lotId,
+      is_closed: true,
+      closed_date: closeDateVal,
+      scheduled_close_date: closeDateVal,
+      scheduled_close_date_locked_at: new Date().toISOString(),
+      scheduled_close_date_note: 'Admin marked closed'
+    }).then(result => {
+      if (result !== null) {
+        closeModal('modal-edit-lot');
+        loadLots().then(() => { renderStats(); renderLotsTable(); });
+      }
+    });
+  }
 }
 
 // ── MARK LOT CLOSED ──
