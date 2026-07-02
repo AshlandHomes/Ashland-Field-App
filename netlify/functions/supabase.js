@@ -44,7 +44,14 @@ exports.handler = async function(event) {
       body: JSON.stringify({ error: 'Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables' }) 
     };
   }
-
+// Shared-secret gate — rejects any caller without the secret header
+  const SHARED_SECRET = process.env.API_SHARED_SECRET;
+  if (SHARED_SECRET) {
+    const provided = event.headers['x-api-secret'] || event.headers['X-Api-Secret'];
+    if (provided !== SHARED_SECRET) {
+      return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+    }
+  }
   try {
     const { action, payload } = JSON.parse(event.body);
 
