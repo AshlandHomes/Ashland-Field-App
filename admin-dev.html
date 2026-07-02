@@ -571,6 +571,21 @@ function renderLotsTable() {
 
   const rows = filtered.map(lot => {
     const delta = calcHealthDelta(lot);
+    // Estimated completion date — working days from start date
+    let estCompDate = '<span style="color:var(--muted)">—</span>';
+    if (lot.start_date) {
+      try {
+        const startD = new Date(lot.start_date + 'T12:00:00');
+        let d = new Date(startD);
+        let wd = 0;
+        while (wd < 99) {
+          d.setDate(d.getDate() + 1);
+          if (d.getDay() !== 0 && d.getDay() !== 6) wd++;
+        }
+        const isOverdue = d < new Date();
+        estCompDate = '<span style="color:' + (isOverdue ? 'var(--red)' : 'var(--ink)') + ';font-weight:' + (isOverdue ? '700' : '400') + '">' + fmtDate(d) + '</span>';
+      } catch(e) {}
+    }
     let healthBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No start date</span>';
     if (delta !== null) {
       if (delta > 3) healthBadge = `<span class="badge badge-health-ahead">+${delta}d ahead</span>`;
@@ -604,6 +619,7 @@ function renderLotsTable() {
       <td><span class="badge badge-stage">${lot.stage}</span><div style="font-size:11px;color:var(--muted);margin-top:2px">${STAGE_DESC[lot.stage]||''}</div></td>
       <td>${lot.assigned_builder||'<span style="color:var(--muted)">Unassigned</span>'}</td>
       <td>${fmtDate(lot.start_date)}</td>
+      <td>${estCompDate}</td>
       <td>${healthBadge}</td>
       <td>${closeBadge}</td>
       <td>${updBadge}</td>
@@ -618,7 +634,7 @@ function renderLotsTable() {
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>SD</th><th>Lot / Plan</th><th>Address</th><th>Stage</th>
-      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Update Status</th><th></th>
+      <th>Builder</th><th>Start Date</th><th>Est. Completion</th><th>Health</th><th>Close Status</th><th>Update Status</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
