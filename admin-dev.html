@@ -573,15 +573,15 @@ function renderLotsTable() {
       ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span><div style="font-size:11px;color:var(--muted);margin-top:2px">' + lastUpdated + '</div>'
       : '<span class="badge" style="background:#fee2e2;color:var(--red);font-weight:700">⚠️ Not Updated</span>';
 
-    // Closing status — 4 states
+    // Close status — single column, one source of truth
     const hasCloseDate = !!lot.scheduled_close_date;
-    const closeDate = hasCloseDate ? fmtDate(lot.scheduled_close_date) : '—';
     let closeBadge;
     if (lot.is_closed) {
       const closedOn = lot.closed_date ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.closed_date) + '</div>' : '';
       closeBadge = '<span class="badge" style="background:#4C4C4C;color:#fff;font-weight:700">🏠 Closed</span>' + closedOn;
     } else if (hasCloseDate) {
-      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">📅 Scheduled</span>';
+      const schedOn = '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>';
+      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">📅 Scheduled</span>' + schedOn;
     } else if (parseFloat(lot.stage) >= 6) {
       closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready to Schedule</span>';
     } else {
@@ -597,10 +597,10 @@ function renderLotsTable() {
       <td>${fmtDate(lot.start_date)}</td>
       <td>${healthBadge}</td>
       <td>${closeBadge}</td>
-      <td>${closeDate}</td>
       <td>${updBadge}</td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${lot.id}')">Edit</button>
+        ${!lot.is_closed ? `<button class="btn btn-sm" onclick="openMarkClosedModal('${lot.id}','${lot.number}','${lot.subdivision}')" style="background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf;margin-left:4px">Close</button>` : ''}
         <button class="btn btn-sm" onclick="openDeleteLotModal('${lot.id}','${lot.number}','${lot.subdivision}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
@@ -609,7 +609,7 @@ function renderLotsTable() {
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>SD</th><th>Lot / Plan</th><th>Address</th><th>Stage</th>
-      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Close Date</th><th>Update Status</th><th></th>
+      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Update Status</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -1024,6 +1024,39 @@ function exportToExcel() {
   URL.revokeObjectURL(url);
 }
 
+// ── MARK LOT CLOSED ──
+var markClosedTarget = {id: null, number: null, subdivision: null};
+
+function openMarkClosedModal(id, number, subdivision) {
+  markClosedTarget = {id: id, number: number, subdivision: subdivision};
+  document.getElementById('mark-closed-desc').textContent =
+    'Set the actual close date for ' + subdivision + ' ' + number + '.';
+  document.getElementById('mark-closed-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('mark-closed-error').textContent = '';
+  document.getElementById('modal-mark-closed').classList.add('open');
+}
+
+async function confirmMarkClosed() {
+  const closeDate = document.getElementById('mark-closed-date').value;
+  const errEl = document.getElementById('mark-closed-error');
+  if (!closeDate) { errEl.textContent = 'Please enter a close date'; return; }
+  errEl.textContent = 'Saving...';
+  const result = await sbCall('updateLot', {
+    id: markClosedTarget.id,
+    is_closed: true,
+    closed_date: closeDate,
+    scheduled_close_date: closeDate
+  });
+  if (result !== null) {
+    closeModal('modal-mark-closed');
+    await loadLots();
+    renderStats();
+    renderLotsTable();
+  } else {
+    errEl.textContent = 'Failed — try again';
+  }
+}
+
 // ── DELETE LOT ──
 var deleteLotTarget = {id: null, number: null, subdivision: null};
 
@@ -1062,6 +1095,24 @@ async function confirmDeleteLot() {
   }
 }
 </script>
+<!-- MARK CLOSED MODAL -->
+<div class="modal-overlay" id="modal-mark-closed">
+  <div class="modal" style="max-width:400px;width:90%">
+    <div style="font-size:32px;text-align:center;margin-bottom:12px">🏠</div>
+    <h2 style="text-align:center;margin-bottom:8px">Mark Lot Closed</h2>
+    <p id="mark-closed-desc" style="text-align:center;color:var(--muted);margin-bottom:20px;font-size:14px"></p>
+    <div class="field">
+      <label>Actual Close Date</label>
+      <input type="date" id="mark-closed-date" style="width:100%">
+    </div>
+    <div id="mark-closed-error" style="color:#dc2626;font-size:13px;text-align:center;margin-bottom:12px;min-height:18px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-mark-closed')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmMarkClosed()">Mark Closed →</button>
+    </div>
+  </div>
+</div>
+
 <!-- DELETE LOT MODAL -->
 <div class="modal-overlay" id="modal-delete-lot">
   <div class="modal" style="max-width:400px;width:90%">
