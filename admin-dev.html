@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ashland Homes — Admin Console</title>
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#00A9D1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#00A9D1;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;
+  --rule:#e5e7eb;--cream:#f9fafb;--card:#ffffff;--green:#1E8449;
+  --gl:#d5f5e3;--red:#c0392b;--amber:#e67e22;--amberbg:#fef9e7;
+  --brand-dark:#0082A0;
+}
+body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink);min-height:100vh}
+
+/* ── LOGIN ── */
+.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--grey)}
+.login-box{background:#fff;border-radius:20px;padding:40px 36px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.login-logo{height:40px;width:auto;margin-bottom:24px}
+.login-box h1{font-family:'DM Serif Display',serif;font-size:24px;margin-bottom:4px}
+.login-box p{color:var(--muted);font-size:13px;margin-bottom:28px}
+.login-pin{display:flex;gap:8px;margin-bottom:16px}
+.login-pin input{flex:1;padding:14px;border-radius:10px;border:2px solid var(--rule);font-family:'DM Mono',monospace;font-size:22px;letter-spacing:.3em;text-align:center;outline:none}
+.login-pin input:focus{border-color:var(--brand)}
+.login-btn{width:100%;padding:14px;border-radius:10px;border:none;background:var(--brand);color:#fff;font-family:'Instrument Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer}
+.login-btn:hover{background:var(--brand-dark)}
+.login-error{color:var(--red);font-size:13px;margin-top:8px;min-height:18px}
+
+/* ── LAYOUT ── */
+.app{display:none}
+.app.open{display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:var(--grey);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar-left{display:flex;align-items:center;gap:16px}
+.topbar img{height:28px;filter:brightness(0) invert(1);opacity:.9}
+.topbar-title{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:rgba(255,255,255,.6)}
+.topbar-right{display:flex;align-items:center;gap:12px}
+.topbar-btn{padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.8);font-family:'Instrument Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer}
+.topbar-btn:hover{background:rgba(255,255,255,.1)}
+.topbar-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+
+.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex;gap:0}
+.nav-tab{padding:14px 20px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap}
+.nav-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.nav-tab:hover:not(.active){color:var(--ink)}
+
+.content{flex:1;padding:28px 32px;max-width:1400px;width:100%}
+
+/* ── CARDS ── */
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:#fff;border-radius:12px;padding:20px;border:1px solid var(--rule)}
+.stat-card .val{font-family:'DM Serif Display',serif;font-size:32px;color:var(--brand);line-height:1}
+.stat-card .lbl{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-top:6px}
+
+/* ── TABLE ── */
+.table-wrap{background:#fff;border-radius:12px;border:1px solid var(--rule);overflow:hidden;margin-bottom:24px}
+.table-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--rule)}
+.table-header h2{font-size:15px;font-weight:700}
+.table-actions{display:flex;gap:8px;align-items:center}
+.search-input{padding:7px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:13px;width:220px;outline:none}
+.search-input:focus{border-color:var(--brand)}
+.btn{padding:8px 16px;border-radius:8px;border:none;font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-dark)}
+.btn-secondary{background:var(--cream);color:var(--ink);border:1px solid var(--rule)}
+.btn-secondary:hover{background:#e5e7eb}
+.btn-green{background:var(--green);color:#fff}
+.btn-red{background:var(--red);color:#fff}
+.btn-sm{padding:5px 10px;font-size:12px}
+table{width:100%;border-collapse:collapse}
+thead{background:#f9fafb}
+th{padding:10px 14px;text-align:left;font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:11px 14px;font-size:13px;border-bottom:1px solid var(--rule);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f9fafb}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'DM Mono',monospace;font-weight:600}
+.badge-stage{background:#e0f2fe;color:#0369a1}
+.badge-health-ahead{background:var(--gl);color:var(--green)}
+.badge-health-behind{background:#fee2e2;color:var(--red)}
+.badge-health-ok{background:#f0fdf4;color:var(--green)}
+.badge-sub{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;font-family:'DM Mono',monospace}
+
+/* ── MODAL ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:16px;padding:28px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal h2{font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:6px}
+.modal-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:14px;outline:none}
+.field input:focus,.field select:focus{border-color:var(--brand)}
+.modal-btns{display:flex;gap:10px;margin-top:24px;justify-content:flex-end}
+
+/* ── FILTER BAR ── */
+.filter-bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filter-select{padding:7px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:13px;background:#fff;outline:none}
+.filter-select:focus{border-color:var(--brand)}
+
+/* ── SUBDIVISION COLORS ── */
+.sub-RC{background:#D6E4F7;color:#1A5276}
+.sub-CO{background:#D5F5E3;color:#1E8449}
+.sub-TB{background:#FEF9E7;color:#7D6608}
+.sub-CT{background:#F5EEF8;color:#6C3483}
+.sub-TE{background:#FDEDEC;color:#922B21}
+.sub-CW{background:#EBF5FB;color:#1A5276}
+
+/* ── EMPTY STATE ── */
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.empty-state p{font-size:14px}
+
+/* ── LOADING ── */
+.loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
+
+/* ── SCREEN SECTIONS ── */
+.section{display:none}
+.section.active{display:block}
+</style>
+</head>
+<body>
+<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">
+  ⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠
+</div>
+<div style="height:30px"></div>
+
+<!-- LOGIN -->
+<div class="login-wrap" id="login-wrap">
+  <div class="login-box">
+    <img class="login-logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 80'%3E%3Ctext x='10' y='50' font-family='serif' font-size='40' fill='%234C4C4C'%3EAH%3C/text%3E%3C/svg%3E" alt="AH">
+    <h1>Admin Console</h1>
+    <p>Ashland Homes Field Operations</p>
+    <div class="login-pin">
+      <input type="password" id="pin-input" placeholder="••••" maxlength="4" inputmode="numeric" onkeydown="if(event.key==='Enter')tryLogin()">
+    </div>
+    <button class="login-btn" onclick="tryLogin()">Enter →</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="app">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div style="font-family:'DM Serif Display',serif;font-size:18px;color:#fff">Ashland Homes</div>
+      <div class="topbar-title">Admin Console</div>
+    </div>
+    <div class="topbar-right">
+      <span style="font-size:12px;color:rgba(255,255,255,.5);font-family:'DM Mono',monospace" id="last-updated"></span>
+      <button class="topbar-btn" onclick="refreshData()">↻ Refresh</button>
+      <button class="topbar-btn primary" onclick="exportToExcel()">↓ Export Excel</button>
+      <button class="topbar-btn" onclick="logout()">Sign Out</button>
+    </div>
+  </div>
+
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="showSection('lots')">🏗 Lots</div>
+    <div class="nav-tab" onclick="showSection('builders')">👷 Builders</div>
+    <div class="nav-tab" onclick="showSection('subdivisions')">🏘 Subdivisions</div>
+  </div>
+
+  <div class="content">
+
+    <!-- STATS ROW -->
+    <div class="stat-row" id="stat-row">
+      <div class="stat-card"><div class="val" id="stat-total">—</div><div class="lbl">Total Lots</div></div>
+      <div class="stat-card"><div class="val" id="stat-active">—</div><div class="lbl">Active Builds</div></div>
+      <div class="stat-card"><div class="val" id="stat-updated">—</div><div class="lbl">Updated This Week</div></div>
+      <div class="stat-card"><div class="val" id="stat-behind">—</div><div class="lbl">Behind Schedule</div></div>
+      <div class="stat-card"><div class="val" id="stat-complete">—</div><div class="lbl">Stage 9.5 Complete</div></div>
+    </div>
+
+    <!-- LOTS SECTION -->
+    <div class="section active" id="section-lots">
+      <div class="table-wrap">
+        <div class="table-header">
+          <h2>Active Lots</h2>
+          <div class="table-actions">
+            <div class="filter-bar" style="margin:0">
+              <select class="filter-select" id="filter-sub" onchange="renderLotsTable()">
+                <option value="">All Subdivisions</option>
+                <option value="RC">RC — Ruby Creek</option>
+                <option value="CO">CO — Chimney Oaks</option>
+                <option value="TB">TB — Traditions of Braselton</option>
+                <option value="CT">CT — Clocktower</option>
+                <option value="TE">TE — Thurgood Estates</option>
+                <option value="CW">CW — Carrington Walk</option>
+              </select>
+              <select class="filter-select" id="filter-builder" onchange="renderLotsTable()">
+                <option value="">All Builders</option>
+                <option value="Matt Hines">Matt Hines</option>
+                <option value="Brendon Connor">Brendon Connor</option>
+                <option value="Dennis Duncan">Dennis Duncan</option>
+              </select>
+              <select class="filter-select" id="filter-close" onchange="renderLotsTable()">
+                <option value="">All Close Status</option>
+                <option value="active">Active Only</option>
+                <option value="scheduled">📅 Scheduled</option>
+                <option value="ready">⚠️ Ready to Schedule</option>
+                <option value="notyet">Not Yet</option>
+                <option value="closed">🏠 Closed</option>
+              </select>
+              <select class="filter-select" id="filter-update" onchange="renderLotsTable()">
+                <option value="">All Update Status</option>
+                <option value="pending">⚠️ Not Updated This Week</option>
+                <option value="updated">✓ Updated This Week</option>
+              </select>
+              <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
+            </div>
+<button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
+          </div>
+        </div>
+        <div id="lots-table-body">
+          <div class="loading">Loading lots from Supabase…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BUILDERS SECTION -->
+    <div class="section" id="section-builders">
+      <div class="table-wrap">
+        <div class="table-header">
+          <h2>Builders</h2>
+          <button class="btn btn-primary" onclick="openAddBuilderModal()">+ Add Builder</button>
+        </div>
+        <div id="builders-table-body">
+          <div class="loading">Loading builders…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SUBDIVISIONS SECTION -->
+    <div class="section" id="section-subdivisions">
+      <div class="table-wrap">
+        <div class="table-header">
+          <h2>Subdivisions</h2>
+          <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
+        </div>
+        <div id="subdivisions-table-body">
+          <div class="loading">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- DELAY LOG MODAL -->
+<div class="modal-overlay" id="modal-delay-log">
+  <div class="modal" style="max-width:600px;width:95vw">
+    <h2>Schedule Delay Log</h2>
+    <div class="modal-sub" id="delay-log-title">Loading…</div>
+    <div id="delay-log-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-delay-log')">Close</button>
+      <button class="btn btn-green btn-sm" onclick="exportDelayLog()">↓ Export CSV</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD LOT MODAL -->
+<div class="modal-overlay" id="modal-add-lot">
+  <div class="modal">
+    <h2>Add New Lot</h2>
+    <div class="modal-sub">New lot will appear in the field app immediately</div>
+    <div class="field"><label>Subdivision</label>
+      <select id="new-sub">
+        <option value="">Select…</option>
+        <option value="RC">RC — Ruby Creek</option>
+        <option value="CO">CO — Chimney Oaks</option>
+        <option value="TB">TB — Traditions of Braselton</option>
+        <option value="CT">CT — Clocktower</option>
+        <option value="TE">TE — Thurgood Estates</option>
+        <option value="CW">CW — Carrington Walk</option>
+      </select>
+    </div>
+    <div class="field"><label>Lot Number</label><input id="new-num" placeholder="e.g. Lot 42" type="text"></div>
+    <div class="field"><label>Street Address</label><input id="new-addr" placeholder="e.g. 123 Maple Drive" type="text"></div>
+    <div class="field"><label>Plan Name</label><input id="new-plan" placeholder="e.g. Newburgh C" type="text"></div>
+    <div class="field"><label>Assigned Builder</label>
+      <select id="new-builder">
+        <option value="">Unassigned</option>
+        <option value="Matt Hines">Matt Hines</option>
+        <option value="Brendon Connor">Brendon Connor</option>
+        <option value="Dennis Duncan">Dennis Duncan</option>
+      </select>
+    </div>
+    <div class="field"><label>Construction Start Date (Admin only)</label><input id="new-start" type="date"></div>
+    <div class="field"><label>Initial Stage</label>
+      <select id="new-stage">
+        <option value="0.3">0.3 — Released to Obtain Permit</option>
+        <option value="1.1" selected>1.1 — Permit Received & Released</option>
+        <option value="1.2">1.2 — Lot Graded</option>
+        <option value="2">2 — Slab Poured</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-lot')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddLot()">Add Lot →</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT LOT MODAL -->
+<div class="modal-overlay" id="modal-edit-lot">
+  <div class="modal">
+    <h2>Edit Lot</h2>
+    <div class="modal-sub" id="edit-lot-sub"></div>
+    <input type="hidden" id="edit-lot-id">
+    <div class="field"><label>Street Address</label><input id="edit-addr" type="text"></div>
+    <div class="field"><label>Plan Name</label><input id="edit-plan" type="text"></div>
+    <div class="field"><label>Assigned Builder</label>
+      <select id="edit-builder">
+        <option value="">Unassigned</option>
+        <option value="Matt Hines">Matt Hines</option>
+        <option value="Brendon Connor">Brendon Connor</option>
+        <option value="Dennis Duncan">Dennis Duncan</option>
+      </select>
+    </div>
+    <div class="field"><label>Construction Start Date</label><input id="edit-start" type="date"></div>
+    <div class="field"><label>Stage</label><input id="edit-stage" type="text" placeholder="e.g. 4.9"></div>
+    <div class="field"><label>Close Date <span style="font-size:11px;color:var(--muted)">(Admin override — final)</span></label><input id="edit-close-date" type="date"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-edit-lot')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditLot()">Save Changes →</button>
+    </div>
+  </div>
+</div>
+
+<!-- SET PIN MODAL -->
+<div class="modal-overlay" id="modal-set-pin">
+  <div class="modal">
+    <h2>Set Builder PIN</h2>
+    <div class="modal-sub" id="pin-modal-sub">Set a 4-digit PIN for this builder</div>
+    <input type="hidden" id="pin-builder-name">
+    <div class="field"><label>New PIN (4 digits)</label>
+      <input id="new-pin" type="password" maxlength="4" inputmode="numeric" placeholder="••••" style="font-size:24px;letter-spacing:.3em;text-align:center">
+    </div>
+    <div class="field"><label>Is this a temporary PIN?</label>
+      <select id="pin-is-temp">
+        <option value="temp">Yes — builder will be prompted to change it</option>
+        <option value="permanent">No — permanent PIN</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-set-pin')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitSetPin()">Set PIN →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD SUBDIVISION MODAL -->
+<div class="modal-overlay" id="modal-add-sub">
+  <div class="modal">
+    <h2>Add Subdivision</h2>
+    <div class="modal-sub">New subdivision will appear in the field app and admin console immediately</div>
+    <div class="field"><label>Subdivision Code (2-3 letters)</label>
+      <input id="sub-code" type="text" maxlength="4" placeholder="e.g. WB" style="text-transform:uppercase">
+    </div>
+    <div class="field"><label>Full Name</label>
+      <input id="sub-name" type="text" placeholder="e.g. Willowbrook">
+    </div>
+    <div class="field"><label>Color Theme</label>
+      <select id="sub-color">
+        <option value="blue">Blue</option>
+        <option value="green">Green</option>
+        <option value="gold">Gold</option>
+        <option value="purple">Purple</option>
+        <option value="red">Red</option>
+        <option value="teal">Teal</option>
+      </select>
+    </div>
+    <div class="field"><label>Assign Builders (optional)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="sub-builder-checks">
+        <!-- populated dynamically from builders table -->
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-sub')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddSubdivision()">Add Subdivision →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD BUILDER MODAL -->
+<div class="modal-overlay" id="modal-add-builder">
+  <div class="modal">
+    <h2>Add Builder</h2>
+    <div class="field"><label>Full Name</label><input id="builder-name" type="text" placeholder="First Last"></div>
+    <div class="field"><label>Subdivisions (check all that apply)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="builder-sub-checkboxes">
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="RC"> RC — Ruby Creek</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CO"> CO — Chimney Oaks</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="TB"> TB — Traditions</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CT"> CT — Clocktower</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="TE"> TE — Thurgood Estates</label>
+        <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CW"> CW — Carrington Walk</label>
+      </div>
+    </div>
+    <div class="field"><label>Initial PIN (4 digits)</label>
+      <input id="builder-pin" type="password" maxlength="4" inputmode="numeric" placeholder="••••" style="font-size:20px;letter-spacing:.3em;text-align:center">
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-builder')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddBuilder()">Add Builder →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const ADMIN_PIN = '0570';
+const SUPABASE_FN = '/.netlify/functions/supabase';
+
+const SUB_NAMES = {RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
+const SUB_COLORS = {RC:'sub-RC',CO:'sub-CO',TB:'sub-TB',CT:'sub-CT',TE:'sub-TE',CW:'sub-CW'};
+const STAGE_ORDER = ['0.3','0.9','1','1.1','1.2','1.5','1.6','1.7','1.8','1.9','2','2.1','2.2','2.3','3','3.1','3.2','3.3','4','4.9','5','5.9','6','7','8','9','9.5'];
+const STAGE_DESC = {'0.3':'Released/Permit','1.1':'Released','1.2':'Lot Graded','1.5':'Slab Formed','1.6':'Plumbing UG','1.7':'Plumbing Insp','1.8':'Slab Prepped','1.9':'Slab Insp','2':'Slab Poured','2.1':'Framing Walls','2.2':'Rafters','2.3':'Roof Deck','3':'Framing Complete','3.1':'Plumbing Rough','3.2':'HVAC Rough','3.3':'Electrical Rough','4':'Mechanicals','4.9':'MEP Inspection','5':'Drywall','5.9':'Utility Hold','6':'Trim & Cabinets','7':'Mech Trim & Paint','8':'Flooring','9':'Trade Punch','9.5':'Construction Complete'};
+
+let lots = [];
+let builders = [];
+
+// ── AUTH ──
+function tryLogin() {
+  const pin = document.getElementById('pin-input').value;
+  if (pin === ADMIN_PIN) {
+    document.getElementById('login-wrap').style.display = 'none';
+    document.getElementById('app').classList.add('open');
+    loadAll();
+  } else {
+    document.getElementById('login-error').textContent = 'Incorrect PIN';
+    document.getElementById('pin-input').value = '';
+    setTimeout(()=>document.getElementById('login-error').textContent='', 2000);
+  }
+}
+document.getElementById('pin-input').addEventListener('keydown', e => { if(e.key==='Enter') tryLogin(); });
+
+function logout() {
+  document.getElementById('app').classList.remove('open');
+  document.getElementById('login-wrap').style.display = 'flex';
+  document.getElementById('pin-input').value = '';
+}
+
+// ── API ──
+async function sbCall(action, payload) {
+  const resp = await fetch(SUPABASE_FN, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action, payload})
+  });
+  const data = await resp.json();
+  if (data && data.error) { alert('Error: ' + data.error); return null; }
+  return data;
+}
+
+// ── DATA ──
+async function loadAll() {
+  await Promise.all([loadLots(), loadBuilders()]);
+  renderStats();
+  renderLotsTable();
+  renderBuildersTable();
+  renderSubdivisionsTable();
+  document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+async function loadLots() {
+  const data = await sbCall('getLots', {});
+  if (data) lots = data;
+}
+
+async function loadBuilders() {
+  const data = await sbCall('getBuilders', {});
+  if (data) builders = data;
+}
+
+async function refreshData() {
+  document.getElementById('last-updated').textContent = 'Refreshing…';
+  await loadAll();
+}
+
+// ── HELPERS ──
+function calcWorkingDaysSince(dateStr) {
+  if (!dateStr) return null;
+  const start = new Date(dateStr + 'T12:00:00');
+  const today = new Date();
+  let days = 0, cur = new Date(start);
+  while (cur <= today) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) days++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+}
+
+function calcHealthDelta(lot) {
+  if (!lot.start_date) return null;
+  const elapsed = calcWorkingDaysSince(lot.start_date);
+  const stageIdx = STAGE_ORDER.indexOf(lot.stage);
+  // expectedDay = how far along the schedule the lot SHOULD be based on stage
+  const expectedDay = stageIdx >= 0 ? Math.round((stageIdx / (STAGE_ORDER.length-1)) * 99) : 0;
+  // delta: negative = behind (more days elapsed than stage warrants)
+  //        positive = ahead (fewer days elapsed than stage warrants)
+  return expectedDay - elapsed;
+}
+
+function fmtDate(str) {
+  if (!str) return '—';
+  const d = new Date(str + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+}
+
+function uuid() {
+  return 'xxxxxxxx'.replace(/x/g, ()=>(Math.random()*16|0).toString(16));
+}
+
+// ── STATS ──
+function renderStats() {
+  document.getElementById('stat-total').textContent = lots.length;
+  document.getElementById('stat-active').textContent = lots.filter(l=>l.stage!=='9.5').length;
+  document.getElementById('stat-updated').textContent = lots.filter(l=>l.updated_this_week).length;
+  const behind = lots.filter(l=>{ const d=calcHealthDelta(l); return d!==null && d<-3; }).length;
+  document.getElementById('stat-behind').textContent = behind;
+  document.getElementById('stat-complete').textContent = lots.filter(l=>l.stage==='9.5').length;
+}
+
+// ── LOTS TABLE ──
+function renderLotsTable() {
+  const filterSub = document.getElementById('filter-sub').value;
+  const filterBuilder = document.getElementById('filter-builder').value;
+  const search = document.getElementById('lot-search').value.toLowerCase();
+
+  const filterUpdate = document.getElementById('filter-update').value;
+  const filterClose = document.getElementById('filter-close').value;
+  let filtered = lots.filter(l => {
+    if (filterSub && l.subdivision !== filterSub) return false;
+    if (filterBuilder && l.assigned_builder !== filterBuilder) return false;
+    if (filterUpdate === 'pending' && l.updated_this_week) return false;
+    if (filterUpdate === 'updated' && !l.updated_this_week) return false;
+    if (filterClose === 'active' && l.is_closed) return false;
+    if (filterClose === 'scheduled' && (!l.scheduled_close_date || l.is_closed)) return false;
+    if (filterClose === 'ready' && (l.scheduled_close_date || parseFloat(l.stage) < 6 || l.is_closed)) return false;
+    if (filterClose === 'notyet' && (parseFloat(l.stage) >= 6 || l.is_closed)) return false;
+    if (filterClose === 'closed' && !l.is_closed) return false;
+    if (search && !l.number.toLowerCase().includes(search) && !l.address.toLowerCase().includes(search) && !l.plan.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  // Sort by subdivision then lot number
+  filtered.sort((a,b) => {
+    if (a.subdivision !== b.subdivision) return a.subdivision.localeCompare(b.subdivision);
+    return a.number.localeCompare(b.number, undefined, {numeric:true});
+  });
+
+  if (!filtered.length) {
+    document.getElementById('lots-table-body').innerHTML = '<div class="empty-state"><div class="icon">🏗</div><p>No lots match your filters</p></div>';
+    return;
+  }
+
+  const rows = filtered.map(lot => {
+    const delta = calcHealthDelta(lot);
+    let healthBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No start date</span>';
+    if (delta !== null) {
+      if (delta > 3) healthBadge = `<span class="badge badge-health-ahead">+${delta}d ahead</span>`;
+      else if (delta < -3) healthBadge = `<span class="badge badge-health-behind" style="cursor:pointer" onclick="openDelayLog('${lot.id}','${lot.number} — ${lot.subdivision}')" title="Click to view delay log">${Math.abs(delta)}d behind ↗</span>`;
+      else healthBadge = `<span class="badge badge-health-ok">On track</span>`;
+    }
+    const lastUpdated = lot.updated_at ? new Date(lot.updated_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + new Date(lot.updated_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
+    const updBadge = lot.updated_this_week 
+      ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span><div style="font-size:11px;color:var(--muted);margin-top:2px">' + lastUpdated + '</div>'
+      : '<span class="badge" style="background:#fee2e2;color:var(--red);font-weight:700">⚠️ Not Updated</span>';
+
+    // Closing status — 4 states
+    const hasCloseDate = !!lot.scheduled_close_date;
+    const closeDate = hasCloseDate ? fmtDate(lot.scheduled_close_date) : '—';
+    let closeBadge;
+    if (lot.is_closed) {
+      const closedOn = lot.closed_date ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.closed_date) + '</div>' : '';
+      closeBadge = '<span class="badge" style="background:#4C4C4C;color:#fff;font-weight:700">🏠 Closed</span>' + closedOn;
+    } else if (hasCloseDate) {
+      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">📅 Scheduled</span>';
+    } else if (parseFloat(lot.stage) >= 6) {
+      closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready to Schedule</span>';
+    } else {
+      closeBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">Not Yet</span>';
+    }
+
+    return `<tr>
+      <td><span class="badge-sub ${SUB_COLORS[lot.subdivision]||''}">${lot.subdivision}</span></td>
+      <td><strong>${lot.number}</strong>${lot.plan?`<div style="font-size:11px;color:var(--muted)">${lot.plan}</div>`:''}</td>
+      <td>${lot.address||'<span style="color:var(--muted)">—</span>'}</td>
+      <td><span class="badge badge-stage">${lot.stage}</span><div style="font-size:11px;color:var(--muted);margin-top:2px">${STAGE_DESC[lot.stage]||''}</div></td>
+      <td>${lot.assigned_builder||'<span style="color:var(--muted)">Unassigned</span>'}</td>
+      <td>${fmtDate(lot.start_date)}</td>
+      <td>${healthBadge}</td>
+      <td>${closeBadge}</td>
+      <td>${closeDate}</td>
+      <td>${updBadge}</td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${lot.id}')">Edit</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('lots-table-body').innerHTML = `<table>
+    <thead><tr>
+      <th>SD</th><th>Lot / Plan</th><th>Address</th><th>Stage</th>
+      <th>Builder</th><th>Start Date</th><th>Health</th><th>Close Status</th><th>Close Date</th><th>Update Status</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ── BUILDERS TABLE ──
+function renderBuildersTable() {
+  if (!builders.length) {
+    document.getElementById('builders-table-body').innerHTML = '<div class="empty-state"><div class="icon">👷</div><p>No builders found</p></div>';
+    return;
+  }
+  const rows = builders.map(b => {
+    const subs = (b.subdivisions||[]).map(s=>`<span class="badge-sub ${SUB_COLORS[s]||''}" style="margin-right:3px">${s}</span>`).join('') || '<span style="color:var(--muted)">None</span>';
+    const pinStatus = b.temp_pin 
+      ? '<span class="badge" style="background:#fef9e7;color:#e67e22">Temp PIN set</span>'
+      : b.pin_hash 
+        ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">PIN set</span>'
+        : '<span class="badge" style="background:#fee2e2;color:var(--red)">No PIN</span>';
+    const lotCount = lots.filter(l=>l.assigned_builder===b.name).length;
+    const deleteBtn = b.is_admin ? '' : `<button class="btn btn-sm" style="background:#fee2e2;color:var(--red);margin-left:6px" onclick="deleteBuilder('${b.name}')">Delete</button>`;
+    return `<tr>
+      <td><strong>${b.name}</strong>${b.is_admin?'<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-left:6px">Admin</span>':''}</td>
+      <td>${subs}</td>
+      <td>${lotCount} lot${lotCount!==1?'s':''}</td>
+      <td>${pinStatus}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-secondary btn-sm" onclick="openSetPinModal('${b.name}')">Set PIN</button>
+        ${deleteBtn}
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('builders-table-body').innerHTML = `<table>
+    <thead><tr><th>Name</th><th>Subdivisions</th><th>Lots</th><th>PIN Status</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+
+function renderSubdivisionsTable() {
+  const subs = Object.keys(SUB_NAMES);
+  const rows = subs.map(code => {
+    const subLots = lots.filter(l=>l.subdivision===code);
+    const active = subLots.filter(l=>l.stage!=='9.5').length;
+    const complete = subLots.filter(l=>l.stage==='9.5').length;
+    const updated = subLots.filter(l=>l.updated_this_week).length;
+    const pending = active - updated;
+    const assignedBuilders = builders
+      .filter(b => (b.subdivisions||[]).includes(code) && !b.is_admin)
+      .map(b=>b.name).join(', ') || '—';
+    const updateStatus = pending > 0
+      ? `<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ ${pending} pending</span>`
+      : active > 0
+        ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ All updated</span>`
+        : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">No active lots</span>`;
+    const closeScheduled = subLots.filter(l=>l.scheduled_close_date).length;
+    const readyToSchedule = subLots.filter(l=>parseFloat(l.stage)>=6 && !l.scheduled_close_date).length;
+    const closeStatus = readyToSchedule > 0
+      ? `<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ ${readyToSchedule} ready to schedule</span>`
+      : closeScheduled > 0
+        ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ ${closeScheduled} scheduled</span>`
+        : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">—</span>`;
+    return `<tr>
+      <td><span class="badge-sub ${SUB_COLORS[code]||''}">${code}</span></td>
+      <td><strong>${SUB_NAMES[code]||code}</strong></td>
+      <td>${subLots.length}</td>
+      <td>${active}</td>
+      <td>${complete}</td>
+      <td>${updateStatus}</td>
+      <td>${closeStatus}</td>
+      <td>${assignedBuilders}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('subdivisions-table-body').innerHTML = `<table>
+    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Complete</th><th>Update Status</th><th>Close Status</th><th>Builders</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function openAddLotModal() {
+  document.getElementById('new-num').value = '';
+  document.getElementById('new-addr').value = '';
+  document.getElementById('new-plan').value = '';
+  document.getElementById('new-sub').value = '';
+  document.getElementById('new-builder').value = '';
+  document.getElementById('new-start').value = '';
+  document.getElementById('new-stage').value = '1.1';
+  document.getElementById('modal-add-lot').classList.add('open');
+}
+
+async function submitAddLot() {
+  const sub = document.getElementById('new-sub').value;
+  const num = document.getElementById('new-num').value.trim();
+  const addr = document.getElementById('new-addr').value.trim();
+  const plan = document.getElementById('new-plan').value.trim();
+  const builder = document.getElementById('new-builder').value;
+  const start = document.getElementById('new-start').value;
+  const stage = document.getElementById('new-stage').value;
+  if (!sub || !num || !start) { alert('Subdivision, lot number, and start date are required'); return; }
+  const newLot = {
+    id: sub.toLowerCase() + num.replace(/\D/g,'') + '_' + Date.now(),
+    number: num, address: addr, plan: plan, subdivision: sub,
+    community: sub, stage: stage, completed_tasks: [],
+    task_overrides: {}, utilities: {gas:false,power:false,water:false},
+    start_date: start, updated_this_week: false, assigned_builder: builder,
+    scheduled_close_date: null, scheduled_close_date_note: '', scheduled_close_date_locked_at: null
+  };
+  const result = await sbCall('upsertLot', newLot);
+  if (result) {
+    closeModal('modal-add-lot');
+    await loadLots();
+    renderStats();
+    renderLotsTable();
+    renderSubdivisionsTable();
+  }
+}
+
+function openEditLotModal(id) {
+  const lot = lots.find(l=>l.id===id);
+  if (!lot) return;
+  document.getElementById('edit-lot-id').value = id;
+  document.getElementById('edit-lot-sub').textContent = lot.subdivision + ' — ' + lot.number + (lot.plan?' ('+lot.plan+')':'');
+  document.getElementById('edit-addr').value = lot.address || '';
+  document.getElementById('edit-plan').value = lot.plan || '';
+  document.getElementById('edit-builder').value = lot.assigned_builder || '';
+  document.getElementById('edit-start').value = lot.start_date || '';
+  document.getElementById('edit-stage').value = lot.stage || '';
+  if (document.getElementById('edit-close-date')) {
+    document.getElementById('edit-close-date').value = lot.scheduled_close_date || '';
+  }
+  document.getElementById('modal-edit-lot').classList.add('open');
+}
+
+async function submitEditLot() {
+  const id = document.getElementById('edit-lot-id').value;
+  const closeDateVal = document.getElementById('edit-close-date') ? document.getElementById('edit-close-date').value || null : undefined;
+  const updates = {
+    id: id,
+    address: document.getElementById('edit-addr').value.trim(),
+    plan: document.getElementById('edit-plan').value.trim(),
+    assigned_builder: document.getElementById('edit-builder').value,
+    start_date: document.getElementById('edit-start').value || null,
+    stage: document.getElementById('edit-stage').value.trim(),
+  };
+  // If admin sets a close date, it overwrites builder's locked date
+  if (closeDateVal !== undefined) {
+    updates.scheduled_close_date = closeDateVal;
+    updates.scheduled_close_date_locked_at = closeDateVal ? new Date().toISOString() : null;
+  }
+  const result = await sbCall('updateLot', updates);
+  if (result !== null) {
+    closeModal('modal-edit-lot');
+    await loadLots();
+    renderStats();
+    renderLotsTable();
+  }
+}
+
+function openSetPinModal(name) {
+  document.getElementById('pin-builder-name').value = name;
+  document.getElementById('pin-modal-sub').textContent = 'Set PIN for ' + name;
+  document.getElementById('new-pin').value = '';
+  document.getElementById('pin-is-temp').value = 'temp';
+  document.getElementById('modal-set-pin').classList.add('open');
+}
+
+async function submitSetPin() {
+  const name = document.getElementById('pin-builder-name').value;
+  const pin = document.getElementById('new-pin').value;
+  const isTemp = document.getElementById('pin-is-temp').value === 'temp';
+  if (!pin || pin.length !== 4 || !/^\d+$/.test(pin)) { alert('PIN must be exactly 4 digits'); return; }
+  const payload = { name };
+  if (isTemp) { payload.temp_pin = pin; payload.pin_hash = null; }
+  else { payload.pin_hash = pin; payload.temp_pin = null; }
+  const result = await sbCall('updateBuilderPin', payload);
+  if (result !== null) {
+    closeModal('modal-set-pin');
+    await loadBuilders();
+    renderBuildersTable();
+    alert((isTemp ? 'Temporary PIN' : 'PIN') + ' set for ' + name);
+  }
+}
+
+// Builder subdivision map
+const BUILDER_SUBS = {
+  'Matt Hines': ['CO','TB','TE'],
+  'Brendon Connor': ['RC','CW'],
+  'Dennis Duncan': ['CT','CW'],
+};
+
+async function autoAssignBuilders() {
+  // For CW (shared), Dennis gets primary assignment
+  // For each lot, assign builder based on subdivision
+  const assignments = {};
+  lots.forEach(l => {
+    if (l.assigned_builder) return; // skip already assigned
+    for (const [builder, subs] of Object.entries(BUILDER_SUBS)) {
+      if (subs.includes(l.subdivision)) {
+        // CW: if already assigned to Brendon, also give Dennis — use first match
+        if (!assignments[l.id]) assignments[l.id] = builder;
+      }
+    }
+  });
+  const unassigned = Object.keys(assignments);
+  if (!unassigned.length) { alert('All lots are already assigned.'); return; }
+  if (!confirm('Auto-assign ' + unassigned.length + ' unassigned lots to their default builders based on subdivision?')) return;
+  // Update each lot
+  let done = 0;
+  for (const [lotId, builder] of Object.entries(assignments)) {
+    await sbCall('updateLot', {id: lotId, assigned_builder: builder});
+    done++;
+  }
+  await loadLots();
+  renderStats();
+  renderLotsTable();
+  alert('Done — ' + done + ' lots assigned.');
+}
+
+async function deleteBuilder(name) {
+  if (!confirm('Delete builder ' + name + '? This cannot be undone. Their lots will remain but will be unassigned.')) return;
+  const result = await sbCall('deleteBuilder', {name});
+  if (result !== null) {
+    await loadBuilders();
+    renderBuildersTable();
+    alert(name + ' has been deleted.');
+  }
+}
+
+function openAddBuilderModal() {
+  document.getElementById('builder-name').value = '';
+  document.getElementById('builder-pin').value = '';
+  document.querySelectorAll('#modal-add-builder input[type=checkbox]').forEach(cb=>cb.checked=false);
+  document.getElementById('modal-add-builder').classList.add('open');
+}
+
+async function submitAddBuilder() {
+  const name = document.getElementById('builder-name').value.trim();
+  const pin = document.getElementById('builder-pin').value;
+  const subs = [...document.querySelectorAll('#modal-add-builder input[type=checkbox]:checked')].map(cb=>cb.value);
+  if (!name) { alert('Name is required'); return; }
+  if (!pin || pin.length !== 4) { alert('4-digit PIN is required'); return; }
+  const result = await sbCall('upsertBuilderRecord', {
+    name, subdivisions: subs, pin_hash: null, temp_pin: pin, is_admin: false
+  });
+  if (result !== null) {
+    closeModal('modal-add-builder');
+    await loadBuilders();
+    renderBuildersTable();
+  }
+}
+
+// ── NAVIGATION ──
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('section-'+name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ── ADD SUBDIVISION ──
+function openAddSubModal() {
+  document.getElementById('sub-code').value = '';
+  document.getElementById('sub-name').value = '';
+  document.getElementById('sub-color').value = 'blue';
+  // Populate builder list dynamically
+  const checksContainer = document.getElementById('sub-builder-checks');
+  checksContainer.innerHTML = builders.filter(b=>!b.is_admin).map(b=>
+    `<label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer">
+      <input type="checkbox" value="${b.name}"> ${b.name}
+    </label>`
+  ).join('');
+  document.getElementById('modal-add-sub').classList.add('open');
+}
+
+async function submitAddSubdivision() {
+  const code = document.getElementById('sub-code').value.trim().toUpperCase();
+  const name = document.getElementById('sub-name').value.trim();
+  if (!code || !name) { alert('Code and name are required'); return; }
+  if (!/^[A-Z]{2,4}$/.test(code)) { alert('Code must be 2-4 letters only'); return; }
+
+  const colorMap = {
+    blue:['#D6E4F7','#1A5276'], green:['#D5F5E3','#1E8449'],
+    gold:['#FEF9E7','#7D6608'], purple:['#F5EEF8','#6C3483'],
+    red:['#FDEDEC','#922B21'], teal:['#EBF5FB','#0E6655']
+  };
+  const [bg, color] = colorMap[document.getElementById('sub-color').value];
+
+  // Update builders that are assigned to this subdivision
+  const assignedBuilders = [...document.querySelectorAll('#sub-builder-checks input:checked')].map(cb=>cb.value);
+  
+  // Add sub to each assigned builder's subdivisions array
+  for (const bname of assignedBuilders) {
+    const builder = builders.find(b=>b.name===bname);
+    if (builder) {
+      const newSubs = [...new Set([...(builder.subdivisions||[]), code])];
+      await sbCall('updateBuilderPin', {name: bname, subdivisions: newSubs});
+    }
+  }
+
+  // Update local SUBDIVISIONS config — note this only persists in memory
+  // until next deploy; the field app's SUBDIVISIONS array needs manual update
+  SUB_NAMES[code] = name;
+  SUB_COLORS[code] = 'sub-' + code;
+
+  closeModal('modal-add-sub');
+  await loadBuilders();
+  renderBuildersTable();
+  renderSubdivisionsTable();
+  alert('Subdivision ' + code + ' — ' + name + ' added. Note: you will also need to add this to the SUBDIVISIONS array in the field app code for it to appear for builders.');
+}
+
+// ── DELAY LOG ──
+let currentDelayLotId = null;
+let currentDelays = [];
+
+async function openDelayLog(lotId, lotLabel) {
+  currentDelayLotId = lotId;
+  document.getElementById('delay-log-title').textContent = lotLabel;
+  document.getElementById('delay-log-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">Loading…</div>';
+  document.getElementById('modal-delay-log').classList.add('open');
+
+  const delays = await sbCall('getDelays', {lotId});
+  currentDelays = delays || [];
+
+  if (!currentDelays.length) {
+    document.getElementById('delay-log-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">No delay events recorded for this lot.</div>';
+    return;
+  }
+
+  document.getElementById('delay-log-list').innerHTML = currentDelays.map((d,i) => {
+    const date = new Date(d.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return `<div style="border:1px solid var(--rule);border-radius:10px;overflow:hidden">
+      <div style="padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;background:#f9fafb" onclick="toggleDelayNote(${i})">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--ink)">${d.task_name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${date} · ${d.builder_name} · <strong style="color:var(--red)">${d.reason}</strong></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted)" id="delay-chevron-${i}">▼</div>
+      </div>
+      <div id="delay-note-${i}" style="display:none;padding:10px 14px;background:#fff;border-top:1px solid var(--rule);font-size:13px;color:var(--ink)">
+        ${d.note || '<span style="color:var(--muted);font-style:italic">No note provided</span>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleDelayNote(i) {
+  const noteEl = document.getElementById('delay-note-'+i);
+  const chevEl = document.getElementById('delay-chevron-'+i);
+  const isOpen = noteEl.style.display !== 'none';
+  noteEl.style.display = isOpen ? 'none' : 'block';
+  chevEl.textContent = isOpen ? '▼' : '▲';
+}
+
+function exportDelayLog() {
+  if (!currentDelays.length) return;
+  const headers = ['Date','Lot','Subdivision','Builder','Task','Reason','Note'];
+  const rows = currentDelays.map(function(d) {
+    return [
+      new Date(d.created_at).toLocaleDateString(),
+      d.lot_number, d.subdivision, d.builder_name,
+      d.task_name, d.reason, d.note||''
+    ];
+  });
+  const csvRows = [headers].concat(rows).map(function(r) {
+    return r.map(function(c) {
+      return String(c).indexOf(',') > -1 || String(c).indexOf('"') > -1
+        ? '"' + String(c).replace(/"/g, '""') + '"'
+        : String(c);
+    }).join(',');
+  });
+  const csv = csvRows.join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'delay_log_' + currentDelayLotId + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+
+// ── EXPORT TO EXCEL ──
+function exportToExcel() {
+  const filterSub = document.getElementById('filter-sub').value;
+  // Default export excludes closed lots — they're archived
+  let filtered = filterSub ? lots.filter(l=>l.subdivision===filterSub && !l.is_closed) : lots.filter(l=>!l.is_closed);
+  filtered.sort((a,b)=>{
+    if(a.subdivision!==b.subdivision) return a.subdivision.localeCompare(b.subdivision);
+    return a.number.localeCompare(b.number,undefined,{numeric:true});
+  });
+
+  const headers = ['Subdivision','Lot Number','Address','Plan','Builder','Stage','Stage Description','Start Date','Updated This Week','Schedule Health'];
+  const rows = filtered.map(l=>{
+    const delta = calcHealthDelta(l);
+    let health = 'No start date';
+    if (delta !== null) health = delta > 3 ? '+'+delta+'d ahead' : delta < -3 ? Math.abs(delta)+'d behind' : 'On track';
+    return [
+      l.subdivision, l.number, l.address||'', l.plan||'',
+      l.assigned_builder||'', l.stage, STAGE_DESC[l.stage]||'',
+      l.start_date||'', l.updated_this_week?'Yes':'No', health
+    ];
+  });
+
+  // Build CSV
+  const csvRows = [headers, ...rows].map(r => r.map(cell => '"'+String(cell).replace(/"/g,'""')+'"').join(','));
+  const csv = csvRows.join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'Ashland_Stage_Report_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
