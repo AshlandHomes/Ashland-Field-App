@@ -324,6 +324,7 @@ tr:hover td{background:#f9fafb}
     </div>
     <div class="field"><label>Construction Start Date</label><input id="edit-start" type="date"></div>
     <div class="field"><label>Stage</label><input id="edit-stage" type="text" placeholder="e.g. 4.9"></div>
+    <div class="field"><label>Close Date <span style="font-size:11px;color:var(--muted)">(Admin override — final)</span></label><input id="edit-close-date" type="date"></div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-edit-lot')">Cancel</button>
       <button class="btn btn-primary" onclick="submitEditLot()">Save Changes →</button>
@@ -740,6 +741,9 @@ function openEditLotModal(id) {
   document.getElementById('edit-builder').value = lot.assigned_builder || '';
   document.getElementById('edit-start').value = lot.start_date || '';
   document.getElementById('edit-stage').value = lot.stage || '';
+  if (document.getElementById('edit-close-date')) {
+    document.getElementById('edit-close-date').value = lot.scheduled_close_date || '';
+  }
   document.getElementById('modal-edit-lot').classList.add('open');
 }
 
