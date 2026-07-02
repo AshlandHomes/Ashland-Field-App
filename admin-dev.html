@@ -1023,6 +1023,44 @@ function exportToExcel() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// ── DELETE LOT ──
+var deleteLotTarget = {id: null, number: null, subdivision: null};
+
+function openDeleteLotModal(id, number, subdivision) {
+  deleteLotTarget = {id: id, number: number, subdivision: subdivision};
+  document.getElementById('delete-lot-desc').textContent =
+    'This will permanently delete ' + subdivision + ' ' + number + ' and all its data. This cannot be undone.';
+  document.getElementById('delete-lot-pin').value = '';
+  document.getElementById('delete-lot-error').textContent = '';
+  document.getElementById('modal-delete-lot').classList.add('open');
+}
+
+function closeDeleteLotModal() {
+  document.getElementById('modal-delete-lot').classList.remove('open');
+  deleteLotTarget = {id: null, number: null, subdivision: null};
+}
+
+async function confirmDeleteLot() {
+  var pin = document.getElementById('delete-lot-pin').value;
+  var errEl = document.getElementById('delete-lot-error');
+  if (pin !== ADMIN_PIN) {
+    errEl.textContent = 'Incorrect PIN';
+    document.getElementById('delete-lot-pin').value = '';
+    return;
+  }
+  errEl.textContent = 'Deleting...';
+  var result = await sbCall('deleteLot', {id: deleteLotTarget.id});
+  if (result !== null) {
+    closeDeleteLotModal();
+    await loadLots();
+    renderStats();
+    renderLotsTable();
+    alert(deleteLotTarget.subdivision + ' ' + deleteLotTarget.number + ' deleted successfully');
+  } else {
+    errEl.textContent = 'Delete failed - try again';
+  }
+}
 </script>
 <!-- DELETE LOT MODAL -->
 <div class="modal-overlay" id="modal-delete-lot">
