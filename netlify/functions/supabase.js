@@ -164,10 +164,9 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
-      case 'ping': {
-        // Test connection
+     case 'ping': {
         const r = await supabaseRequest('GET', 'field_ops_lots?select=count&limit=1');
-        return { statusCode: 200, body: JSON.stringify({ ok: true, status: r.status }) };
+        return { statusCode: 200, body: JSON.stringify({ ok: true, status: r.status, error: r.error || null, url: SUPABASE_URL }) };
       }
 case 'keycheck': {
         return { statusCode: 200, body: JSON.stringify({
