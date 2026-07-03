@@ -169,7 +169,13 @@ exports.handler = async function(event) {
         const r = await supabaseRequest('GET', 'field_ops_lots?select=count&limit=1');
         return { statusCode: 200, body: JSON.stringify({ ok: true, status: r.status }) };
       }
-
+case 'keycheck': {
+        return { statusCode: 200, body: JSON.stringify({
+          keyStart: (SUPABASE_KEY || 'NONE').slice(0, 12),
+          hasServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+          hasAnon: !!process.env.SUPABASE_ANON_KEY
+        }) };
+      }
       case 'deleteBuilder': {
         await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
