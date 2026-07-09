@@ -162,6 +162,7 @@ tr:hover td{background:#f9fafb}
     <div class="nav-tab active" onclick="showSection('lots')">🏗 Lots</div>
     <div class="nav-tab" onclick="showSection('builders')">👷 Builders</div>
     <div class="nav-tab" onclick="showSection('subdivisions')">🏘 Subdivisions</div>
+    <div class="nav-tab" onclick="showSection('schedule')">📅 Schedule Lots</div>
   </div>
 
   <div class="content">
@@ -243,6 +244,19 @@ tr:hover td{background:#f9fafb}
         </div>
         <div id="subdivisions-table-body">
           <div class="loading">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCHEDULE LOTS SECTION (engine) -->
+    <div class="section" id="section-schedule">
+      <div class="table-wrap">
+        <div class="table-header">
+          <h2>Schedule Lots (Engine)</h2>
+          <button class="btn btn-primary" onclick="openStampModal()">+ Stamp New Lot</button>
+        </div>
+        <div id="schedule-table-body">
+          <div class="loading">Loading schedule lots…</div>
         </div>
       </div>
     </div>
@@ -417,6 +431,22 @@ tr:hover td{background:#f9fafb}
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-add-builder')">Cancel</button>
       <button class="btn btn-primary" onclick="submitAddBuilder()">Add Builder →</button>
+    </div>
+  </div>
+</div>
+
+<!-- STAMP SCHEDULE LOT MODAL -->
+<div class="modal-overlay" id="modal-stamp">
+  <div class="modal">
+    <h2>Stamp New Schedule Lot</h2>
+    <div class="modal-sub">Copies the full schedule from a template into a new lot. Start date is set afterward.</div>
+    <div class="field"><label>Template</label><select id="stamp-template"></select></div>
+    <div class="field"><label>Lot Number</label><input id="stamp-num" type="text" placeholder="e.g. Lot 14"></div>
+    <div class="field"><label>Street Address</label><input id="stamp-addr" type="text" placeholder="e.g. 124 Maple Ridge Way"></div>
+    <div class="field"><label>Community</label><input id="stamp-comm" type="text" placeholder="e.g. Aberdeen"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-stamp')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitStamp()">Stamp Lot →</button>
     </div>
   </div>
 </div>
@@ -932,6 +962,7 @@ function showSection(name) {
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('section-'+name).classList.add('active');
   event.target.classList.add('active');
+  if (name === 'schedule' && typeof loadScheduleLots === 'function') loadScheduleLots();
 }
 
 // ── ADD SUBDIVISION ──
@@ -1199,6 +1230,84 @@ async function confirmDeleteLot() {
     alert(deleteLotTarget.subdivision + ' ' + deleteLotTarget.number + ' deleted successfully');
   } else {
     errEl.textContent = 'Delete failed - try again';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// SCHEDULE LOTS (engine) — Step 2b
+// ══════════════════════════════════════════════════════
+let scheduleLots = [];
+let scheduleTemplates = [];
+
+async function loadScheduleLots() {
+  document.getElementById('schedule-table-body').innerHTML = '<div class="loading">Loading schedule lots…</div>';
+  const [lotsData, tplData] = await Promise.all([
+    sbCall('getScheduleLots', {}),
+    sbCall('getTemplates', {})
+  ]);
+  scheduleLots = lotsData || [];
+  scheduleTemplates = tplData || [];
+  renderScheduleLots();
+}
+
+function renderScheduleLots() {
+  if (!scheduleLots.length) {
+    document.getElementById('schedule-table-body').innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>No schedule lots yet. Stamp one from a template to begin.</p></div>';
+    return;
+  }
+  const rows = scheduleLots.map(l => {
+    const tpl = scheduleTemplates.find(t => t.id === l.template_id);
+    const created = l.created_at ? new Date(l.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+    const start = l.construction_start_date ? fmtDate(l.construction_start_date) : '<span style="color:var(--muted)">Not set</span>';
+    return `<tr>
+      <td><strong>${l.lot_number}</strong></td>
+      <td>${l.community || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${tpl ? tpl.name : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${start}</td>
+      <td>${created}</td>
+      <td>
+        <button class="btn btn-sm" onclick="deleteScheduleLot('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+  document.getElementById('schedule-table-body').innerHTML = `<table>
+    <thead><tr><th>Lot</th><th>Community</th><th>Template</th><th>Start Date</th><th>Created</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function openStampModal() {
+  const sel = document.getElementById('stamp-template');
+  if (!scheduleTemplates.length) {
+    alert('No templates loaded yet. Give it a moment and reopen the Schedule Lots tab.');
+    return;
+  }
+  sel.innerHTML = scheduleTemplates.map(t => `<option value="${t.id}">${t.name}${t.total_days?' ('+t.total_days+' days)':''}</option>`).join('');
+  document.getElementById('stamp-num').value = '';
+  document.getElementById('stamp-addr').value = '';
+  document.getElementById('stamp-comm').value = '';
+  document.getElementById('modal-stamp').classList.add('open');
+}
+
+async function submitStamp() {
+  const template_id = document.getElementById('stamp-template').value;
+  const lot_number = document.getElementById('stamp-num').value.trim();
+  const address = document.getElementById('stamp-addr').value.trim();
+  const community = document.getElementById('stamp-comm').value.trim();
+  if (!template_id || !lot_number) { alert('Template and lot number are required'); return; }
+  const result = await sbCall('stampLot', { template_id, lot_number, address, community });
+  if (result && result.success) {
+    closeModal('modal-stamp');
+    alert('Stamped ' + lot_number + ' — ' + result.task_count + ' tasks copied, ' + result.gate_count + ' gate(s).');
+    await loadScheduleLots();
+  }
+}
+
+async function deleteScheduleLot(id, num) {
+  if (!confirm('Delete schedule lot ' + num + '? This removes its full task copy.')) return;
+  const result = await sbCall('deleteScheduleLot', { id });
+  if (result && result.success) {
+    await loadScheduleLots();
   }
 }
 </script>
