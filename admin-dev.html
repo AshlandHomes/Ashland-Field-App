@@ -435,6 +435,20 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<!-- SET CONSTRUCTION START MODAL -->
+<div class="modal-overlay" id="modal-schedule-start">
+  <div class="modal" style="max-width:400px">
+    <h2>Set Construction Start</h2>
+    <div class="modal-sub" id="sched-start-sub"></div>
+    <input type="hidden" id="sched-start-id">
+    <div class="field"><label>Construction Start Date</label><input type="date" id="sched-start-date"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-schedule-start')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitScheduleStart()">Save →</button>
+    </div>
+  </div>
+</div>
+
 <!-- STAMP SCHEDULE LOT MODAL -->
 <div class="modal-overlay" id="modal-stamp">
   <div class="modal">
@@ -1266,7 +1280,8 @@ function renderScheduleLots() {
       <td>${start}</td>
       <td>${created}</td>
       <td>
-        <button class="btn btn-sm" onclick="deleteScheduleLot('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5">Delete</button>
+        <button class="btn btn-sm" onclick="openScheduleStart('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc">Set Start</button>
+        <button class="btn btn-sm" onclick="deleteScheduleLot('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
   }).join('');
@@ -1307,6 +1322,24 @@ async function deleteScheduleLot(id, num) {
   if (!confirm('Delete schedule lot ' + num + '? This removes its full task copy.')) return;
   const result = await sbCall('deleteScheduleLot', { id });
   if (result && result.success) {
+    await loadScheduleLots();
+  }
+}
+
+function openScheduleStart(id, num) {
+  document.getElementById('sched-start-id').value = id;
+  document.getElementById('sched-start-sub').textContent = 'Set the construction start date for ' + num;
+  const lot = scheduleLots.find(l => l.id === id);
+  document.getElementById('sched-start-date').value = (lot && lot.construction_start_date) || '';
+  document.getElementById('modal-schedule-start').classList.add('open');
+}
+
+async function submitScheduleStart() {
+  const id = document.getElementById('sched-start-id').value;
+  const dateVal = document.getElementById('sched-start-date').value || null;
+  const result = await sbCall('updateScheduleLot', { id, construction_start_date: dateVal });
+  if (result !== null) {
+    closeModal('modal-schedule-start');
     await loadScheduleLots();
   }
 }
