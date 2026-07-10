@@ -163,6 +163,7 @@ tr:hover td{background:#f9fafb}
     <div class="nav-tab" onclick="showSection('builders')">👷 Builders</div>
     <div class="nav-tab" onclick="showSection('subdivisions')">🏘 Subdivisions</div>
     <div class="nav-tab" onclick="showSection('schedule')">📅 Schedule Lots</div>
+    <div class="nav-tab" onclick="showSection('flags')">🚩 Flags</div>
   </div>
 
   <div class="content">
@@ -261,6 +262,24 @@ tr:hover td{background:#f9fafb}
         <div id="schedule-table-body">
           <div class="loading">Loading schedule lots…</div>
         </div>
+      </div>
+    </div>
+
+    <!-- FLAGS SECTION -->
+    <div class="section" id="section-flags">
+      <div class="table-wrap">
+        <div class="table-header">
+          <h2>Flagged Notes</h2>
+          <div class="table-actions">
+            <select class="filter-select" id="flag-filter" onchange="renderFlags()">
+              <option value="all">All Flags</option>
+              <option value="red">🔴 Management only</option>
+              <option value="yellow">🟡 Reminders only</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadFlags()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="flags-table-body"><div class="loading">Loading flagged notes…</div></div>
       </div>
     </div>
 
@@ -1019,6 +1038,7 @@ function showSection(name) {
   document.getElementById('section-'+name).classList.add('active');
   event.target.classList.add('active');
   if (name === 'schedule' && typeof loadScheduleLots === 'function') loadScheduleLots();
+  if (name === 'flags' && typeof loadFlags === 'function') loadFlags();
 }
 
 // ── ADD SUBDIVISION ──
@@ -1470,6 +1490,45 @@ async function submitScheduleAssign() {
     closeModal('modal-schedule-assign');
     await loadScheduleLots();
   }
+}
+
+// ---- FLAGGED NOTES ----
+let flaggedNotes = [];
+async function loadFlags() {
+  document.getElementById('flags-table-body').innerHTML = '<div class="loading">Loading flagged notes…</div>';
+  const data = await sbCall('getFlaggedNotes', {});
+  flaggedNotes = data || [];
+  renderFlags();
+}
+function renderFlags() {
+  const filter = document.getElementById('flag-filter').value;
+  let list = flaggedNotes;
+  if (filter !== 'all') list = list.filter(n => n.flag === filter);
+  // red first, then by newest
+  list = [...list].sort((a,b) => {
+    if (a.flag !== b.flag) return a.flag === 'red' ? -1 : 1;
+    return new Date(b.created_at) - new Date(a.created_at);
+  });
+  const el = document.getElementById('flags-table-body');
+  if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="icon">🚩</div><p>No flagged notes.</p></div>'; return; }
+  const rows = list.map(n => {
+    const when = new Date(n.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + ' ' + new Date(n.created_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    const flagBadge = n.flag === 'red'
+      ? '<span class="badge" style="background:#fee2e2;color:#dc2626;font-weight:700">🔴 Management</span>'
+      : '<span class="badge" style="background:#fef9e7;color:#b7791f;font-weight:700">🟡 Reminder</span>';
+    const noteHtml = String(n.note||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    return `<tr>
+      <td style="white-space:nowrap">${flagBadge}</td>
+      <td><strong>${n.lot_number||'—'}</strong>${n.community?`<div style="font-size:11px;color:var(--muted)">${n.community}</div>`:''}</td>
+      <td>#${n.bt_num!=null?n.bt_num:'—'}</td>
+      <td style="max-width:420px">${noteHtml}</td>
+      <td style="white-space:nowrap">${n.builder_name||n.author||'—'}<div style="font-size:11px;color:var(--muted)">${when}</div></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table>
+    <thead><tr><th>Flag</th><th>Lot</th><th>Task</th><th>Note</th><th>By / When</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 }
 </script>
 <!-- MARK CLOSED MODAL -->
