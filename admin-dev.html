@@ -1285,10 +1285,21 @@ function renderScheduleLots() {
     } else {
       stageCell = '<span style="color:var(--muted)">—</span>';
     }
+    // freshness: days since last real task update
+    let freshCell;
+    if (l.last_task_update) {
+      const days = Math.floor((Date.now() - new Date(l.last_task_update).getTime()) / 86400000);
+      const label = days === 0 ? 'Today' : days === 1 ? '1 day ago' : days + ' days ago';
+      const stale = days >= 5;
+      freshCell = '<span class="badge" style="background:' + (stale?'#fee2e2':'#d5f5e3') + ';color:' + (stale?'var(--red)':'#1E8449') + ';font-weight:700">' + (stale?'⚠️ ':'') + label + '</span>';
+    } else {
+      freshCell = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No updates</span>';
+    }
     return `<tr>
       <td><strong>${l.lot_number}</strong></td>
       <td>${l.community || '<span style="color:var(--muted)">—</span>'}</td>
       <td>${stageCell}</td>
+      <td>${freshCell}</td>
       <td>${tpl ? tpl.name : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${start}</td>
       <td>${created}</td>
@@ -1299,7 +1310,7 @@ function renderScheduleLots() {
     </tr>`;
   }).join('');
   document.getElementById('schedule-table-body').innerHTML = `<table>
-    <thead><tr><th>Lot</th><th>Community</th><th>Stage</th><th>Template</th><th>Start Date</th><th>Created</th><th></th></tr></thead>
+    <thead><tr><th>Lot</th><th>Community</th><th>Stage</th><th>Schedule Currency</th><th>Template</th><th>Start Date</th><th>Created</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
