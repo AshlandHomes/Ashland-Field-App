@@ -260,7 +260,7 @@ async function startTask(n){
   const v=prompt('Start date for #'+n+' '+t.name+' (YYYY-MM-DD):',def);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date. Use YYYY-MM-DD.');return;}
   act[n]={started:true,finished:false,start:v,finish:null};
-  recompute();renderSched();await saveTask(t);
+  render(lastLotNum,lastNoStart);await saveTask(t);
 }
 
 async function finishTask(n){
@@ -268,12 +268,12 @@ async function finishTask(n){
   const v=prompt('Finish date for #'+n+' '+t.name+' (YYYY-MM-DD):',def);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date. Use YYYY-MM-DD.');return;}
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};
-  recompute();renderSched();await saveTask(t);
+  render(lastLotNum,lastNoStart);await saveTask(t);
 }
 
 async function undoTask(n){
   const t=bn[n];act[n]={started:false,finished:false,start:null,finish:null};
-  recompute();renderSched();await saveTask(t);
+  render(lastLotNum,lastNoStart);await saveTask(t);
 }
 
 initPicker();
