@@ -439,6 +439,10 @@ case 'keycheck': {
         }));
         return { statusCode: 200, body: JSON.stringify(enriched) };
       }
+        case 'debugNotes': {
+        const r = await supabaseRequest('GET', 'sched_lot_task_notes?select=*&limit=5');
+        return { statusCode: 200, body: JSON.stringify({ status: r.status, error: r.error || null, data: r.data }) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
