@@ -333,6 +333,41 @@ case 'keycheck': {
         }
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
+        case 'getTemplateStageMap': {
+        const { template_id } = payload;
+        if (!template_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id is required' }) };
+        }
+        const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${template_id}&select=id,stage_code,stage_label,is_manual,stage_order&order=stage_order`);
+        const sm = smRes.data || [];
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num`);
+        const btById = {};
+        (tkRes.data || []).forEach(t => { btById[t.id] = t.bt_num; });
+        const smIds = sm.map(s => s.id);
+        let joins = [];
+        if (smIds.length) {
+          const jRes = await supabaseRequest('GET', `sched_stage_map_tasks?stage_map_id=in.(${smIds.join(',')})&select=stage_map_id,task_id`);
+          joins = jRes.data || [];
+        }
+        const trig = {};
+        joins.forEach(j => { (trig[j.stage_map_id] = trig[j.stage_map_id] || []).push(btById[j.task_id]); });
+        const stages = sm.map(s => ({
+          code: s.stage_code, label: s.stage_label, is_manual: s.is_manual, order: s.stage_order,
+          triggers: (trig[s.id] || []).filter(x => x != null)
+        }));
+        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=name,icon,hold_stage_code,gate_order&order=gate_order`);
+        return { statusCode: 200, body: JSON.stringify({ stages, gates: gRes.data || [] }) };
+      }
+
+      case 'updateScheduleLotGate': {
+        const { gate_id, confirmed } = payload;
+        if (!gate_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'gate_id is required' }) };
+        }
+        const updates = { confirmed: !!confirmed, confirmed_at: confirmed ? new Date().toISOString() : null };
+        const r = await supabaseRequest('PATCH', `sched_lot_gate_state?id=eq.${gate_id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
