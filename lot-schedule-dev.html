@@ -54,6 +54,16 @@ select{font-family:'Instrument Sans',sans-serif;font-size:14px;padding:8px 12px;
 </head>
 <body>
 <div class="devbanner">⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠</div>
+<div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:22px;width:300px;max-width:90vw">
+    <div id="dpick-title" style="font-size:14px;font-weight:700;margin-bottom:14px"></div>
+    <input type="date" id="dpick-input" style="width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:16px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="dpick-cancel" style="font-family:inherit;font-size:13px;font-weight:600;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
+      <button id="dpick-ok" style="font-family:inherit;font-size:13px;font-weight:700;padding:8px 14px;border-radius:8px;border:none;background:var(--brand);color:#fff;cursor:pointer">OK</button>
+    </div>
+  </div>
+</div>
 <div class="wrap">
   <div class="controls">
     <label>Schedule Lot</label>
@@ -251,6 +261,21 @@ function renderSched(){
 
 function ymd(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')}
 function isValidDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(new Date(s+'T00:00:00').getTime());}
+function todayYmd(){return ymd(new Date());}
+
+// calendar picker (replaces prompt) — resolves with YYYY-MM-DD or null on cancel
+function openDatePicker(title,defaultDate){
+  return new Promise(resolve=>{
+    const ov=document.getElementById('dpick');
+    document.getElementById('dpick-title').textContent=title;
+    document.getElementById('dpick-input').value=defaultDate||todayYmd();
+    ov.style.display='flex';
+    const ok=document.getElementById('dpick-ok'),cancel=document.getElementById('dpick-cancel');
+    function done(v){ov.style.display='none';ok.onclick=null;cancel.onclick=null;resolve(v);}
+    ok.onclick=()=>{const v=document.getElementById('dpick-input').value;done(v||null);};
+    cancel.onclick=()=>done(null);
+  });
+}
 
 async function saveTask(t){
   const a=act[t.num];
@@ -265,17 +290,17 @@ async function saveStage(){
 }
 
 async function startTask(n){
-  const t=bn[n];const def=ymd(offToDate(t._projected_es));
-  const v=prompt('Start date for #'+n+' '+t.name+' (YYYY-MM-DD):',def);
-  if(v===null)return;if(!isValidDate(v)){alert('Invalid date. Use YYYY-MM-DD.');return;}
+  const t=bn[n];
+  const v=await openDatePicker('Start date — #'+n+' '+t.name, todayYmd());
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
   act[n]={started:true,finished:false,start:v,finish:null};
   render(lastLotNum,lastNoStart);await saveTask(t);
 }
 
 async function finishTask(n){
-  const t=bn[n];const def=ymd(offToDate(t._projected_ef));
-  const v=prompt('Finish date for #'+n+' '+t.name+' (YYYY-MM-DD):',def);
-  if(v===null)return;if(!isValidDate(v)){alert('Invalid date. Use YYYY-MM-DD.');return;}
+  const t=bn[n];
+  const v=await openDatePicker('Finish date — #'+n+' '+t.name, todayYmd());
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};
   render(lastLotNum,lastNoStart);await saveTask(t);
 }
