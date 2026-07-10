@@ -66,6 +66,11 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .ab{flex:1;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
 .ab.start{background:var(--start);color:#fff}.ab.fin{background:var(--green);color:#fff}.ab.undo{background:#eef0f2;color:var(--muted)}
 .critdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:6px;vertical-align:middle}
+.ticons{display:flex;gap:6px;font-size:18px;line-height:1}
+.notei{font-size:18px}.flagi{font-size:16px}
+.ab.note{background:#f5f3ff;color:#6C3483;border:1px solid #d7bde2;flex:0 0 auto;padding:9px 12px}
+.flagbtn{font-family:inherit;font-size:13px;font-weight:600;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
+.flagbtn.sel{border-color:var(--brand);background:#e0f2fe;color:#0369a1}
 </style>
 </head>
 <body>
@@ -77,6 +82,26 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button id="dpick-cancel" style="font-family:inherit;font-size:13px;font-weight:600;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
       <button id="dpick-ok" style="font-family:inherit;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;border:none;background:var(--brand);color:#fff;cursor:pointer">OK</button>
+    </div>
+  </div>
+</div>
+<div id="notemodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center">
+  <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto">
+    <div id="note-title" style="font-size:15px;font-weight:700;margin-bottom:4px"></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Write a note. Tap ☁️ to clean it up with AI.</div>
+    <textarea id="note-text" rows="6" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate your note…"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button id="note-ai" onclick="aiCleanup()" style="flex:1;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid #7dd3fc;background:#e0f2fe;color:#0369a1;cursor:pointer">☁️ AI Cleanup</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px">Flag</div>
+    <div style="display:flex;gap:8px">
+      <button class="flagbtn" data-f="none" onclick="setNoteFlag('none')" style="flex:1">None</button>
+      <button class="flagbtn" data-f="yellow" onclick="setNoteFlag('yellow')" style="flex:1">🟡 Remind Me</button>
+      <button class="flagbtn" data-f="red" onclick="setNoteFlag('red')" style="flex:1">🔴 Management</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button onclick="closeNote()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:12px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
+      <button onclick="saveNote()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:12px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Save Note</button>
     </div>
   </div>
 </div>
@@ -241,7 +266,7 @@ async function openLot(id){
   const rows=data.tasks||[];
   lotGates=data.gates||[];
   curManual=curLot.manual_stage||null;
-  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order}));
+  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none'}));
   bn={};TASKS.forEach(t=>bn[t.num]=t);
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
@@ -295,14 +320,16 @@ function renderTasks(){
       if(a.finished){acts='<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';}
       else if(a.started){acts='<button class="ab fin" data-a="finish" data-n="'+t.num+'">Finish</button><button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';}
       else{acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';}
-      h+='<div class="t '+cls+'"><div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div></div>'
+      const flagIcon=t.flag==='red'?'<span class="flagi">🔴</span>':(t.flag==='yellow'?'<span class="flagi">🟡</span>':'');
+      const noteIcon=(t.note&&t.note.trim())?'<span class="notei">📝</span>':'';
+      h+='<div class="t '+cls+'"><div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div><div class="ticons">'+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+fmt(ps)+' → '+fmt(pf)+'</div>'
-        +'<div class="tacts">'+acts+'</div></div>';
+        +'<div class="tacts">'+acts+'<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button></div></div>';
     });
   });
   document.getElementById('sched').innerHTML=h;
   document.querySelectorAll('.ph').forEach(el=>{el.onclick=()=>{const p=+el.dataset.ph;userToggledPhases=true;collapsedPhases[p]=!collapsedPhases[p];renderTasks();};});
-  document.querySelectorAll('.ab').forEach(b=>{b.onclick=()=>{const n=+b.dataset.n,a=b.dataset.a;if(a==='start')startTask(n);else if(a==='finish')finishTask(n);else if(a==='undo')undoTask(n);};});
+  document.querySelectorAll('.ab').forEach(b=>{b.onclick=()=>{const n=+b.dataset.n,a=b.dataset.a;if(a==='start')startTask(n);else if(a==='finish')finishTask(n);else if(a==='undo')undoTask(n);else if(a==='note')openNote(n);};});
 }
 
 async function saveTask(t){
@@ -332,6 +359,39 @@ async function toggleGate(gateId,currentlyConfirmed){
   g.confirmed=!currentlyConfirmed;renderSchedule();
   await sbCall('updateScheduleLotGate',{gate_id:gateId,confirmed:g.confirmed});
   await saveStage();
+}
+
+// ---- notes + flags ----
+let noteTaskNum=null, noteFlag='none';
+function openNote(n){
+  noteTaskNum=n;const t=bn[n];
+  noteFlag=t.flag||'none';
+  document.getElementById('note-title').textContent='#'+n+' '+t.name;
+  document.getElementById('note-text').value=t.note||'';
+  renderFlagBtns();
+  document.getElementById('notemodal').style.display='flex';
+}
+function closeNote(){document.getElementById('notemodal').style.display='none';noteTaskNum=null;}
+function setNoteFlag(f){noteFlag=f;renderFlagBtns();}
+function renderFlagBtns(){document.querySelectorAll('.flagbtn').forEach(b=>{b.classList.toggle('sel',b.dataset.f===noteFlag);});}
+async function aiCleanup(){
+  const ta=document.getElementById('note-text');const raw=ta.value.trim();
+  if(!raw){alert('Write a note first.');return;}
+  const btn=document.getElementById('note-ai');const orig=btn.textContent;btn.textContent='☁️ Cleaning…';btn.disabled=true;
+  try{
+    const r=await fetch('/.netlify/functions/cleanup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rawText:raw})});
+    const d=await r.json();
+    if(d.cleaned){ta.value=d.cleaned;}else{alert('Cleanup failed: '+(d.error||'unknown'));}
+  }catch(e){alert('Cleanup error: '+e);}
+  btn.textContent=orig;btn.disabled=false;
+}
+async function saveNote(){
+  if(noteTaskNum===null)return;
+  const t=bn[noteTaskNum];
+  const note=document.getElementById('note-text').value;
+  t.note=note;t.flag=noteFlag;
+  closeNote();renderTasks();
+  await sbCall('updateScheduleLotTaskNote',{task_id:t._id,note:note,flag:noteFlag});
 }
 
 loadBuilders();
