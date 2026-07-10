@@ -36,6 +36,12 @@ select{font-family:'Instrument Sans',sans-serif;font-size:14px;padding:8px 12px;
 .tdates{font-size:12px;font-family:'DM Mono',monospace;text-align:right;white-space:nowrap}
 .tdates b{color:var(--ink)}
 .tdates .plan{color:var(--muted);font-size:11px}
+.tright{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.tctrl{display:flex;gap:5px}
+.ab{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:4px 10px;border-radius:6px;border:none;cursor:pointer}
+.ab.start{background:var(--start);color:#fff}
+.ab.fin{background:var(--done);color:#fff}
+.ab.undo{background:#eef0f2;color:var(--muted)}
 .empty{text-align:center;padding:60px 20px;color:var(--muted)}
 .loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
 </style>
@@ -59,6 +65,7 @@ async function sbCall(action,payload){await loadSecret();const r=await fetch(SUP
 // ===== ENGINE STATE =====
 let TASKS=[], bn={}, act={}, startDate=null;
 let collapsedPhases={}, userToggledPhases=false;
+let currentLotId=null;
 
 // ===== CALENDAR HELPERS (from validated harness) =====
 function addWD(start,off){let d=new Date(start);d.setHours(0,0,0,0);let c=1;while(c<off){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==6)c++;}return d;}
@@ -117,11 +124,12 @@ async function loadLot(lotId,startIso,lotNum){
 
   // map Supabase rows -> engine shape
   TASKS=rows.map(r=>({
-    num:r.bt_num, name:r.name, rs:r.relative_start, dur:r.duration, lag:r.lag,
+    _id:r.id, num:r.bt_num, name:r.name, rs:r.relative_start, dur:r.duration, lag:r.lag,
     rf:r.relative_finish, preds:r.predecessors||[], phase:r.phase_order,
     phase_name:r.phase_name, type:r.task_type
   }));
   bn={};TASKS.forEach(t=>bn[t.num]=t);
+  currentLotId=lotId;
   // actuals from DB status
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish};});
 
@@ -177,13 +185,47 @@ function renderSched(){
       const stTag=a.finished?'<span class="tag st">done</span>':(a.started?'<span class="tag st">started</span>':'');
       const critTag=t._crit?'<span class="tag crit">critical</span>':'<span class="tag float">float '+t._tf+'d</span>';
       const actionTag=t.type==='action'?'<span class="tag action">action</span>':'';
-      h+='<div class="t '+cls+'"><div><div class="tname"><span class="tnum">#'+t.num+'</span> '+t.name+'</div>'
+      let ctrl='';
+      if(a.finished){ctrl='<button class="ab undo" data-act="undo" data-n="'+t.num+'">undo</button>';}
+      else if(a.started){ctrl='<button class="ab fin" data-act="finish" data-n="'+t.num+'">finish</button><button class="ab undo" data-act="undo" data-n="'+t.num+'">undo</button>';}
+      else{ctrl='<button class="ab start" data-act="start" data-n="'+t.num+'">start</button>';}
+      h+='<div class="t '+cls+'"><div style="flex:1"><div class="tname"><span class="tnum">#'+t.num+'</span> '+t.name+'</div>'
         +'<div class="ttags">'+critTag+actionTag+stTag+'</div></div>'
-        +'<div class="tdates">'+dates+'</div></div>';
+        +'<div class="tright"><div class="tdates">'+dates+'</div><div class="tctrl">'+ctrl+'</div></div></div>';
     });
   });
   document.getElementById('sched').innerHTML=h;
   document.querySelectorAll('.ph').forEach(el=>{el.onclick=()=>{const p=+el.dataset.ph;userToggledPhases=true;collapsedPhases[p]=!collapsedPhases[p];renderSched();};});
+  document.querySelectorAll('.ab').forEach(b=>{b.onclick=e=>{e.stopPropagation();const n=+b.dataset.n,ac=b.dataset.act;if(ac==='start')startTask(n);else if(ac==='finish')finishTask(n);else if(ac==='undo')undoTask(n);};});
+}
+
+function ymd(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')}
+function isValidDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(new Date(s+'T00:00:00').getTime());}
+
+async function saveTask(t){
+  const a=act[t.num];
+  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:currentLotId,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null});
+}
+
+async function startTask(n){
+  const t=bn[n];const def=ymd(offToDate(t._projected_es));
+  const v=prompt('Start date for #'+n+' '+t.name+' (YYYY-MM-DD):',def);
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date. Use YYYY-MM-DD.');return;}
+  act[n]={started:true,finished:false,start:v,finish:null};
+  recompute();renderSched();await saveTask(t);
+}
+
+async function finishTask(n){
+  const t=bn[n];const def=ymd(offToDate(t._projected_ef));
+  const v=prompt('Finish date for #'+n+' '+t.name+' (YYYY-MM-DD):',def);
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date. Use YYYY-MM-DD.');return;}
+  const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};
+  recompute();renderSched();await saveTask(t);
+}
+
+async function undoTask(n){
+  const t=bn[n];act[n]={started:false,finished:false,start:null,finish:null};
+  recompute();renderSched();await saveTask(t);
 }
 
 initPicker();
