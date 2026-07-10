@@ -209,28 +209,11 @@ function render(lotNum,noStart){
     gb+='</div></div>';
     h_gate=gb;
   } else { h_gate=''; }
-  // manual (pre-construction) stage selector — matters before any auto stage is achieved
-  const manualStages=stageMap.filter(s=>s.is_manual);
-  let manualBar='';
-  if(manualStages.length){
-    manualBar='<div class="manualbar"><span class="ml">Pre-construction stage (admin)</span><select id="manualSel"><option value="">— none —</option>'
-      +manualStages.map(s=>'<option value="'+s.code+'"'+(s.code===currentManualStage?' selected':'')+'>'+s.code+' — '+s.label+'</option>').join('')
-      +'</select></div>';
-  }
-  document.getElementById('view').innerHTML=h+(noStart?'<div class="notice">No construction start date set for this lot — showing a preview from <b>today</b>. Set the start date in the admin Schedule Lots tab for real dates.</div>':'')+manualBar+h_gate+'<div id="sched"></div>';
+  document.getElementById('view').innerHTML=h+(noStart?'<div class="notice">No construction start date set for this lot — showing a preview from <b>today</b>. Set the start date in the admin Schedule Lots tab for real dates.</div>':'')+h_gate+'<div id="sched"></div>';
   renderSched();
   document.querySelectorAll('.gbtn').forEach(b=>{b.onclick=()=>toggleGate(b.dataset.gid, b.dataset.cf==='1');});
-  const msel=document.getElementById('manualSel');
-  if(msel){msel.onchange=()=>saveManualStage(msel.value);}
 }
 let h_gate='';
-
-async function saveManualStage(code){
-  currentManualStage=code||null;
-  render(lastLotNum,lastNoStart);
-  await sbCall('updateScheduleLot',{id:currentLotId,manual_stage:currentManualStage});
-  await saveStage();
-}
 
 async function toggleGate(gateId, currentlyConfirmed){
   const g=lotGates.find(x=>x.id===gateId); if(!g)return;
