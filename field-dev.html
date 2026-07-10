@@ -68,6 +68,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .critdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:6px;vertical-align:middle}
 .ticons{display:flex;gap:6px;font-size:18px;line-height:1}
 .notei{font-size:18px}.flagi{font-size:16px}
+.notect{font-size:11px;font-weight:700;color:var(--muted);vertical-align:super}
 .ab.note{background:#f5f3ff;color:#6C3483;border:1px solid #d7bde2;flex:0 0 auto;padding:9px 12px}
 .flagbtn{font-family:inherit;font-size:13px;font-weight:600;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
 .flagbtn.sel{border-color:var(--brand);background:#e0f2fe;color:#0369a1}
@@ -86,22 +87,22 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
   </div>
 </div>
 <div id="notemodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center">
-  <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto">
-    <div id="note-title" style="font-size:15px;font-weight:700;margin-bottom:4px"></div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Write a note. Tap ☁️ to clean it up with AI.</div>
-    <textarea id="note-text" rows="6" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate your note…"></textarea>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button id="note-ai" onclick="aiCleanup()" style="flex:1;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid #7dd3fc;background:#e0f2fe;color:#0369a1;cursor:pointer">☁️ AI Cleanup</button>
+  <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <div id="note-title" style="font-size:15px;font-weight:700;margin-bottom:12px"></div>
+    <div id="note-thread" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+    <div style="border-top:1px solid var(--line);padding-top:14px">
+      <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Add a note</div>
+      <textarea id="note-text" rows="4" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate…"></textarea>
+      <button id="note-ai" onclick="aiCleanup()" style="width:100%;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid #7dd3fc;background:#e0f2fe;color:#0369a1;cursor:pointer;margin-top:10px">☁️ AI Cleanup</button>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="flagbtn" data-f="none" onclick="setNoteFlag('none')" style="flex:1">None</button>
+        <button class="flagbtn" data-f="yellow" onclick="setNoteFlag('yellow')" style="flex:1">🟡 Remind</button>
+        <button class="flagbtn" data-f="red" onclick="setNoteFlag('red')" style="flex:1">🔴 Mgmt</button>
+      </div>
     </div>
-    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px">Flag</div>
-    <div style="display:flex;gap:8px">
-      <button class="flagbtn" data-f="none" onclick="setNoteFlag('none')" style="flex:1">None</button>
-      <button class="flagbtn" data-f="yellow" onclick="setNoteFlag('yellow')" style="flex:1">🟡 Remind Me</button>
-      <button class="flagbtn" data-f="red" onclick="setNoteFlag('red')" style="flex:1">🔴 Management</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:18px">
-      <button onclick="closeNote()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:12px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
-      <button onclick="saveNote()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:12px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Save Note</button>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="closeNote()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:12px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Done</button>
+      <button onclick="addNote()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:12px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Add Note</button>
     </div>
   </div>
 </div>
@@ -271,6 +272,7 @@ async function openLot(id){
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
   if(curLot.template_id){const sm=await sbCall('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
+  lotNotes=await sbCall('getTaskNotes',{lot_id:id})||[];
   userToggledPhases=false;collapsedPhases={};
   renderSchedule();
 }
@@ -320,8 +322,10 @@ function renderTasks(){
       if(a.finished){acts='<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';}
       else if(a.started){acts='<button class="ab fin" data-a="finish" data-n="'+t.num+'">Finish</button><button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';}
       else{acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';}
-      const flagIcon=t.flag==='red'?'<span class="flagi">🔴</span>':(t.flag==='yellow'?'<span class="flagi">🟡</span>':'');
-      const noteIcon=(t.note&&t.note.trim())?'<span class="notei">📝</span>':'';
+      const tNotes=notesForTask(t.num);
+      const anyRed=tNotes.some(x=>x.flag==='red'), anyYellow=tNotes.some(x=>x.flag==='yellow');
+      const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
+      const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
       h+='<div class="t '+cls+'"><div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div><div class="ticons">'+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+fmt(ps)+' → '+fmt(pf)+'</div>'
         +'<div class="tacts">'+acts+'<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button></div></div>';
@@ -361,19 +365,41 @@ async function toggleGate(gateId,currentlyConfirmed){
   await saveStage();
 }
 
-// ---- notes + flags ----
-let noteTaskNum=null, noteFlag='none';
+// ---- notes thread + flags ----
+let lotNotes=[], noteTaskNum=null, noteFlag='none';
+function notesForTask(bt){return lotNotes.filter(n=>n.bt_num===bt).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));}
+function fmtNoteTime(iso){const d=new Date(iso);return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
+function flagBadge(f){if(f==='red')return '<span style="font-size:13px">🔴</span>';if(f==='yellow')return '<span style="font-size:13px">🟡</span>';return '';}
+
 function openNote(n){
-  noteTaskNum=n;const t=bn[n];
-  noteFlag=t.flag||'none';
+  noteTaskNum=n;const t=bn[n];noteFlag='none';
   document.getElementById('note-title').textContent='#'+n+' '+t.name;
-  document.getElementById('note-text').value=t.note||'';
-  renderFlagBtns();
+  document.getElementById('note-text').value='';
+  renderFlagBtns();renderThread();
   document.getElementById('notemodal').style.display='flex';
 }
-function closeNote(){document.getElementById('notemodal').style.display='none';noteTaskNum=null;}
+function closeNote(){document.getElementById('notemodal').style.display='none';noteTaskNum=null;renderTasks();}
 function setNoteFlag(f){noteFlag=f;renderFlagBtns();}
-function renderFlagBtns(){document.querySelectorAll('.flagbtn').forEach(b=>{b.classList.toggle('sel',b.dataset.f===noteFlag);});}
+function renderFlagBtns(){document.querySelectorAll('#notemodal .flagbtn').forEach(b=>{b.classList.toggle('sel',b.dataset.f===noteFlag);});}
+
+function renderThread(){
+  const list=notesForTask(noteTaskNum);
+  const el=document.getElementById('note-thread');
+  if(!list.length){el.innerHTML='<div style="font-size:13px;color:var(--muted)">No notes yet.</div>';return;}
+  el.innerHTML=list.map(nt=>{
+    return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fafafa">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+      +'<span style="font-size:11px;color:var(--muted);font-family:\'DM Mono\',monospace">'+fmtNoteTime(nt.created_at)+(nt.author?' · '+nt.author:'')+'</span>'
+      +'<span>'+flagBadge(nt.flag)+'</span></div>'
+      +'<div style="font-size:14px;white-space:pre-wrap">'+escapeHtml(nt.note)+'</div>'
+      +'<div style="display:flex;gap:6px;margin-top:8px">'
+      +'<button onclick="cycleNoteFlag(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer">Flag: '+(nt.flag==='none'?'none':nt.flag)+' ⟳</button>'
+      +'<button onclick="deleteNote(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid #fca5a5;background:#fee2e2;color:#dc2626;cursor:pointer">Delete</button>'
+      +'</div></div>';
+  }).join('');
+}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
 async function aiCleanup(){
   const ta=document.getElementById('note-text');const raw=ta.value.trim();
   if(!raw){alert('Write a note first.');return;}
@@ -385,13 +411,30 @@ async function aiCleanup(){
   }catch(e){alert('Cleanup error: '+e);}
   btn.textContent=orig;btn.disabled=false;
 }
-async function saveNote(){
+
+async function addNote(){
   if(noteTaskNum===null)return;
   const t=bn[noteTaskNum];
-  const note=document.getElementById('note-text').value;
-  t.note=note;t.flag=noteFlag;
-  closeNote();renderTasks();
-  await sbCall('updateScheduleLotTaskNote',{task_id:t._id,note:note,flag:noteFlag});
+  const note=document.getElementById('note-text').value.trim();
+  if(!note){alert('Write a note first.');return;}
+  const res=await sbCall('addTaskNote',{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder});
+  const row=Array.isArray(res)?res[0]:res;
+  if(row&&row.id){lotNotes.push(row);}else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  document.getElementById('note-text').value='';noteFlag='none';renderFlagBtns();
+  renderThread();
+}
+
+async function cycleNoteFlag(id){
+  const nt=lotNotes.find(x=>x.id===id);if(!nt)return;
+  const order=['none','yellow','red'];nt.flag=order[(order.indexOf(nt.flag)+1)%3];
+  renderThread();
+  await sbCall('updateTaskNote',{id,flag:nt.flag});
+}
+async function deleteNote(id){
+  if(!confirm('Delete this note?'))return;
+  lotNotes=lotNotes.filter(x=>x.id!==id);
+  renderThread();
+  await sbCall('deleteTaskNote',{id});
 }
 
 loadBuilders();
