@@ -200,6 +200,7 @@ async function toggleGate(gateId, currentlyConfirmed){
   g.confirmed=!currentlyConfirmed;
   render(lastLotNum,lastNoStart);
   await sbCall('updateScheduleLotGate',{gate_id:gateId,confirmed:g.confirmed});
+  await saveStage();
 }
 let lastLotNum='', lastNoStart=false;
 
@@ -253,6 +254,13 @@ function isValidDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(new Date(s+
 async function saveTask(t){
   const a=act[t.num];
   await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:currentLotId,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null});
+  await saveStage();
+}
+
+async function saveStage(){
+  if(!currentLotId)return;
+  const st=computeStage();
+  await sbCall('updateScheduleLot',{id:currentLotId,reported_stage:(st.reportedCode==='—'?null:st.reportedCode),true_stage:st.trueCode||null});
 }
 
 async function startTask(n){
