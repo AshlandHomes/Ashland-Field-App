@@ -368,6 +368,17 @@ case 'keycheck': {
         const r = await supabaseRequest('PATCH', `sched_lot_gate_state?id=eq.${gate_id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
+        case 'updateScheduleLotTaskNote': {
+        const { task_id, note, flag } = payload;
+        if (!task_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
+        }
+        const updates = { updated_at: new Date().toISOString() };
+        if (note !== undefined) updates.note = note;
+        if (flag !== undefined) updates.flag = flag;
+        const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
