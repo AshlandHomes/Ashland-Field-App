@@ -394,7 +394,6 @@ function renderThread(){
       +'<div style="font-size:14px;white-space:pre-wrap">'+escapeHtml(nt.note)+'</div>'
       +'<div style="display:flex;gap:6px;margin-top:8px">'
       +'<button onclick="cycleNoteFlag(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer">Flag: '+(nt.flag==='none'?'none':nt.flag)+' ⟳</button>'
-      +'<button onclick="deleteNote(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid #fca5a5;background:#fee2e2;color:#dc2626;cursor:pointer">Delete</button>'
       +'</div></div>';
   }).join('');
 }
@@ -429,12 +428,6 @@ async function cycleNoteFlag(id){
   const order=['none','yellow','red'];nt.flag=order[(order.indexOf(nt.flag)+1)%3];
   renderThread();
   await sbCall('updateTaskNote',{id,flag:nt.flag});
-}
-async function deleteNote(id){
-  if(!confirm('Delete this note?'))return;
-  lotNotes=lotNotes.filter(x=>x.id!==id);
-  renderThread();
-  await sbCall('deleteTaskNote',{id});
 }
 
 loadBuilders();
