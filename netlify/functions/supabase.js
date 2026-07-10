@@ -309,6 +309,15 @@ case 'keycheck': {
         const r = await supabaseRequest('PATCH', `sched_lots?id=eq.${id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
+        case 'getScheduleLotTasks': {
+        const { lot_id } = payload;
+        if (!lot_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_id is required' }) };
+        }
+        const t = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lot_id}&select=*&order=task_order`);
+        const g = await supabaseRequest('GET', `sched_lot_gate_state?lot_id=eq.${lot_id}&select=*`);
+        return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates: g.data || [] }) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
