@@ -253,7 +253,10 @@ tr:hover td{background:#f9fafb}
       <div class="table-wrap">
         <div class="table-header">
           <h2>Schedule Lots (Engine)</h2>
-          <button class="btn btn-primary" onclick="openStampModal()">+ Stamp New Lot</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onclick="exportScheduleStages()">↓ Export Stage Report</button>
+            <button class="btn btn-primary" onclick="openStampModal()">+ Stamp New Lot</button>
+          </div>
         </div>
         <div id="schedule-table-body">
           <div class="loading">Loading schedule lots…</div>
@@ -1273,9 +1276,19 @@ function renderScheduleLots() {
     const tpl = scheduleTemplates.find(t => t.id === l.template_id);
     const created = l.created_at ? new Date(l.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
     const start = l.construction_start_date ? fmtDate(l.construction_start_date) : '<span style="color:var(--muted)">Not set</span>';
+    // Stage cell: show reported; if held (reported 5.9 but true higher), show the hold note
+    let stageCell;
+    if (l.reported_stage) {
+      const held = (l.reported_stage === '5.9' && l.true_stage && l.true_stage !== '5.9');
+      stageCell = '<span class="badge badge-stage">' + l.reported_stage + '</span>'
+        + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + l.true_stage + '</div>' : '');
+    } else {
+      stageCell = '<span style="color:var(--muted)">—</span>';
+    }
     return `<tr>
       <td><strong>${l.lot_number}</strong></td>
       <td>${l.community || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${stageCell}</td>
       <td>${tpl ? tpl.name : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${start}</td>
       <td>${created}</td>
@@ -1286,9 +1299,27 @@ function renderScheduleLots() {
     </tr>`;
   }).join('');
   document.getElementById('schedule-table-body').innerHTML = `<table>
-    <thead><tr><th>Lot</th><th>Community</th><th>Template</th><th>Start Date</th><th>Created</th><th></th></tr></thead>
+    <thead><tr><th>Lot</th><th>Community</th><th>Stage</th><th>Template</th><th>Start Date</th><th>Created</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+function exportScheduleStages() {
+  if (!scheduleLots.length) { alert('No schedule lots to export.'); return; }
+  const headers = ['Lot','Community','Reported Stage','True Stage','Held','Start Date','Template'];
+  const rows = scheduleLots.map(l => {
+    const tpl = scheduleTemplates.find(t => t.id === l.template_id);
+    const held = (l.reported_stage === '5.9' && l.true_stage && l.true_stage !== '5.9') ? 'Yes' : '';
+    return [l.lot_number, l.community||'', l.reported_stage||'', l.true_stage||'', held, l.construction_start_date||'', tpl?tpl.name:''];
+  });
+  const csv = [headers, ...rows].map(r => r.map(c => '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'Schedule_Stage_Report_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function openStampModal() {
