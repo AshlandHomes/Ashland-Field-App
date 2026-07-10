@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ashland Field (DEV)</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--brand:#00A9D1;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b;--amber:#e67e22}
+body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+.devbanner{background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.15em;padding:5px}
+.wrap{max-width:480px;margin:0 auto;padding:16px}
+.screen{display:none}.screen.active{display:block}
+
+/* login */
+.brand{text-align:center;margin:24px 0}
+.brand h1{font-family:'DM Mono',monospace;font-size:15px;letter-spacing:.2em;color:var(--grey)}
+.brand p{font-size:12px;color:var(--muted);margin-top:4px}
+.bpick{display:grid;grid-template-columns:1fr;gap:10px;margin-top:20px}
+.bbtn{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:16px;font-weight:600;text-align:left;cursor:pointer}
+.bbtn:active{background:#f0f9ff;border-color:var(--brand)}
+.pinwrap{text-align:center;margin-top:20px}
+.pindots{display:flex;justify-content:center;gap:12px;margin:20px 0}
+.pindot{width:16px;height:16px;border-radius:50%;border:2px solid var(--line)}
+.pindot.filled{background:var(--brand);border-color:var(--brand)}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:280px;margin:0 auto}
+.key{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:22px;font-weight:600;cursor:pointer;font-family:'DM Mono',monospace}
+.key:active{background:#f0f9ff}
+.key.blank{background:transparent;border:none;cursor:default}
+.pinerr{color:var(--red);font-size:13px;min-height:18px;margin-top:12px}
+.back{background:none;border:none;color:var(--brand);font-size:14px;font-weight:600;cursor:pointer;padding:8px 0}
+
+/* lots */
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.topbar .who{font-size:13px;color:var(--muted)}
+.topbar .who b{color:var(--ink);font-size:15px}
+.signout{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer}
+.lotcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;cursor:pointer}
+.lotcard:active{border-color:var(--brand)}
+.lotcard .lh{display:flex;justify-content:space-between;align-items:flex-start}
+.lotcard .num{font-size:18px;font-weight:700}
+.lotcard .comm{font-size:13px;color:var(--muted);margin-top:2px}
+.stagebadge{background:#e0f2fe;color:#0369a1;font-family:'DM Mono',monospace;font-weight:700;font-size:14px;padding:4px 10px;border-radius:8px}
+.stagebadge.held{background:#fef4e6;color:var(--amber)}
+.lotmeta{font-size:12px;color:var(--muted);margin-top:10px}
+.empty{text-align:center;padding:50px 20px;color:var(--muted)}
+.loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
+</style>
+</head>
+<body>
+<div class="devbanner">⚠ DEV / UAT — NOT FOR PRODUCTION ⚠</div>
+<div class="wrap">
+
+  <!-- SCREEN 1: pick builder -->
+  <div class="screen active" id="screen-builders">
+    <div class="brand"><h1>ASHLAND FIELD</h1><p>Select your name to sign in</p></div>
+    <div class="bpick" id="builder-list"><div class="loading">Loading…</div></div>
+  </div>
+
+  <!-- SCREEN 2: PIN -->
+  <div class="screen" id="screen-pin">
+    <button class="back" onclick="toBuilders()">← Back</button>
+    <div class="pinwrap">
+      <div class="brand" style="margin:12px 0"><h1 id="pin-name"></h1><p>Enter your 4-digit PIN</p></div>
+      <div class="pindots" id="pindots"></div>
+      <div class="keys" id="keys"></div>
+      <div class="pinerr" id="pinerr"></div>
+    </div>
+  </div>
+
+  <!-- SCREEN 3: my lots -->
+  <div class="screen" id="screen-lots">
+    <div class="topbar">
+      <div class="who">Signed in as<br><b id="lots-who"></b></div>
+      <button class="signout" onclick="signOut()">Sign Out</button>
+    </div>
+    <div id="lots-list"><div class="loading">Loading your lots…</div></div>
+  </div>
+
+</div>
+
+<script>
+const SUPABASE_FN='/.netlify/functions/supabase';
+let API_SECRET=null;
+async function loadSecret(){if(API_SECRET)return API_SECRET;const r=await fetch('/.netlify/functions/config');const d=await r.json();API_SECRET=d.secret;return API_SECRET;}
+async function sbCall(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});const d=await r.json();if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
+
+let currentBuilder=null, pinEntry='';
+
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+
+// ---- SCREEN 1: builders ----
+async function loadBuilders(){
+  const bs=await sbCall('getBuilders',{})||[];
+  const list=bs.filter(b=>!b.is_admin);
+  const el=document.getElementById('builder-list');
+  if(!list.length){el.innerHTML='<div class="empty">No builders found.</div>';return;}
+  el.innerHTML=list.map(b=>'<button class="bbtn" onclick="pickBuilder(\''+b.name.replace(/'/g,"\\'")+'\')">'+b.name+'</button>').join('');
+}
+function pickBuilder(name){currentBuilder=name;pinEntry='';document.getElementById('pin-name').textContent=name;document.getElementById('pinerr').textContent='';renderPin();showScreen('screen-pin');}
+function toBuilders(){currentBuilder=null;pinEntry='';showScreen('screen-builders');}
+
+// ---- SCREEN 2: PIN ----
+function renderPin(){
+  let dots='';for(let i=0;i<4;i++)dots+='<div class="pindot'+(i<pinEntry.length?' filled':'')+'"></div>';
+  document.getElementById('pindots').innerHTML=dots;
+  const keyEls=['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  document.getElementById('keys').innerHTML=keyEls.map(k=>{
+    if(k==='')return '<div class="key blank"></div>';
+    return '<button class="key" onclick="pinKey(\''+k+'\')">'+k+'</button>';
+  }).join('');
+}
+async function pinKey(k){
+  if(k==='⌫'){pinEntry=pinEntry.slice(0,-1);renderPin();return;}
+  if(pinEntry.length>=4)return;
+  pinEntry+=k;renderPin();
+  if(pinEntry.length===4){await tryPin();}
+}
+async function tryPin(){
+  const res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry});
+  if(res&&res.valid){enterApp();}
+  else{document.getElementById('pinerr').textContent='Incorrect PIN';pinEntry='';setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},900);}
+}
+
+// ---- SCREEN 3: my lots ----
+function enterApp(){document.getElementById('lots-who').textContent=currentBuilder;showScreen('screen-lots');loadMyLots();}
+function signOut(){currentBuilder=null;pinEntry='';showScreen('screen-builders');}
+
+async function loadMyLots(){
+  document.getElementById('lots-list').innerHTML='<div class="loading">Loading your lots…</div>';
+  const all=await sbCall('getScheduleLots',{})||[];
+  // only this builder's lots, released (stage >= 1.1)
+  const mine=all.filter(l=>l.builder_name===currentBuilder && l.reported_stage && parseFloat(l.reported_stage)>=1.1);
+  const el=document.getElementById('lots-list');
+  if(!mine.length){el.innerHTML='<div class="empty">No released lots assigned to you yet.</div>';return;}
+  el.innerHTML=mine.map(l=>{
+    const held=(l.reported_stage==='5.9'&&l.true_stage&&l.true_stage!=='5.9');
+    return '<div class="lotcard" onclick="openLot(\''+l.id+'\')">'
+      +'<div class="lh"><div><div class="num">'+l.lot_number+'</div>'+(l.community?'<div class="comm">'+l.community+'</div>':'')+'</div>'
+      +'<span class="stagebadge'+(held?' held':'')+'">'+l.reported_stage+'</span></div>'
+      +'<div class="lotmeta">'+(l.construction_start_date?'Start: '+l.construction_start_date:'No start date set')+(held?' · ⚡ held at 5.9':'')+'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function openLot(id){
+  // Step B will open the mobile schedule view; for now, confirm selection
+  alert('Opening lot schedule is the next step. Lot id: '+id);
+}
+
+loadBuilders();
+</script>
+</body>
+</html>
