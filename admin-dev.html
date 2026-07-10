@@ -475,6 +475,22 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<!-- ASSIGN BUILDER MODAL -->
+<div class="modal-overlay" id="modal-schedule-assign">
+  <div class="modal" style="max-width:420px">
+    <h2>Assign Builder</h2>
+    <div class="modal-sub" id="sched-assign-sub"></div>
+    <input type="hidden" id="sched-assign-id">
+    <div class="field"><label>Assigned Builder</label>
+      <select id="sched-assign-sel"><option value="">Unassigned</option></select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-schedule-assign')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitScheduleAssign()">Save →</button>
+    </div>
+  </div>
+</div>
+
 <!-- STAMP SCHEDULE LOT MODAL -->
 <div class="modal-overlay" id="modal-stamp">
   <div class="modal">
@@ -1321,20 +1337,21 @@ function renderScheduleLots() {
     return `<tr>
       <td><strong>${l.lot_number}</strong></td>
       <td>${l.community || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${l.builder_name || '<span style="color:var(--muted)">Unassigned</span>'}</td>
       <td>${stageCell}</td>
       <td>${freshCell}</td>
       <td>${tpl ? tpl.name : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${start}</td>
-      <td>${created}</td>
       <td>
-        <button class="btn btn-sm" onclick="openScheduleStart('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc">Set Start</button>
+        <button class="btn btn-sm" onclick="openScheduleAssign('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#f5eef8;color:#6C3483;border:1px solid #d7bde2">Assign</button>
+        <button class="btn btn-sm" onclick="openScheduleStart('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;margin-left:4px">Set Start</button>
         <button class="btn btn-sm" onclick="openScheduleStageModal('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#eafaf1;color:#1E8449;border:1px solid #a9dfbf;margin-left:4px">Set Stage</button>
         <button class="btn btn-sm" onclick="deleteScheduleLot('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
   }).join('');
   document.getElementById('schedule-table-body').innerHTML = `<table>
-    <thead><tr><th>Lot</th><th>Community</th><th>Stage</th><th>Schedule Currency</th><th>Template</th><th>Start Date</th><th>Created</th><th></th></tr></thead>
+    <thead><tr><th>Lot</th><th>Community</th><th>Builder</th><th>Stage</th><th>Schedule Currency</th><th>Template</th><th>Start Date</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -1430,6 +1447,27 @@ async function submitScheduleStage() {
   const result = await sbCall('updateScheduleLot', updates);
   if (result !== null) {
     closeModal('modal-schedule-stage');
+    await loadScheduleLots();
+  }
+}
+
+function openScheduleAssign(id, num) {
+  document.getElementById('sched-assign-id').value = id;
+  document.getElementById('sched-assign-sub').textContent = 'Assign a builder to ' + num;
+  const lot = scheduleLots.find(l => l.id === id);
+  const sel = document.getElementById('sched-assign-sel');
+  const list = (builders || []).filter(b => !b.is_admin);
+  sel.innerHTML = '<option value="">Unassigned</option>' + list.map(b => '<option value="' + b.name + '">' + b.name + '</option>').join('');
+  sel.value = (lot && lot.builder_name) || '';
+  document.getElementById('modal-schedule-assign').classList.add('open');
+}
+
+async function submitScheduleAssign() {
+  const id = document.getElementById('sched-assign-id').value;
+  const name = document.getElementById('sched-assign-sel').value || null;
+  const result = await sbCall('updateScheduleLot', { id, builder_name: name });
+  if (result !== null) {
+    closeModal('modal-schedule-assign');
     await loadScheduleLots();
   }
 }
