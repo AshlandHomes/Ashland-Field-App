@@ -24,6 +24,9 @@ select{font-family:'Instrument Sans',sans-serif;font-size:14px;padding:8px 12px;
 .gatebar .grow{display:flex;gap:8px;flex-wrap:wrap}
 .gbtn{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer}
 .gbtn.on{background:var(--done);color:#fff;border-color:var(--done)}
+.manualbar{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.manualbar .ml{font-size:11px;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.manualbar select{font-family:'Instrument Sans',sans-serif;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px}
 .notice{background:#fef9e7;border:1px solid #f7d774;color:#7d6608;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
 .ph{background:var(--ink);color:#fff;padding:8px 16px;font-size:11px;font-weight:700;letter-spacing:.03em;display:flex;justify-content:space-between;cursor:pointer;user-select:none;border-radius:8px;margin-top:8px}
 .ph:hover{background:#2a2a2a}
@@ -83,6 +86,7 @@ let TASKS=[], bn={}, act={}, startDate=null;
 let collapsedPhases={}, userToggledPhases=false;
 let currentLotId=null, currentTemplateId=null;
 let stageMap=[], lotGates=[];
+let currentManualStage=null;
 
 // ===== CALENDAR HELPERS (from validated harness) =====
 function addWD(start,off){let d=new Date(start);d.setHours(0,0,0,0);let c=1;while(c<off){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==6)c++;}return d;}
@@ -125,6 +129,10 @@ function computeStage(){
   const achieved=stageMap.filter(s=>!s.is_manual && s.triggers && s.triggers.length && s.triggers.every(bt=>act[bt]&&act[bt].finished));
   let trueStage=null;
   achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
+  // if no auto stage achieved yet, fall back to the admin-set manual (pre-construction) stage
+  if(!trueStage && currentManualStage){
+    trueStage=stageMap.find(s=>s.code===currentManualStage)||{code:currentManualStage,label:'Pre-construction',order:0};
+  }
   const gatesOpen=lotGates.some(g=>!g.confirmed);
   const HOLD=5.9;
   let held=false, reportedCode, reportedLabel;
@@ -144,13 +152,14 @@ async function initPicker(){
   if(!lots.length){sel.innerHTML='<option value="">No stamped lots yet</option>';return;}
   sel.innerHTML='<option value="">Select a lot…</option>'+lots.map(l=>{
     const label=l.lot_number+(l.community?' · '+l.community:'')+(l.construction_start_date?'':' (no start date)');
-    return '<option value="'+l.id+'" data-start="'+(l.construction_start_date||'')+'" data-num="'+encodeURIComponent(l.lot_number)+'" data-tpl="'+(l.template_id||'')+'">'+label+'</option>';
+    return '<option value="'+l.id+'" data-start="'+(l.construction_start_date||'')+'" data-num="'+encodeURIComponent(l.lot_number)+'" data-tpl="'+(l.template_id||'')+'" data-manual="'+(l.manual_stage||'')+'">'+label+'</option>';
   }).join('');
-  sel.onchange=()=>{const o=sel.options[sel.selectedIndex];if(!sel.value){document.getElementById('view').innerHTML='<div class="empty">Pick a lot to view its computed schedule.</div>';return;}loadLot(sel.value,o.dataset.start,decodeURIComponent(o.dataset.num),o.dataset.tpl);};
+  sel.onchange=()=>{const o=sel.options[sel.selectedIndex];if(!sel.value){document.getElementById('view').innerHTML='<div class="empty">Pick a lot to view its computed schedule.</div>';return;}loadLot(sel.value,o.dataset.start,decodeURIComponent(o.dataset.num),o.dataset.tpl,o.dataset.manual);};
 }
 
 // ===== LOAD A LOT + RUN ENGINE =====
-async function loadLot(lotId,startIso,lotNum,tplId){
+async function loadLot(lotId,startIso,lotNum,tplId,manualStage){
+  currentManualStage=manualStage||null;
   document.getElementById('view').innerHTML='<div class="loading">Loading schedule…</div>';
   const data=await sbCall('getScheduleLotTasks',{lot_id:lotId});
   if(!data){return;}
@@ -200,11 +209,28 @@ function render(lotNum,noStart){
     gb+='</div></div>';
     h_gate=gb;
   } else { h_gate=''; }
-  document.getElementById('view').innerHTML=h+(noStart?'<div class="notice">No construction start date set for this lot — showing a preview from <b>today</b>. Set the start date in the admin Schedule Lots tab for real dates.</div>':'')+h_gate+'<div id="sched"></div>';
+  // manual (pre-construction) stage selector — matters before any auto stage is achieved
+  const manualStages=stageMap.filter(s=>s.is_manual);
+  let manualBar='';
+  if(manualStages.length){
+    manualBar='<div class="manualbar"><span class="ml">Pre-construction stage (admin)</span><select id="manualSel"><option value="">— none —</option>'
+      +manualStages.map(s=>'<option value="'+s.code+'"'+(s.code===currentManualStage?' selected':'')+'>'+s.code+' — '+s.label+'</option>').join('')
+      +'</select></div>';
+  }
+  document.getElementById('view').innerHTML=h+(noStart?'<div class="notice">No construction start date set for this lot — showing a preview from <b>today</b>. Set the start date in the admin Schedule Lots tab for real dates.</div>':'')+manualBar+h_gate+'<div id="sched"></div>';
   renderSched();
   document.querySelectorAll('.gbtn').forEach(b=>{b.onclick=()=>toggleGate(b.dataset.gid, b.dataset.cf==='1');});
+  const msel=document.getElementById('manualSel');
+  if(msel){msel.onchange=()=>saveManualStage(msel.value);}
 }
 let h_gate='';
+
+async function saveManualStage(code){
+  currentManualStage=code||null;
+  render(lastLotNum,lastNoStart);
+  await sbCall('updateScheduleLot',{id:currentLotId,manual_stage:currentManualStage});
+  await saveStage();
+}
 
 async function toggleGate(gateId, currentlyConfirmed){
   const g=lotGates.find(x=>x.id===gateId); if(!g)return;
