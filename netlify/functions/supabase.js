@@ -1,6 +1,7 @@
 // Netlify serverless function — Supabase data proxy
 // Supports both legacy (eyJ) and new (sb_publishable_) key formats
 
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
