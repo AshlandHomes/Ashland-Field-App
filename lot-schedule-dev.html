@@ -18,6 +18,12 @@ select{font-family:'Instrument Sans',sans-serif;font-size:14px;padding:8px 12px;
 .topbar .item{display:flex;flex-direction:column}
 .topbar .k{font-size:10px;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.5)}
 .topbar .v{font-size:18px;font-weight:700;font-family:'DM Mono',monospace}
+.topbar .sublbl{font-size:10px;color:rgba(255,255,255,.6);margin-top:2px}
+.gatebar{background:#fff6ee;border:1px solid #f7d774;border-radius:12px;padding:12px 16px;margin-bottom:16px}
+.gatebar .gh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--crit);margin-bottom:8px}
+.gatebar .grow{display:flex;gap:8px;flex-wrap:wrap}
+.gbtn{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer}
+.gbtn.on{background:var(--done);color:#fff;border-color:var(--done)}
 .notice{background:#fef9e7;border:1px solid #f7d774;color:#7d6608;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
 .ph{background:var(--ink);color:#fff;padding:8px 16px;font-size:11px;font-weight:700;letter-spacing:.03em;display:flex;justify-content:space-between;cursor:pointer;user-select:none;border-radius:8px;margin-top:8px}
 .ph:hover{background:#2a2a2a}
@@ -65,7 +71,8 @@ async function sbCall(action,payload){await loadSecret();const r=await fetch(SUP
 // ===== ENGINE STATE =====
 let TASKS=[], bn={}, act={}, startDate=null;
 let collapsedPhases={}, userToggledPhases=false;
-let currentLotId=null;
+let currentLotId=null, currentTemplateId=null;
+let stageMap=[], lotGates=[];
 
 // ===== CALENDAR HELPERS (from validated harness) =====
 function addWD(start,off){let d=new Date(start);d.setHours(0,0,0,0);let c=1;while(c<off){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==6)c++;}return d;}
@@ -102,6 +109,24 @@ function runEngine(mode){
 }
 function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return {planEnd:p,projEnd:pr};}
 
+// ===== STAGE (cap-and-snap Option B) =====
+function computeStage(){
+  // achieved auto stages: every trigger task finished (AND logic)
+  const achieved=stageMap.filter(s=>!s.is_manual && s.triggers && s.triggers.length && s.triggers.every(bt=>act[bt]&&act[bt].finished));
+  let trueStage=null;
+  achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
+  const gatesOpen=lotGates.some(g=>!g.confirmed);
+  const HOLD=5.9;
+  let held=false, reportedCode, reportedLabel;
+  if(trueStage && gatesOpen && parseFloat(trueStage.code)>HOLD){
+    held=true; reportedCode='5.9'; reportedLabel='Utility Hold';
+  } else {
+    reportedCode=trueStage?trueStage.code:'—';
+    reportedLabel=trueStage?trueStage.label:'Pre-construction';
+  }
+  return {reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
+}
+
 // ===== LOAD LOTS INTO PICKER =====
 async function initPicker(){
   const lots=await sbCall('getScheduleLots',{})||[];
@@ -109,18 +134,21 @@ async function initPicker(){
   if(!lots.length){sel.innerHTML='<option value="">No stamped lots yet</option>';return;}
   sel.innerHTML='<option value="">Select a lot…</option>'+lots.map(l=>{
     const label=l.lot_number+(l.community?' · '+l.community:'')+(l.construction_start_date?'':' (no start date)');
-    return '<option value="'+l.id+'" data-start="'+(l.construction_start_date||'')+'" data-num="'+encodeURIComponent(l.lot_number)+'">'+label+'</option>';
+    return '<option value="'+l.id+'" data-start="'+(l.construction_start_date||'')+'" data-num="'+encodeURIComponent(l.lot_number)+'" data-tpl="'+(l.template_id||'')+'">'+label+'</option>';
   }).join('');
-  sel.onchange=()=>{const o=sel.options[sel.selectedIndex];if(!sel.value){document.getElementById('view').innerHTML='<div class="empty">Pick a lot to view its computed schedule.</div>';return;}loadLot(sel.value,o.dataset.start,decodeURIComponent(o.dataset.num));};
+  sel.onchange=()=>{const o=sel.options[sel.selectedIndex];if(!sel.value){document.getElementById('view').innerHTML='<div class="empty">Pick a lot to view its computed schedule.</div>';return;}loadLot(sel.value,o.dataset.start,decodeURIComponent(o.dataset.num),o.dataset.tpl);};
 }
 
 // ===== LOAD A LOT + RUN ENGINE =====
-async function loadLot(lotId,startIso,lotNum){
+async function loadLot(lotId,startIso,lotNum,tplId){
   document.getElementById('view').innerHTML='<div class="loading">Loading schedule…</div>';
   const data=await sbCall('getScheduleLotTasks',{lot_id:lotId});
   if(!data){return;}
   const rows=data.tasks||[];
   if(!rows.length){document.getElementById('view').innerHTML='<div class="empty">This lot has no tasks.</div>';return;}
+  lotGates=data.gates||[];
+  // stage map from the template
+  if(tplId){const sm=await sbCall('getTemplateStageMap',{template_id:tplId});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
 
   // map Supabase rows -> engine shape
   TASKS=rows.map(r=>({
@@ -142,18 +170,38 @@ async function loadLot(lotId,startIso,lotNum){
 }
 
 function render(lotNum,noStart){
+  lastLotNum=lotNum; lastNoStart=noStart;
   const {planEnd,projEnd}=recompute();
   const finDate=offToDate(projEnd);
+  const st=computeStage();
   let h='';
   h+='<div class="topbar">'
     +'<div class="item"><span class="k">Lot</span><span class="v">'+lotNum+'</span></div>'
+    +'<div class="item"><span class="k">Reported Stage</span><span class="v">'+st.reportedCode+'</span><span class="sublbl">'+st.reportedLabel+'</span></div>'
     +'<div class="item"><span class="k">Start</span><span class="v">'+fmt(startDate)+'</span></div>'
     +'<div class="item"><span class="k">Projected Finish</span><span class="v">'+fmt(finDate)+'</span></div>'
     +'<div class="item"><span class="k">Working Days</span><span class="v">'+projEnd+'</span></div>'
     +'</div>';
-  document.getElementById('view').innerHTML=h+(noStart?'<div class="notice">No construction start date set for this lot — showing a preview from <b>today</b>. Set the start date in the admin Schedule Lots tab for real dates.</div>':'')+'<div id="sched"></div>';
+  // gate bar
+  if(lotGates.length){
+    let gb='<div class="gatebar"><div class="gh">'+(st.held?'⚡ HELD at 5.9 — actually Stage '+st.trueCode+' ('+st.trueLabel+')':(st.gatesOpen?'Utility Confirmations — required to clear Stage 5.9':'✓ All utilities confirmed'))+'</div><div class="grow">';
+    lotGates.forEach(g=>{gb+='<button class="gbtn'+(g.confirmed?' on':'')+'" data-gid="'+g.id+'" data-cf="'+(g.confirmed?1:0)+'">'+g.gate_name+(g.confirmed?' ✓':'')+'</button>';});
+    gb+='</div></div>';
+    h_gate=gb;
+  } else { h_gate=''; }
+  document.getElementById('view').innerHTML=h+(noStart?'<div class="notice">No construction start date set for this lot — showing a preview from <b>today</b>. Set the start date in the admin Schedule Lots tab for real dates.</div>':'')+h_gate+'<div id="sched"></div>';
   renderSched();
+  document.querySelectorAll('.gbtn').forEach(b=>{b.onclick=()=>toggleGate(b.dataset.gid, b.dataset.cf==='1');});
 }
+let h_gate='';
+
+async function toggleGate(gateId, currentlyConfirmed){
+  const g=lotGates.find(x=>x.id===gateId); if(!g)return;
+  g.confirmed=!currentlyConfirmed;
+  render(lastLotNum,lastNoStart);
+  await sbCall('updateScheduleLotGate',{gate_id:gateId,confirmed:g.confirmed});
+}
+let lastLotNum='', lastNoStart=false;
 
 function renderSched(){
   let h='';
