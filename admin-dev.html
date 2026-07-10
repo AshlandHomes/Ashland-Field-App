@@ -452,6 +452,29 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<!-- SET PRE-CONSTRUCTION STAGE MODAL -->
+<div class="modal-overlay" id="modal-schedule-stage">
+  <div class="modal" style="max-width:420px">
+    <h2>Set Pre-Construction Stage</h2>
+    <div class="modal-sub" id="sched-stage-sub"></div>
+    <input type="hidden" id="sched-stage-id">
+    <div class="field"><label>Pre-Construction Stage</label>
+      <select id="sched-stage-sel">
+        <option value="">— none —</option>
+        <option value="0.3">0.3 — Released to Obtain Permit</option>
+        <option value="0.9">0.9 — Permit Check Received</option>
+        <option value="1">1 — Permit Received Not Released</option>
+        <option value="1.1">1.1 — Permit Received &amp; Released</option>
+      </select>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:-6px">Once construction tasks are completed, the stage advances automatically and overrides this.</div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-schedule-stage')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitScheduleStage()">Save →</button>
+    </div>
+  </div>
+</div>
+
 <!-- STAMP SCHEDULE LOT MODAL -->
 <div class="modal-overlay" id="modal-stamp">
   <div class="modal">
@@ -1305,6 +1328,7 @@ function renderScheduleLots() {
       <td>${created}</td>
       <td>
         <button class="btn btn-sm" onclick="openScheduleStart('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc">Set Start</button>
+        <button class="btn btn-sm" onclick="openScheduleStageModal('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#eafaf1;color:#1E8449;border:1px solid #a9dfbf;margin-left:4px">Set Stage</button>
         <button class="btn btn-sm" onclick="deleteScheduleLot('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
@@ -1382,6 +1406,30 @@ async function submitScheduleStart() {
   const result = await sbCall('updateScheduleLot', { id, construction_start_date: dateVal });
   if (result !== null) {
     closeModal('modal-schedule-start');
+    await loadScheduleLots();
+  }
+}
+
+function openScheduleStageModal(id, num) {
+  document.getElementById('sched-stage-id').value = id;
+  document.getElementById('sched-stage-sub').textContent = 'Set the pre-construction stage for ' + num;
+  const lot = scheduleLots.find(l => l.id === id);
+  document.getElementById('sched-stage-sel').value = (lot && lot.manual_stage) || '';
+  document.getElementById('modal-schedule-stage').classList.add('open');
+}
+
+async function submitScheduleStage() {
+  const id = document.getElementById('sched-stage-id').value;
+  const code = document.getElementById('sched-stage-sel').value || null;
+  const lot = scheduleLots.find(l => l.id === id);
+  const manualCodes = ['0.3','0.9','1','1.1',''];
+  const isAutoReported = lot && lot.reported_stage && !manualCodes.includes(lot.reported_stage);
+  const updates = { id, manual_stage: code };
+  // only set the reported/true stage from manual if an auto (construction) stage hasn't taken over
+  if (!isAutoReported) { updates.reported_stage = code; updates.true_stage = code; }
+  const result = await sbCall('updateScheduleLot', updates);
+  if (result !== null) {
+    closeModal('modal-schedule-stage');
     await loadScheduleLots();
   }
 }
