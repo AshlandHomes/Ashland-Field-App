@@ -300,6 +300,15 @@ case 'keycheck': {
 
         return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, task_count: lotTasks.length, gate_count: gates.length }) };
       }
+        case 'updateScheduleLot': {
+        const { id, ...updates } = payload;
+        if (!id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        }
+        updates.updated_at = new Date().toISOString();
+        const r = await supabaseRequest('PATCH', `sched_lots?id=eq.${id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
