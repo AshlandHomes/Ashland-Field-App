@@ -419,6 +419,25 @@ case 'keycheck': {
         await supabaseRequest('DELETE', `sched_lot_task_notes?id=eq.${payload.id}`);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
+        case 'getFlaggedNotes': {
+        // all red/yellow flagged notes across every lot, newest first, with lot context
+        const notes = await supabaseRequest('GET', `sched_lot_task_notes?flag=in.(red,yellow)&select=*&order=created_at.desc`);
+        const rows = notes.data || [];
+        // attach lot number/community/builder for each note's lot
+        const lotIds = [...new Set(rows.map(n => n.lot_id).filter(Boolean))];
+        let lotMap = {};
+        if (lotIds.length) {
+          const lots = await supabaseRequest('GET', `sched_lots?id=in.(${lotIds.join(',')})&select=id,lot_number,community,builder_name`);
+          (lots.data || []).forEach(l => { lotMap[l.id] = l; });
+        }
+        const enriched = rows.map(n => ({
+          ...n,
+          lot_number: lotMap[n.lot_id] ? lotMap[n.lot_id].lot_number : null,
+          community: lotMap[n.lot_id] ? lotMap[n.lot_id].community : null,
+          builder_name: lotMap[n.lot_id] ? lotMap[n.lot_id].builder_name : null
+        }));
+        return { statusCode: 200, body: JSON.stringify(enriched) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
