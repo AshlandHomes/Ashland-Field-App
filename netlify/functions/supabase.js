@@ -379,6 +379,46 @@ case 'keycheck': {
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
+        case 'addTaskNote': {
+        const { lot_task_id, lot_id, bt_num, note, flag, author } = payload;
+        if (!lot_task_id || !note) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_task_id and note are required' }) };
+        }
+        const r = await supabaseRequest('POST', 'sched_lot_task_notes', {
+          lot_task_id, lot_id: lot_id || null, bt_num: (bt_num != null ? bt_num : null),
+          note, flag: flag || 'none', author: author || null
+        });
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getTaskNotes': {
+        const { lot_id } = payload;
+        if (!lot_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_id is required' }) };
+        }
+        const r = await supabaseRequest('GET', `sched_lot_task_notes?lot_id=eq.${lot_id}&select=*&order=created_at.asc`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'updateTaskNote': {
+        const { id, note, flag } = payload;
+        if (!id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        }
+        const updates = {};
+        if (note !== undefined) updates.note = note;
+        if (flag !== undefined) updates.flag = flag;
+        const r = await supabaseRequest('PATCH', `sched_lot_task_notes?id=eq.${id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'deleteTaskNote': {
+        if (!payload.id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        }
+        await supabaseRequest('DELETE', `sched_lot_task_notes?id=eq.${payload.id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
