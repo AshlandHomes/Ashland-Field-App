@@ -443,6 +443,14 @@ case 'keycheck': {
         const r = await supabaseRequest('GET', 'sched_lot_task_notes?select=*&limit=5');
         return { statusCode: 200, body: JSON.stringify({ status: r.status, error: r.error || null, data: r.data }) };
       }
+        case 'debugNotesFilter': {
+        const r = await supabaseRequest('GET', `sched_lot_task_notes?lot_id=eq.${payload.lot_id}&select=*`);
+        return { statusCode: 200, body: JSON.stringify({ status: r.status, error: r.error || null, count: (r.data||[]).length }) };
+      }
+      case 'debugNoteWrite': {
+        const r = await supabaseRequest('POST', 'sched_lot_task_notes', { lot_task_id: payload.lot_task_id, lot_id: payload.lot_id, bt_num: payload.bt_num, note: 'DBG', flag: 'red' });
+        return { statusCode: 200, body: JSON.stringify({ status: r.status, error: r.error || null, data: r.data }) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
