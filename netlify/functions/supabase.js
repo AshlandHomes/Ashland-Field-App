@@ -133,20 +133,25 @@ exports.handler = async function(event) {
 
       case 'verifyPin': {
         const { name, pin } = payload;
-        const r = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=pin_hash,temp_pin,is_admin`);
+        const r = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=pin_hash,temp_pin,is_admin,failed_attempts,is_locked`);
         if (!r.data || !r.data.length) {
           return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'builder_not_found' }) };
         }
-        const builder = r.data[0];
-        if (builder.temp_pin && builder.temp_pin === pin) {
-          return { statusCode: 200, body: JSON.stringify({ valid: true, is_temp: true }) };
+        const b = r.data[0];
+        if (b.is_locked) {
+          return { statusCode: 200, body: JSON.stringify({ valid: false, locked: true, reason: 'locked' }) };
         }
-        if (builder.pin_hash && builder.pin_hash === pin) {
-          return { statusCode: 200, body: JSON.stringify({ valid: true, is_temp: false }) };
+        const ok = (b.temp_pin && b.temp_pin === pin) || (b.pin_hash && b.pin_hash === pin);
+        if (ok) {
+          await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { failed_attempts: 0, updated_at: new Date().toISOString() });
+          const isTemp = !!(b.temp_pin && b.temp_pin === pin);
+          return { statusCode: 200, body: JSON.stringify({ valid: true, is_temp: isTemp }) };
         }
-        return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'wrong_pin' }) };
+        const attempts = (b.failed_attempts || 0) + 1;
+        const lock = attempts >= 5;
+        await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { failed_attempts: attempts, is_locked: lock, updated_at: new Date().toISOString() });
+        return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'wrong_pin', locked: lock, attemptsLeft: Math.max(0, 5 - attempts) }) };
       }
-
       case 'addOverride': {
         const r = await supabaseRequest('POST', 'field_ops_overrides', payload);
         return { statusCode: 200, body: JSON.stringify(r.data) };
@@ -431,7 +436,25 @@ case 'keycheck': {
         }));
         return { statusCode: 200, body: JSON.stringify(enriched) };
       }
-     
+     case 'setBuilderPin': {
+        const { name, pin } = payload;
+        if (!name || !pin || !/^\d{4}$/.test(pin)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
+        }
+        await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
+          pin_hash: pin, temp_pin: null, failed_attempts: 0, is_locked: false, updated_at: new Date().toISOString()
+        });
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
+      case 'unlockBuilder': {
+        const { name } = payload;
+        if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
+        await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
+          is_locked: false, failed_attempts: 0, updated_at: new Date().toISOString()
+        });
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
