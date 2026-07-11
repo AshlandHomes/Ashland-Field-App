@@ -763,12 +763,15 @@ function renderBuildersTable() {
   }
   const rows = builders.map(b => {
     const subs = (b.subdivisions||[]).map(s=>`<span class="badge-sub ${SUB_COLORS[s]||''}" style="margin-right:3px">${s}</span>`).join('') || '<span style="color:var(--muted)">None</span>';
-    const pinStatus = b.temp_pin 
+    const pinStatus = b.is_locked
+      ? '<span class="badge" style="background:#fee2e2;color:#dc2626;font-weight:700">🔒 Locked</span>'
+      : b.temp_pin 
       ? '<span class="badge" style="background:#fef9e7;color:#e67e22">Temp PIN set</span>'
       : b.pin_hash 
         ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">PIN set</span>'
         : '<span class="badge" style="background:#fee2e2;color:var(--red)">No PIN</span>';
     const lotCount = lots.filter(l=>l.assigned_builder===b.name).length;
+    const unlockBtn = b.is_locked ? `<button class="btn btn-sm" style="background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf;margin-left:6px" onclick="unlockBuilder('${b.name}')">Unlock</button>` : '';
     const deleteBtn = b.is_admin ? '' : `<button class="btn btn-sm" style="background:#fee2e2;color:var(--red);margin-left:6px" onclick="deleteBuilder('${b.name}')">Delete</button>`;
     return `<tr>
       <td><strong>${b.name}</strong>${b.is_admin?'<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-left:6px">Admin</span>':''}</td>
@@ -777,6 +780,7 @@ function renderBuildersTable() {
       <td>${pinStatus}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="openSetPinModal('${b.name}')">Set PIN</button>
+        ${unlockBtn}
         ${deleteBtn}
       </td>
     </tr>`;
@@ -1005,6 +1009,15 @@ async function deleteBuilder(name) {
     await loadBuilders();
     renderBuildersTable();
     alert(name + ' has been deleted.');
+  }
+}
+
+async function unlockBuilder(name) {
+  const result = await sbCall('unlockBuilder', {name});
+  if (result !== null) {
+    await loadBuilders();
+    renderBuildersTable();
+    alert(name + ' has been unlocked and their failed attempts reset.');
   }
 }
 
