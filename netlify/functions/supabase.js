@@ -455,6 +455,91 @@ case 'keycheck': {
         });
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
+        case 'getTemplateTasks': {
+        const { template_id } = payload;
+        if (!template_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id is required' }) };
+        }
+        const phRes = await supabaseRequest('GET', `sched_template_phases?template_id=eq.${template_id}&select=id,name,phase_order`);
+        const phaseMap = {};
+        (phRes.data || []).forEach(p => { phaseMap[p.id] = { name: p.name, order: p.phase_order }; });
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=*&order=task_order`);
+        const tasks = (tkRes.data || []).map(t => {
+          const ph = phaseMap[t.phase_id] || {};
+          return {
+            bt_num: t.bt_num, name: t.name, phase_name: ph.name || null, phase_order: (ph.order !== undefined ? ph.order : null),
+            duration: t.duration, lag: t.lag, relative_start: t.relative_start, predecessors: t.predecessors,
+            notification: t.notification, relative_finish: t.relative_finish, is_critical: t.is_critical,
+            task_type: t.task_type || 'work', task_order: t.task_order
+          };
+        });
+        return { statusCode: 200, body: JSON.stringify(tasks) };
+      }
+
+      case 'migrateOldLot': {
+        const { template_id, lot_number, community, builder_name, construction_start_date,
+                completed, gates, reported_stage, true_stage } = payload;
+        if (!template_id || !lot_number) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and lot_number required' }) };
+        }
+        const doneMap = {};
+        (completed || []).forEach(c => { doneMap[c.bt_num] = { actual_start: c.actual_start || null, actual_finish: c.actual_finish || null }; });
+
+        const phRes = await supabaseRequest('GET', `sched_template_phases?template_id=eq.${template_id}&select=id,name,phase_order`);
+        const phaseMap = {};
+        (phRes.data || []).forEach(p => { phaseMap[p.id] = { name: p.name, order: p.phase_order }; });
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=*&order=task_order`);
+        const tasks = tkRes.data || [];
+        if (!tasks.length) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template has no tasks' }) };
+        }
+
+        const lotRes = await supabaseRequest('POST', 'sched_lots', {
+          template_id, lot_number, community: community || null, builder_name: builder_name || null,
+          construction_start_date: construction_start_date || null, status: 'active',
+          reported_stage: reported_stage || null, true_stage: true_stage || null,
+          last_task_update: new Date().toISOString()
+        });
+        if (lotRes.error || !lotRes.data) {
+          return { statusCode: 500, body: JSON.stringify({ error: 'lot insert failed: ' + (lotRes.error || 'unknown') }) };
+        }
+        const lot = Array.isArray(lotRes.data) ? lotRes.data[0] : lotRes.data;
+        const lot_id = lot.id;
+
+        const lotTasks = tasks.map(t => {
+          const ph = phaseMap[t.phase_id] || {};
+          const d = doneMap[t.bt_num];
+          return {
+            lot_id, source_task_id: t.id, bt_num: t.bt_num, name: t.name,
+            phase_name: ph.name || null, phase_order: (ph.order !== undefined ? ph.order : null),
+            duration: t.duration, lag: t.lag, relative_start: t.relative_start, predecessors: t.predecessors,
+            notification: t.notification, relative_finish: t.relative_finish, is_critical: t.is_critical,
+            task_type: t.task_type || 'work', task_order: t.task_order,
+            status: d ? 'finished' : 'not_started',
+            actual_start: d ? d.actual_start : null,
+            actual_finish: d ? d.actual_finish : null
+          };
+        });
+        const ins = await supabaseRequest('POST', 'sched_lot_tasks', lotTasks);
+        if (ins.error) {
+          await supabaseRequest('DELETE', `sched_lots?id=eq.${lot_id}`);
+          return { statusCode: 500, body: JSON.stringify({ error: 'task insert failed: ' + ins.error }) };
+        }
+
+        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=*`);
+        const tgates = gRes.data || [];
+        if (tgates.length) {
+          const g = gates || {};
+          const gateRows = tgates.map(tg => {
+            const key = (tg.name || '').toLowerCase();
+            const conf = !!g[key];
+            return { lot_id, source_gate_id: tg.id, gate_name: tg.name, confirmed: conf, confirmed_at: conf ? new Date().toISOString() : null };
+          });
+          await supabaseRequest('POST', 'sched_lot_gate_state', gateRows);
+        }
+
+        return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, tasks: lotTasks.length, completed: (completed||[]).length }) };
+      }
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
