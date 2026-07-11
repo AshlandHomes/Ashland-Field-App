@@ -120,6 +120,14 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
       <div class="pinerr" id="pinerr"></div>
     </div>
   </div>
+  <div class="screen" id="screen-setpin">
+    <div class="pinwrap">
+      <div class="brand" style="margin:12px 0"><h1 id="setpin-heading">Create your PIN</h1><p id="setpin-sub">Choose a new 4-digit PIN</p></div>
+      <div class="pindots" id="setpin-dots"></div>
+      <div class="keys" id="setpin-keys"></div>
+      <div class="pinerr" id="setpin-err"></div>
+    </div>
+  </div>
   <div class="screen" id="screen-lots">
     <div class="topbar">
       <div class="who">Signed in as<br><b id="lots-who"></b></div>
@@ -166,8 +174,57 @@ async function pinKey(k){
 }
 async function tryPin(){
   const res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry});
-  if(res&&res.valid){enterApp();}
-  else{document.getElementById('pinerr').textContent='Incorrect PIN';pinEntry='';setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},900);}
+  if(res&&res.valid){
+    if(res.is_temp){ startSetPin(); return; }  // forced PIN change on temp PIN
+    enterApp();
+  } else if(res&&res.locked){
+    document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
+    pinEntry='';renderPin();
+  } else {
+    const left=(res&&typeof res.attemptsLeft==='number')?res.attemptsLeft:null;
+    const msg=(left!==null)?('Incorrect PIN — '+left+' attempt'+(left===1?'':'s')+' left'):'Incorrect PIN';
+    document.getElementById('pinerr').textContent=msg;pinEntry='';
+    setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},1100);
+  }
+}
+
+// ---- forced PIN change (temp PIN) ----
+let setPinEntry='', setPinConfirm='', setPinStage='new';
+function startSetPin(){
+  setPinEntry='';setPinConfirm='';setPinStage='new';
+  showScreen('screen-setpin');renderSetPin();
+}
+function renderSetPin(){
+  const entry=setPinStage==='new'?setPinEntry:setPinConfirm;
+  document.getElementById('setpin-heading').textContent=setPinStage==='new'?'Create your PIN':'Confirm your PIN';
+  document.getElementById('setpin-sub').textContent=setPinStage==='new'?'Choose a new 4-digit PIN':'Enter it again to confirm';
+  let dots='';for(let i=0;i<4;i++)dots+='<div class="pindot'+(i<entry.length?' filled':'')+'"></div>';
+  document.getElementById('setpin-dots').innerHTML=dots;
+  const keyEls=['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  document.getElementById('setpin-keys').innerHTML=keyEls.map(k=>{if(k==='')return '<div class="key blank"></div>';return '<button class="key" onclick="setPinKey(\''+k+'\')">'+k+'</button>';}).join('');
+}
+async function setPinKey(k){
+  const err=document.getElementById('setpin-err');err.textContent='';
+  if(setPinStage==='new'){
+    if(k==='⌫'){setPinEntry=setPinEntry.slice(0,-1);renderSetPin();return;}
+    if(setPinEntry.length>=4)return;
+    setPinEntry+=k;renderSetPin();
+    if(setPinEntry.length===4){setPinStage='confirm';setTimeout(renderSetPin,150);}
+  } else {
+    if(k==='⌫'){setPinConfirm=setPinConfirm.slice(0,-1);renderSetPin();return;}
+    if(setPinConfirm.length>=4)return;
+    setPinConfirm+=k;renderSetPin();
+    if(setPinConfirm.length===4){
+      if(setPinConfirm!==setPinEntry){
+        err.textContent='PINs don\u2019t match — try again';
+        setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);
+        return;
+      }
+      const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
+      if(r&&r.success){enterApp();}
+      else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
+    }
+  }
 }
 
 function enterApp(){document.getElementById('lots-who').textContent=currentBuilder;showScreen('screen-lots');loadMyLots();}
