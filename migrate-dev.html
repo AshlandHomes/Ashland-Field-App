@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Migration Preview (DEV)</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--brand:#00A9D1;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b;--amber:#e67e22}
+body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--ink);padding:40px 16px}
+.devbanner{position:fixed;top:0;left:0;right:0;z-index:99;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px}
+.wrap{max-width:1000px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+.summary{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;gap:32px}
+.summary .n{font-size:28px;font-weight:700;font-family:'DM Mono',monospace}
+.summary .l{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.summary .ok{color:var(--green)}.summary .bad{color:var(--red)}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th{background:#f9fafb;padding:10px 12px;text-align:left;font-size:11px;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--line)}
+td{padding:10px 12px;font-size:13px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;font-family:'DM Mono',monospace;font-weight:700;font-size:12px}
+.b-stage{background:#e0f2fe;color:#0369a1}
+.b-held{background:#fef4e6;color:var(--amber)}
+.match{color:var(--green);font-weight:700}
+.mismatch{color:var(--red);font-weight:700}
+.util{font-family:'DM Mono',monospace;font-size:11px}
+.loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace}
+.btn{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:20px}
+</style>
+</head>
+<body>
+<div class="devbanner">⚠ DEV — MIGRATION PREVIEW (READ ONLY, NO WRITES) ⚠</div>
+<div class="wrap">
+  <h1>Migration Preview</h1>
+  <div class="sub">Computes each active lot's stage from its old <code>completed_tasks</code> and compares to the old app's reported stage. If they match, the task numbering aligns and the preload logic is sound. <b>Nothing is written.</b></div>
+  <button class="btn" onclick="run()">↻ Run Preview</button>
+  <div id="out"><div class="loading">Click “Run Preview”.</div></div>
+</div>
+
+<script>
+const SUPABASE_FN='/.netlify/functions/supabase';
+let API_SECRET=null;
+async function loadSecret(){if(API_SECRET)return API_SECRET;const r=await fetch('/.netlify/functions/config');const d=await r.json();API_SECRET=d.secret;return API_SECRET;}
+async function sbCall(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});const d=await r.json();if(d&&d.error){console.error(action,d.error);return null;}return d;}
+
+const SLAB_TEMPLATE='9fae6f78-d2b5-4d57-9e09-8622d37cd829';
+
+function computeStageFromTasks(completedSet, stages, util){
+  const achieved=stages.filter(s=>!s.is_manual && s.triggers && s.triggers.length && s.triggers.every(bt=>completedSet.has(bt)));
+  let trueStage=null;
+  achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
+  const gatesOpen=!(util.gas&&util.power&&util.water);
+  if(trueStage && gatesOpen && parseFloat(trueStage.code)>5.9){
+    return {reported:'5.9',held:true,trueCode:trueStage.code};
+  }
+  return {reported:trueStage?trueStage.code:'—',held:false,trueCode:trueStage?trueStage.code:null};
+}
+
+async function run(){
+  document.getElementById('out').innerHTML='<div class="loading">Loading old lots + template stage map…</div>';
+  const lots=await sbCall('getLots',{})||[];
+  const sm=await sbCall('getTemplateStageMap',{template_id:SLAB_TEMPLATE});
+  const stages=(sm&&sm.stages)||[];
+  const active=lots.filter(l=>!l.is_closed);
+
+  let match=0, mism=0;
+  const rows=active.map(l=>{
+    const completed=Array.isArray(l.completed_tasks)?l.completed_tasks:[];
+    const set=new Set(completed.map(Number));
+    const util={gas:l.utilities&&(l.utilities.gas===true||l.utilities.gas==='true'),
+                power:l.utilities&&(l.utilities.power===true||l.utilities.power==='true'),
+                water:l.utilities&&(l.utilities.water===true||l.utilities.water==='true')};
+    const c=computeStageFromTasks(set,stages,util);
+    const old=String(l.stage);
+    const isMatch=(c.reported===old);
+    if(isMatch)match++;else mism++;
+    const stageBadge='<span class="badge '+(c.held?'b-held':'b-stage')+'">'+c.reported+'</span>'+(c.held?' <span style="font-size:11px;color:var(--amber)">true '+c.trueCode+'</span>':'');
+    return '<tr>'
+      +'<td>'+l.subdivision+'</td>'
+      +'<td><b>'+l.number+'</b></td>'
+      +'<td>'+(l.assigned_builder||'—')+'</td>'
+      +'<td>'+completed.length+'</td>'
+      +'<td class="util">'+(util.gas?'G':'·')+(util.power?'P':'·')+(util.water?'W':'·')+'</td>'
+      +'<td><span class="badge b-stage">'+old+'</span></td>'
+      +'<td>'+stageBadge+'</td>'
+      +'<td class="'+(isMatch?'match':'mismatch')+'">'+(isMatch?'✓ match':'✗ '+old+'≠'+c.reported)+'</td>'
+      +'</tr>';
+  }).join('');
+
+  document.getElementById('out').innerHTML=
+    '<div class="summary">'
+    +'<div><div class="n">'+active.length+'</div><div class="l">Active Lots</div></div>'
+    +'<div><div class="n ok">'+match+'</div><div class="l">Stage Match</div></div>'
+    +'<div><div class="n '+(mism?'bad':'ok')+'">'+mism+'</div><div class="l">Mismatch</div></div>'
+    +'</div>'
+    +'<table><thead><tr><th>SD</th><th>Lot</th><th>Builder</th><th>Done</th><th>Util</th><th>Old Stage</th><th>Computed</th><th>Check</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+</script>
+</body>
+</html>
