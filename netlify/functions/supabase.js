@@ -337,7 +337,22 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
-      // ── NEW: edit a single lot task (predecessors, lag, duration, phase) ──
+      // ── Item 4: stamp lot as complete with frozen health delta ──
+      case 'stampLotComplete': {
+        const { id, completion_stamped_at, completion_wd_elapsed, completion_health_delta } = payload;
+        if (!id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        }
+        const r = await supabaseRequest('PATCH', `sched_lots?id=eq.${id}`, {
+          completion_stamped_at: completion_stamped_at || new Date().toISOString(),
+          completion_wd_elapsed: completion_wd_elapsed != null ? completion_wd_elapsed : null,
+          completion_health_delta: completion_health_delta != null ? completion_health_delta : null,
+          updated_at: new Date().toISOString()
+        });
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      // ── edit a single lot task (predecessors, lag, duration, phase) ──
       case 'editLotTask': {
         const { task_id, predecessors, lag, duration, phase_name, phase_order } = payload;
         if (!task_id) {
