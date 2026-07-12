@@ -483,6 +483,9 @@ exports.handler = async function(event) {
         const { include_archived } = payload || {};
         const filter = include_archived ? '' : '&is_archived=eq.false';
         const r = await supabaseRequest('GET', `sched_subdivisions?select=*&order=code${filter}`);
+        if (r.error) {
+          return { statusCode: 200, body: JSON.stringify({ error: 'DB(' + r.status + '): ' + r.error }) };
+        }
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
       }
 
