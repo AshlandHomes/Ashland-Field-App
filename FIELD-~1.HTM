@@ -466,7 +466,7 @@ function renderSchedule(){
 }
 
 function renderTasks(){
-  const canEdit=(currentBuilder===curLot.builder_name);
+  const canEdit=true; // TODO: re-enable builder guard before go-live
   let h='';
   const phaseOrder=[];const seen={};
   TASKS.forEach(t=>{if(!seen[t.phase]){seen[t.phase]=true;phaseOrder.push(t.phase);}});
