@@ -4,9 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ashland Homes — Admin Console</title>
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="theme-color" content="#00A9D1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -22,7 +19,6 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 /* ── LOGIN ── */
 .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--grey)}
 .login-box{background:#fff;border-radius:20px;padding:40px 36px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.2)}
-.login-logo{height:40px;width:auto;margin-bottom:24px}
 .login-box h1{font-family:'DM Serif Display',serif;font-size:24px;margin-bottom:4px}
 .login-box p{color:var(--muted);font-size:13px;margin-bottom:28px}
 .login-pin{display:flex;gap:8px;margin-bottom:16px}
@@ -37,9 +33,9 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .app.open{display:flex;flex-direction:column;min-height:100vh}
 .topbar{background:var(--grey);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-left{display:flex;align-items:center;gap:16px}
-.topbar img{height:28px;filter:brightness(0) invert(1);opacity:.9}
 .topbar-title{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:rgba(255,255,255,.6)}
 .topbar-right{display:flex;align-items:center;gap:12px}
+.topbar-brand{font-family:'DM Serif Display',serif;font-size:18px;color:#fff}
 .topbar-btn{padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.8);font-family:'Instrument Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer}
 .topbar-btn:hover{background:rgba(255,255,255,.1)}
 .topbar-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
@@ -51,7 +47,7 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 
 .content{flex:1;padding:28px 32px;max-width:1400px;width:100%}
 
-/* ── CARDS ── */
+/* ── STAT CARDS ── */
 .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:28px}
 .stat-card{background:#fff;border-radius:12px;padding:20px;border:1px solid var(--rule)}
 .stat-card .val{font-family:'DM Serif Display',serif;font-size:32px;color:var(--brand);line-height:1}
@@ -59,17 +55,16 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 
 /* ── TABLE ── */
 .table-wrap{background:#fff;border-radius:12px;border:1px solid var(--rule);overflow:hidden;margin-bottom:24px}
-.table-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--rule)}
+.table-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--rule);flex-wrap:wrap;gap:10px}
 .table-header h2{font-size:15px;font-weight:700}
-.table-actions{display:flex;gap:8px;align-items:center}
-.search-input{padding:7px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:13px;width:220px;outline:none}
+.table-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.search-input{padding:7px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:13px;width:200px;outline:none}
 .search-input:focus{border-color:var(--brand)}
 .btn{padding:8px 16px;border-radius:8px;border:none;font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer}
 .btn-primary{background:var(--brand);color:#fff}
 .btn-primary:hover{background:var(--brand-dark)}
 .btn-secondary{background:var(--cream);color:var(--ink);border:1px solid var(--rule)}
 .btn-secondary:hover{background:#e5e7eb}
-.btn-green{background:var(--green);color:#fff}
 .btn-red{background:var(--red);color:#fff}
 .btn-sm{padding:5px 10px;font-size:12px}
 table{width:100%;border-collapse:collapse}
@@ -80,15 +75,12 @@ tr:last-child td{border-bottom:none}
 tr:hover td{background:#f9fafb}
 .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'DM Mono',monospace;font-weight:600}
 .badge-stage{background:#e0f2fe;color:#0369a1}
-.badge-health-ahead{background:var(--gl);color:var(--green)}
-.badge-health-behind{background:#fee2e2;color:var(--red)}
-.badge-health-ok{background:#f0fdf4;color:var(--green)}
 .badge-sub{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;font-family:'DM Mono',monospace}
 
 /* ── MODAL ── */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
-.modal{background:#fff;border-radius:16px;padding:28px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal{background:#fff;border-radius:16px;padding:28px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto}
 .modal h2{font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:6px}
 .modal-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
 .field{margin-bottom:16px}
@@ -96,9 +88,12 @@ tr:hover td{background:#f9fafb}
 .field input,.field select,.field textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:14px;outline:none}
 .field input:focus,.field select:focus{border-color:var(--brand)}
 .modal-btns{display:flex;gap:10px;margin-top:24px;justify-content:flex-end}
+.modal-section{border-top:1px solid var(--rule);padding-top:18px;margin-top:4px}
+.modal-section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:14px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* ── FILTER BAR ── */
-.filter-bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .filter-select{padding:7px 12px;border-radius:8px;border:1px solid var(--rule);font-family:'Instrument Sans',sans-serif;font-size:13px;background:#fff;outline:none}
 .filter-select:focus{border-color:var(--brand)}
 
@@ -110,20 +105,15 @@ tr:hover td{background:#f9fafb}
 .sub-TE{background:#FDEDEC;color:#922B21}
 .sub-CW{background:#EBF5FB;color:#1A5276}
 
-/* ── EMPTY STATE ── */
+/* ── EMPTY / LOADING ── */
 .empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
 .empty-state .icon{font-size:48px;margin-bottom:12px}
-.empty-state p{font-size:14px}
-
-/* ── LOADING ── */
 .loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
-
-/* ── SCREEN SECTIONS ── */
-.section{display:none}
-.section.active{display:block}
+.section{display:none}.section.active{display:block}
 </style>
 </head>
 <body>
+
 <div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">
   ⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠
 </div>
@@ -132,11 +122,10 @@ tr:hover td{background:#f9fafb}
 <!-- LOGIN -->
 <div class="login-wrap" id="login-wrap">
   <div class="login-box">
-    <img class="login-logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 80'%3E%3Ctext x='10' y='50' font-family='serif' font-size='40' fill='%234C4C4C'%3EAH%3C/text%3E%3C/svg%3E" alt="AH">
     <h1>Admin Console</h1>
     <p>Ashland Homes Field Operations</p>
     <div class="login-pin">
-      <input type="password" id="pin-input" placeholder="••••" maxlength="4" inputmode="numeric" onkeydown="if(event.key==='Enter')tryLogin()">
+      <input type="password" id="pin-input" placeholder="••••" maxlength="4" inputmode="numeric">
     </div>
     <button class="login-btn" onclick="tryLogin()">Enter →</button>
     <div class="login-error" id="login-error"></div>
@@ -147,125 +136,87 @@ tr:hover td{background:#f9fafb}
 <div class="app" id="app">
   <div class="topbar">
     <div class="topbar-left">
-      <div style="font-family:'DM Serif Display',serif;font-size:18px;color:#fff">Ashland Homes</div>
+      <div class="topbar-brand">Ashland Homes</div>
       <div class="topbar-title">Admin Console</div>
     </div>
     <div class="topbar-right">
       <span style="font-size:12px;color:rgba(255,255,255,.5);font-family:'DM Mono',monospace" id="last-updated"></span>
       <button class="topbar-btn" onclick="refreshData()">↻ Refresh</button>
-      <button class="topbar-btn primary" onclick="exportToExcel()">↓ Export Excel</button>
+      <button class="topbar-btn primary" onclick="exportToExcel()">↓ Export</button>
       <button class="topbar-btn" onclick="logout()">Sign Out</button>
     </div>
   </div>
 
   <div class="nav-tabs">
-    <div class="nav-tab active" onclick="showSection('lots')">🏗 Lots</div>
-    <div class="nav-tab" onclick="showSection('builders')">👷 Builders</div>
-    <div class="nav-tab" onclick="showSection('subdivisions')">🏘 Subdivisions</div>
-    <div class="nav-tab" onclick="showSection('schedule')">📅 Schedule Lots</div>
-    <div class="nav-tab" onclick="showSection('flags')">🚩 Flags</div>
+    <div class="nav-tab active" data-section="lots" onclick="showSection('lots',this)">🏗 Lots</div>
+    <div class="nav-tab" data-section="builders" onclick="showSection('builders',this)">👷 Builders</div>
+    <div class="nav-tab" data-section="subdivisions" onclick="showSection('subdivisions',this)">🏘 Subdivisions</div>
+    <div class="nav-tab" data-section="flags" onclick="showSection('flags',this)">🚩 Flags</div>
   </div>
 
   <div class="content">
 
-    <!-- STATS ROW -->
+    <!-- STAT CARDS -->
     <div class="stat-row" id="stat-row">
       <div class="stat-card"><div class="val" id="stat-total">—</div><div class="lbl">Total Lots</div></div>
       <div class="stat-card"><div class="val" id="stat-active">—</div><div class="lbl">Active Builds</div></div>
       <div class="stat-card"><div class="val" id="stat-updated">—</div><div class="lbl">Updated This Week</div></div>
-      <div class="stat-card"><div class="val" id="stat-behind">—</div><div class="lbl">Behind Schedule</div></div>
-      <div class="stat-card"><div class="val" id="stat-complete">—</div><div class="lbl">Stage 9.5 Complete</div></div>
+      <div class="stat-card"><div class="val" id="stat-ready">—</div><div class="lbl">Ready to Close</div></div>
+      <div class="stat-card"><div class="val" id="stat-closed">—</div><div class="lbl">Closed</div></div>
     </div>
 
-    <!-- LOTS SECTION -->
+    <!-- LOTS -->
     <div class="section active" id="section-lots">
       <div class="table-wrap">
         <div class="table-header">
-          <h2>Active Lots</h2>
+          <h2>Lots</h2>
           <div class="table-actions">
-            <div class="filter-bar" style="margin:0">
-              <select class="filter-select" id="filter-sub" onchange="renderLotsTable()">
-                <option value="">All Subdivisions</option>
-                <option value="RC">RC — Ruby Creek</option>
-                <option value="CO">CO — Chimney Oaks</option>
-                <option value="TB">TB — Traditions of Braselton</option>
-                <option value="CT">CT — Clocktower</option>
-                <option value="TE">TE — Thurgood Estates</option>
-                <option value="CW">CW — Carrington Walk</option>
+            <div class="filter-bar">
+              <select class="filter-select" id="filter-community" onchange="renderLotsTable()">
+                <option value="">All Communities</option>
               </select>
               <select class="filter-select" id="filter-builder" onchange="renderLotsTable()">
                 <option value="">All Builders</option>
-                <option value="Matt Hines">Matt Hines</option>
-                <option value="Brendon Connor">Brendon Connor</option>
-                <option value="Dennis Duncan">Dennis Duncan</option>
               </select>
               <select class="filter-select" id="filter-close" onchange="renderLotsTable()">
-                <option value="">All Close Status</option>
+                <option value="">All Statuses</option>
                 <option value="active">Active Only</option>
-                <option value="scheduled">📅 Scheduled</option>
-                <option value="ready">⚠️ Ready to Schedule</option>
-                <option value="notyet">Not Yet</option>
+                <option value="ready">⚠️ Ready to Close</option>
+                <option value="scheduled">📅 Close Scheduled</option>
                 <option value="closed">🏠 Closed</option>
               </select>
-              <select class="filter-select" id="filter-update" onchange="renderLotsTable()">
-                <option value="">All Update Status</option>
-                <option value="pending">⚠️ Not Updated This Week</option>
-                <option value="updated">✓ Updated This Week</option>
-              </select>
-              <input class="search-input" id="lot-search" placeholder="Search lots..." oninput="renderLotsTable()">
+              <input class="search-input" id="lot-search" placeholder="Search lots…" oninput="renderLotsTable()">
             </div>
-<button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
+            <button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
           </div>
         </div>
-        <div id="lots-table-body">
-          <div class="loading">Loading lots from Supabase…</div>
-        </div>
+        <div id="lots-table-body"><div class="loading">Loading lots…</div></div>
       </div>
     </div>
 
-    <!-- BUILDERS SECTION -->
+    <!-- BUILDERS -->
     <div class="section" id="section-builders">
       <div class="table-wrap">
         <div class="table-header">
           <h2>Builders</h2>
           <button class="btn btn-primary" onclick="openAddBuilderModal()">+ Add Builder</button>
         </div>
-        <div id="builders-table-body">
-          <div class="loading">Loading builders…</div>
-        </div>
+        <div id="builders-table-body"><div class="loading">Loading builders…</div></div>
       </div>
     </div>
 
-    <!-- SUBDIVISIONS SECTION -->
+    <!-- SUBDIVISIONS -->
     <div class="section" id="section-subdivisions">
       <div class="table-wrap">
         <div class="table-header">
           <h2>Subdivisions</h2>
-          <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
+          <button class="btn btn-secondary" onclick="openAddSubModal()">+ Add Subdivision</button>
         </div>
-        <div id="subdivisions-table-body">
-          <div class="loading">Loading…</div>
-        </div>
+        <div id="subdivisions-table-body"><div class="loading">Loading…</div></div>
       </div>
     </div>
 
-    <!-- SCHEDULE LOTS SECTION (engine) -->
-    <div class="section" id="section-schedule">
-      <div class="table-wrap">
-        <div class="table-header">
-          <h2>Schedule Lots (Engine)</h2>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-secondary" onclick="exportScheduleStages()">↓ Export Stage Report</button>
-            <button class="btn btn-primary" onclick="openStampModal()">+ Stamp New Lot</button>
-          </div>
-        </div>
-        <div id="schedule-table-body">
-          <div class="loading">Loading schedule lots…</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- FLAGS SECTION -->
+    <!-- FLAGS -->
     <div class="section" id="section-flags">
       <div class="table-wrap">
         <div class="table-header">
@@ -286,54 +237,36 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
-<!-- DELAY LOG MODAL -->
-<div class="modal-overlay" id="modal-delay-log">
-  <div class="modal" style="max-width:600px;width:95vw">
-    <h2>Schedule Delay Log</h2>
-    <div class="modal-sub" id="delay-log-title">Loading…</div>
-    <div id="delay-log-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:60vh;overflow-y:auto"></div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-delay-log')">Close</button>
-      <button class="btn btn-green btn-sm" onclick="exportDelayLog()">↓ Export CSV</button>
-    </div>
-  </div>
-</div>
-
 <!-- ADD LOT MODAL -->
 <div class="modal-overlay" id="modal-add-lot">
   <div class="modal">
     <h2>Add New Lot</h2>
-    <div class="modal-sub">New lot will appear in the field app immediately</div>
-    <div class="field"><label>Subdivision</label>
-      <select id="new-sub">
-        <option value="">Select…</option>
-        <option value="RC">RC — Ruby Creek</option>
-        <option value="CO">CO — Chimney Oaks</option>
-        <option value="TB">TB — Traditions of Braselton</option>
-        <option value="CT">CT — Clocktower</option>
-        <option value="TE">TE — Thurgood Estates</option>
-        <option value="CW">CW — Carrington Walk</option>
-      </select>
+    <div class="modal-sub">Copies a full schedule template into a new lot.</div>
+    <div class="field">
+      <label>Template</label>
+      <select id="add-template"></select>
     </div>
-    <div class="field"><label>Lot Number</label><input id="new-num" placeholder="e.g. Lot 42" type="text"></div>
-    <div class="field"><label>Street Address</label><input id="new-addr" placeholder="e.g. 123 Maple Drive" type="text"></div>
-    <div class="field"><label>Plan Name</label><input id="new-plan" placeholder="e.g. Newburgh C" type="text"></div>
-    <div class="field"><label>Assigned Builder</label>
-      <select id="new-builder">
-        <option value="">Unassigned</option>
-        <option value="Matt Hines">Matt Hines</option>
-        <option value="Brendon Connor">Brendon Connor</option>
-        <option value="Dennis Duncan">Dennis Duncan</option>
-      </select>
+    <div class="field-row">
+      <div class="field" style="margin-bottom:0">
+        <label>Lot Number</label>
+        <input id="add-lot-num" type="text" placeholder="e.g. Lot 14">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Community</label>
+        <input id="add-community" type="text" placeholder="e.g. CO">
+      </div>
     </div>
-    <div class="field"><label>Construction Start Date (Admin only)</label><input id="new-start" type="date"></div>
-    <div class="field"><label>Initial Stage</label>
-      <select id="new-stage">
-        <option value="0.3">0.3 — Released to Obtain Permit</option>
-        <option value="1.1" selected>1.1 — Permit Received & Released</option>
-        <option value="1.2">1.2 — Lot Graded</option>
-        <option value="2">2 — Slab Poured</option>
-      </select>
+    <div class="field" style="margin-top:16px">
+      <label>Street Address <span style="font-weight:400;text-transform:none;font-size:11px">(optional)</span></label>
+      <input id="add-address" type="text" placeholder="e.g. 124 Maple Ridge Way">
+    </div>
+    <div class="field">
+      <label>Assign Builder <span style="font-weight:400;text-transform:none;font-size:11px">(optional)</span></label>
+      <select id="add-builder"><option value="">Unassigned</option></select>
+    </div>
+    <div class="field">
+      <label>Construction Start Date <span style="font-weight:400;text-transform:none;font-size:11px">(optional)</span></label>
+      <input id="add-start-date" type="date">
     </div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-add-lot')">Cancel</button>
@@ -348,28 +281,61 @@ tr:hover td{background:#f9fafb}
     <h2>Edit Lot</h2>
     <div class="modal-sub" id="edit-lot-sub"></div>
     <input type="hidden" id="edit-lot-id">
-    <div class="field"><label>Street Address</label><input id="edit-addr" type="text"></div>
-    <div class="field"><label>Plan Name</label><input id="edit-plan" type="text"></div>
-    <div class="field"><label>Assigned Builder</label>
-      <select id="edit-builder">
-        <option value="">Unassigned</option>
-        <option value="Matt Hines">Matt Hines</option>
-        <option value="Brendon Connor">Brendon Connor</option>
-        <option value="Dennis Duncan">Dennis Duncan</option>
-      </select>
-    </div>
-    <div class="field"><label>Construction Start Date</label><input id="edit-start" type="date"></div>
-    <div class="field"><label>Stage</label><input id="edit-stage" type="text" placeholder="e.g. 4.9"></div>
-    <div class="field"><label>Scheduled Close Date <span style="font-size:11px;color:var(--muted)">(Admin override — final)</span></label><input id="edit-close-date" type="date"></div>
-    <div class="field" style="border-top:1px solid var(--rule);padding-top:16px;margin-top:4px">
-      <div id="edit-close-status-row" style="display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-size:13px;font-weight:600;color:var(--ink)" id="edit-close-status-label">Close Status</div>
-          <div style="font-size:12px;color:var(--muted)" id="edit-close-status-sub"></div>
-        </div>
-        <button id="edit-close-toggle-btn" onclick="toggleLotClosed()" style="padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;border:none"></button>
+
+    <div class="field-row">
+      <div class="field" style="margin-bottom:0">
+        <label>Lot Number</label>
+        <input id="edit-lot-num" type="text">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Community</label>
+        <input id="edit-community" type="text">
       </div>
     </div>
+    <div class="field" style="margin-top:16px">
+      <label>Street Address</label>
+      <input id="edit-address" type="text">
+    </div>
+    <div class="field">
+      <label>Assigned Builder</label>
+      <select id="edit-builder"><option value="">Unassigned</option></select>
+    </div>
+    <div class="field-row">
+      <div class="field" style="margin-bottom:0">
+        <label>Construction Start Date</label>
+        <input id="edit-start-date" type="date">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Scheduled Close Date</label>
+        <input id="edit-close-date" type="date">
+      </div>
+    </div>
+
+    <div class="modal-section" style="margin-top:18px">
+      <div class="modal-section-label">Pre-Construction Stage</div>
+      <div class="field" style="margin-bottom:4px">
+        <label>Manual Stage Override <span style="font-weight:400;text-transform:none;font-size:11px">(auto-stage takes over once tasks complete)</span></label>
+        <select id="edit-manual-stage">
+          <option value="">— none —</option>
+          <option value="0.3">0.3 — Released to Obtain Permit</option>
+          <option value="0.9">0.9 — Permit Check Received</option>
+          <option value="1">1 — Permit Received, Not Released</option>
+          <option value="1.1">1.1 — Permit Received &amp; Released</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-section" style="margin-top:18px">
+      <div class="modal-section-label">Lot Status</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600" id="edit-status-label">Active</div>
+          <div style="font-size:12px;color:var(--muted)" id="edit-status-sub"></div>
+        </div>
+        <button id="edit-close-toggle-btn" onclick="toggleLotClosed()" style="padding:8px 18px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;border:none"></button>
+      </div>
+    </div>
+
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-edit-lot')">Cancel</button>
       <button class="btn btn-primary" onclick="submitEditLot()">Save Changes →</button>
@@ -381,12 +347,14 @@ tr:hover td{background:#f9fafb}
 <div class="modal-overlay" id="modal-set-pin">
   <div class="modal">
     <h2>Set Builder PIN</h2>
-    <div class="modal-sub" id="pin-modal-sub">Set a 4-digit PIN for this builder</div>
+    <div class="modal-sub" id="pin-modal-sub"></div>
     <input type="hidden" id="pin-builder-name">
-    <div class="field"><label>New PIN (4 digits)</label>
+    <div class="field">
+      <label>New PIN (4 digits)</label>
       <input id="new-pin" type="password" maxlength="4" inputmode="numeric" placeholder="••••" style="font-size:24px;letter-spacing:.3em;text-align:center">
     </div>
-    <div class="field"><label>Is this a temporary PIN?</label>
+    <div class="field">
+      <label>Temporary PIN?</label>
       <select id="pin-is-temp">
         <option value="temp">Yes — builder will be prompted to change it</option>
         <option value="permanent">No — permanent PIN</option>
@@ -399,45 +367,13 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
-<!-- ADD SUBDIVISION MODAL -->
-<div class="modal-overlay" id="modal-add-sub">
-  <div class="modal">
-    <h2>Add Subdivision</h2>
-    <div class="modal-sub">New subdivision will appear in the field app and admin console immediately</div>
-    <div class="field"><label>Subdivision Code (2-3 letters)</label>
-      <input id="sub-code" type="text" maxlength="4" placeholder="e.g. WB" style="text-transform:uppercase">
-    </div>
-    <div class="field"><label>Full Name</label>
-      <input id="sub-name" type="text" placeholder="e.g. Willowbrook">
-    </div>
-    <div class="field"><label>Color Theme</label>
-      <select id="sub-color">
-        <option value="blue">Blue</option>
-        <option value="green">Green</option>
-        <option value="gold">Gold</option>
-        <option value="purple">Purple</option>
-        <option value="red">Red</option>
-        <option value="teal">Teal</option>
-      </select>
-    </div>
-    <div class="field"><label>Assign Builders (optional)</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="sub-builder-checks">
-        <!-- populated dynamically from builders table -->
-      </div>
-    </div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-add-sub')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAddSubdivision()">Add Subdivision →</button>
-    </div>
-  </div>
-</div>
-
 <!-- ADD BUILDER MODAL -->
 <div class="modal-overlay" id="modal-add-builder">
   <div class="modal">
     <h2>Add Builder</h2>
     <div class="field"><label>Full Name</label><input id="builder-name" type="text" placeholder="First Last"></div>
-    <div class="field"><label>Subdivisions (check all that apply)</label>
+    <div class="field">
+      <label>Subdivisions</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="builder-sub-checkboxes">
         <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="RC"> RC — Ruby Creek</label>
         <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CO"> CO — Chimney Oaks</label>
@@ -447,7 +383,8 @@ tr:hover td{background:#f9fafb}
         <label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer"><input type="checkbox" value="CW"> CW — Carrington Walk</label>
       </div>
     </div>
-    <div class="field"><label>Initial PIN (4 digits)</label>
+    <div class="field">
+      <label>Initial PIN (4 digits)</label>
       <input id="builder-pin" type="password" maxlength="4" inputmode="numeric" placeholder="••••" style="font-size:20px;letter-spacing:.3em;text-align:center">
     </div>
     <div class="modal-btns">
@@ -457,79 +394,59 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
-<!-- SET CONSTRUCTION START MODAL -->
-<div class="modal-overlay" id="modal-schedule-start">
-  <div class="modal" style="max-width:400px">
-    <h2>Set Construction Start</h2>
-    <div class="modal-sub" id="sched-start-sub"></div>
-    <input type="hidden" id="sched-start-id">
-    <div class="field"><label>Construction Start Date</label><input type="date" id="sched-start-date"></div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-schedule-start')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitScheduleStart()">Save →</button>
-    </div>
-  </div>
-</div>
-
-<!-- SET PRE-CONSTRUCTION STAGE MODAL -->
-<div class="modal-overlay" id="modal-schedule-stage">
-  <div class="modal" style="max-width:420px">
-    <h2>Set Pre-Construction Stage</h2>
-    <div class="modal-sub" id="sched-stage-sub"></div>
-    <input type="hidden" id="sched-stage-id">
-    <div class="field"><label>Pre-Construction Stage</label>
-      <select id="sched-stage-sel">
-        <option value="">— none —</option>
-        <option value="0.3">0.3 — Released to Obtain Permit</option>
-        <option value="0.9">0.9 — Permit Check Received</option>
-        <option value="1">1 — Permit Received Not Released</option>
-        <option value="1.1">1.1 — Permit Received &amp; Released</option>
-      </select>
-    </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:-6px">Once construction tasks are completed, the stage advances automatically and overrides this.</div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-schedule-stage')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitScheduleStage()">Save →</button>
-    </div>
-  </div>
-</div>
-
-<!-- ASSIGN BUILDER MODAL -->
-<div class="modal-overlay" id="modal-schedule-assign">
-  <div class="modal" style="max-width:420px">
-    <h2>Assign Builder</h2>
-    <div class="modal-sub" id="sched-assign-sub"></div>
-    <input type="hidden" id="sched-assign-id">
-    <div class="field"><label>Assigned Builder</label>
-      <select id="sched-assign-sel"><option value="">Unassigned</option></select>
-    </div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-schedule-assign')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitScheduleAssign()">Save →</button>
-    </div>
-  </div>
-</div>
-
-<!-- STAMP SCHEDULE LOT MODAL -->
-<div class="modal-overlay" id="modal-stamp">
+<!-- ADD SUBDIVISION MODAL -->
+<div class="modal-overlay" id="modal-add-sub">
   <div class="modal">
-    <h2>Stamp New Schedule Lot</h2>
-    <div class="modal-sub">Copies the full schedule from a template into a new lot. Start date is set afterward.</div>
-    <div class="field"><label>Template</label><select id="stamp-template"></select></div>
-    <div class="field"><label>Lot Number</label><input id="stamp-num" type="text" placeholder="e.g. Lot 14"></div>
-    <div class="field"><label>Street Address</label><input id="stamp-addr" type="text" placeholder="e.g. 124 Maple Ridge Way"></div>
-    <div class="field"><label>Community</label><input id="stamp-comm" type="text" placeholder="e.g. Aberdeen"></div>
+    <h2>Add Subdivision</h2>
+    <div class="field"><label>Code (2–4 letters)</label><input id="sub-code" type="text" maxlength="4" placeholder="e.g. WB" style="text-transform:uppercase"></div>
+    <div class="field"><label>Full Name</label><input id="sub-name" type="text" placeholder="e.g. Willowbrook"></div>
+    <div class="field">
+      <label>Assign Builders</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px" id="sub-builder-checks"></div>
+    </div>
     <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-stamp')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitStamp()">Stamp Lot →</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-sub')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddSubdivision()">Add Subdivision →</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE LOT MODAL -->
+<div class="modal-overlay" id="modal-delete-lot">
+  <div class="modal" style="max-width:400px">
+    <div style="font-size:32px;text-align:center;margin-bottom:12px">⚠️</div>
+    <h2 style="text-align:center;color:#dc2626;margin-bottom:8px">Delete Lot?</h2>
+    <p id="delete-lot-desc" style="text-align:center;color:var(--muted);margin-bottom:20px;font-size:14px"></p>
+    <div class="field">
+      <label>Enter Admin PIN to confirm</label>
+      <input type="password" id="delete-lot-pin" maxlength="4" inputmode="numeric" placeholder="••••"
+        style="text-align:center;font-size:24px;letter-spacing:.4em"
+        onkeydown="if(event.key==='Enter')confirmDeleteLot()">
+    </div>
+    <div id="delete-lot-error" style="color:#dc2626;font-size:13px;text-align:center;margin-bottom:12px;min-height:18px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-delete-lot')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmDeleteLot()">Delete Permanently</button>
     </div>
   </div>
 </div>
 
 <script>
+// ── CONSTANTS ──
 const ADMIN_PIN = '0570';
 const SUPABASE_FN = '/.netlify/functions/supabase';
+const SUB_NAMES = {RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
+const SUB_COLORS = {RC:'sub-RC',CO:'sub-CO',TB:'sub-TB',CT:'sub-CT',TE:'sub-TE',CW:'sub-CW'};
+
+// ── STATE ──
+let scheduleLots = [];
+let builders = [];
+let scheduleTemplates = [];
+let flaggedNotes = [];
 let API_SECRET = null;
+let deleteLotTarget = {id:null, num:null};
+
+// ── AUTH ──
 async function loadSecret() {
   if (API_SECRET) return API_SECRET;
   const r = await fetch('/.netlify/functions/config');
@@ -537,36 +454,7 @@ async function loadSecret() {
   API_SECRET = d.secret;
   return API_SECRET;
 }
-const SUB_NAMES = {RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
-const SUB_COLORS = {RC:'sub-RC',CO:'sub-CO',TB:'sub-TB',CT:'sub-CT',TE:'sub-TE',CW:'sub-CW'};
-const STAGE_ORDER = ['0.3','0.9','1','1.1','1.2','1.5','1.6','1.7','1.8','1.9','2','2.1','2.2','2.3','3','3.1','3.2','3.3','4','4.9','5','5.9','6','7','8','9','9.5'];
-const STAGE_DESC = {'0.3':'Released/Permit','1.1':'Released','1.2':'Lot Graded','1.5':'Slab Formed','1.6':'Plumbing UG','1.7':'Plumbing Insp','1.8':'Slab Prepped','1.9':'Slab Insp','2':'Slab Poured','2.1':'Framing Walls','2.2':'Rafters','2.3':'Roof Deck','3':'Framing Complete','3.1':'Plumbing Rough','3.2':'HVAC Rough','3.3':'Electrical Rough','4':'Mechanicals','4.9':'MEP Inspection','5':'Drywall','5.9':'Utility Hold','6':'Trim & Cabinets','7':'Mech Trim & Paint','8':'Flooring','9':'Trade Punch','9.5':'Construction Complete'};
 
-let lots = [];
-let builders = [];
-
-// ── AUTH ──
-function tryLogin() {
-  const pin = document.getElementById('pin-input').value;
-  if (pin === ADMIN_PIN) {
-    document.getElementById('login-wrap').style.display = 'none';
-    document.getElementById('app').classList.add('open');
-    loadAll();
-  } else {
-    document.getElementById('login-error').textContent = 'Incorrect PIN';
-    document.getElementById('pin-input').value = '';
-    setTimeout(()=>document.getElementById('login-error').textContent='', 2000);
-  }
-}
-document.getElementById('pin-input').addEventListener('keydown', e => { if(e.key==='Enter') tryLogin(); });
-
-function logout() {
-  document.getElementById('app').classList.remove('open');
-  document.getElementById('login-wrap').style.display = 'flex';
-  document.getElementById('pin-input').value = '';
-}
-
-// ── API ──
 async function sbCall(action, payload) {
   await loadSecret();
   const resp = await fetch(SUPABASE_FN, {
@@ -579,9 +467,31 @@ async function sbCall(action, payload) {
   return data;
 }
 
+function tryLogin() {
+  const pin = document.getElementById('pin-input').value;
+  if (pin === ADMIN_PIN) {
+    document.getElementById('login-wrap').style.display = 'none';
+    document.getElementById('app').classList.add('open');
+    loadAll();
+  } else {
+    document.getElementById('login-error').textContent = 'Incorrect PIN';
+    document.getElementById('pin-input').value = '';
+    setTimeout(() => document.getElementById('login-error').textContent = '', 2000);
+  }
+}
+document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+
+function logout() {
+  document.getElementById('app').classList.remove('open');
+  document.getElementById('login-wrap').style.display = 'flex';
+  document.getElementById('pin-input').value = '';
+}
+
 // ── DATA ──
 async function loadAll() {
-  await Promise.all([loadLots(), loadBuilders()]);
+  document.getElementById('last-updated').textContent = 'Loading…';
+  await Promise.all([loadScheduleData(), loadBuilders()]);
+  populateFilters();
   renderStats();
   renderLotsTable();
   renderBuildersTable();
@@ -589,9 +499,13 @@ async function loadAll() {
   document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
-async function loadLots() {
-  const data = await sbCall('getLots', {});
-  if (data) lots = data;
+async function loadScheduleData() {
+  const [lotsData, tplData] = await Promise.all([
+    sbCall('getScheduleLots', {}),
+    sbCall('getTemplates', {})
+  ]);
+  scheduleLots = lotsData || [];
+  scheduleTemplates = tplData || [];
 }
 
 async function loadBuilders() {
@@ -605,157 +519,333 @@ async function refreshData() {
 }
 
 // ── HELPERS ──
-function calcWorkingDaysSince(dateStr) {
-  if (!dateStr) return null;
-  const start = new Date(dateStr + 'T12:00:00');
-  const today = new Date();
-  let days = 0, cur = new Date(start);
-  while (cur <= today) {
-    const dow = cur.getDay();
-    if (dow !== 0 && dow !== 6) days++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return days;
-}
-
-function calcHealthDelta(lot) {
-  if (!lot.start_date) return null;
-  const elapsed = calcWorkingDaysSince(lot.start_date);
-  const stageIdx = STAGE_ORDER.indexOf(lot.stage);
-  // expectedDay = how far along the schedule the lot SHOULD be based on stage
-  const expectedDay = stageIdx >= 0 ? Math.round((stageIdx / (STAGE_ORDER.length-1)) * 99) : 0;
-  // delta: negative = behind (more days elapsed than stage warrants)
-  //        positive = ahead (fewer days elapsed than stage warrants)
-  return expectedDay - elapsed;
-}
-
 function fmtDate(str) {
   if (!str) return '—';
   const d = new Date(str + 'T12:00:00');
   return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
 }
 
-function uuid() {
-  return 'xxxxxxxx'.replace(/x/g, ()=>(Math.random()*16|0).toString(16));
+function calcPlannedCompletion(startStr) {
+  if (!startStr) return null;
+  const p = startStr.split('-');
+  let d = new Date(+p[0], +p[1]-1, +p[2]);
+  let wd = 0;
+  while (wd < 99) { d.setDate(d.getDate()+1); if (d.getDay()!==0&&d.getDay()!==6) wd++; }
+  return d;
+}
+
+function isUpdatedRecently(ts) {
+  if (!ts) return false;
+  return (Date.now() - new Date(ts).getTime()) < 7 * 86400000;
+}
+
+function subBadge(community) {
+  const cls = SUB_COLORS[community] || '';
+  const name = SUB_NAMES[community] || community || '—';
+  return `<span class="badge-sub ${cls}" title="${name}">${community||'—'}</span>`;
+}
+
+function stageCell(lot) {
+  if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
+  const held = lot.reported_stage === '5.9' && lot.true_stage && lot.true_stage !== '5.9';
+  return '<span class="badge badge-stage">' + lot.reported_stage + '</span>'
+    + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + lot.true_stage + '</div>' : '');
+}
+
+function closeBadge(lot) {
+  if (lot.status === 'closed') {
+    return '<span class="badge" style="background:#4C4C4C;color:#fff">🏠 Closed</span>';
+  }
+  if (lot.scheduled_close_date) {
+    return '<span class="badge" style="background:#d5f5e3;color:#1E8449">📅 Scheduled</span>'
+      + '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>';
+  }
+  if (parseFloat(lot.reported_stage||0) >= 6) {
+    return '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready to Schedule</span>';
+  }
+  return '<span class="badge" style="background:#f3f4f6;color:var(--muted)">Not Yet</span>';
+}
+
+function builderOptionsHtml(selectedName) {
+  const opts = builders.filter(b=>!b.is_admin).map(b =>
+    `<option value="${b.name}"${b.name===selectedName?' selected':''}>${b.name}</option>`
+  ).join('');
+  return '<option value="">Unassigned</option>' + opts;
 }
 
 // ── STATS ──
 function renderStats() {
-  document.getElementById('stat-total').textContent = lots.length;
-  document.getElementById('stat-active').textContent = lots.filter(l=>l.stage!=='9.5').length;
-  document.getElementById('stat-updated').textContent = lots.filter(l=>l.updated_this_week).length;
-  const behind = lots.filter(l=>{ const d=calcHealthDelta(l); return d!==null && d<-3; }).length;
-  document.getElementById('stat-behind').textContent = behind;
-  document.getElementById('stat-complete').textContent = lots.filter(l=>l.stage==='9.5').length;
+  const total = scheduleLots.length;
+  const active = scheduleLots.filter(l => l.status !== 'closed').length;
+  const updated = scheduleLots.filter(l => isUpdatedRecently(l.last_task_update)).length;
+  const ready = scheduleLots.filter(l => parseFloat(l.reported_stage||0) >= 6 && l.status !== 'closed' && !l.scheduled_close_date).length;
+  const closed = scheduleLots.filter(l => l.status === 'closed').length;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-active').textContent = active;
+  document.getElementById('stat-updated').textContent = updated;
+  document.getElementById('stat-ready').textContent = ready;
+  document.getElementById('stat-closed').textContent = closed;
+}
+
+// ── FILTERS ──
+function populateFilters() {
+  const communities = [...new Set(scheduleLots.map(l=>l.community).filter(Boolean))].sort();
+  const comEl = document.getElementById('filter-community');
+  const prevCom = comEl.value;
+  comEl.innerHTML = '<option value="">All Communities</option>'
+    + communities.map(c => `<option value="${c}"${c===prevCom?' selected':''}>${SUB_NAMES[c]||c} (${c})</option>`).join('');
+
+  const builderEl = document.getElementById('filter-builder');
+  const prevB = builderEl.value;
+  const activeBuilders = [...new Set(scheduleLots.map(l=>l.builder_name).filter(Boolean))].sort();
+  builderEl.innerHTML = '<option value="">All Builders</option>'
+    + activeBuilders.map(n => `<option value="${n}"${n===prevB?' selected':''}>${n}</option>`).join('');
 }
 
 // ── LOTS TABLE ──
 function renderLotsTable() {
-  const filterSub = document.getElementById('filter-sub').value;
-  const filterBuilder = document.getElementById('filter-builder').value;
-  const search = document.getElementById('lot-search').value.toLowerCase();
+  const filterCom  = document.getElementById('filter-community').value;
+  const filterBld  = document.getElementById('filter-builder').value;
+  const filterClose= document.getElementById('filter-close').value;
+  const search     = document.getElementById('lot-search').value.toLowerCase();
 
-  const filterUpdate = document.getElementById('filter-update').value;
-  const filterClose = document.getElementById('filter-close').value;
-  let filtered = lots.filter(l => {
-    if (filterSub && l.subdivision !== filterSub) return false;
-    if (filterBuilder && l.assigned_builder !== filterBuilder) return false;
-    if (filterUpdate === 'pending' && l.updated_this_week) return false;
-    if (filterUpdate === 'updated' && !l.updated_this_week) return false;
-    if (filterClose === 'active' && l.is_closed) return false;
-    if (filterClose === 'scheduled' && (!l.scheduled_close_date || l.is_closed)) return false;
-    if (filterClose === 'ready' && (l.scheduled_close_date || parseFloat(l.stage) < 6 || l.is_closed)) return false;
-    if (filterClose === 'notyet' && (parseFloat(l.stage) >= 6 || l.is_closed)) return false;
-    if (filterClose === 'closed' && !l.is_closed) return false;
-    if (search && !l.number.toLowerCase().includes(search) && !l.address.toLowerCase().includes(search) && !l.plan.toLowerCase().includes(search)) return false;
+  let filtered = scheduleLots.filter(l => {
+    if (filterCom && l.community !== filterCom) return false;
+    if (filterBld && l.builder_name !== filterBld) return false;
+    if (filterClose === 'active'    && l.status === 'closed') return false;
+    if (filterClose === 'closed'    && l.status !== 'closed') return false;
+    if (filterClose === 'scheduled' && (!l.scheduled_close_date || l.status === 'closed')) return false;
+    if (filterClose === 'ready'     && (parseFloat(l.reported_stage||0) < 6 || l.scheduled_close_date || l.status === 'closed')) return false;
+    if (search && !(l.lot_number||'').toLowerCase().includes(search)
+               && !(l.address||'').toLowerCase().includes(search)
+               && !(l.community||'').toLowerCase().includes(search)
+               && !(l.builder_name||'').toLowerCase().includes(search)) return false;
     return true;
   });
 
-  // Sort by subdivision then lot number
   filtered.sort((a,b) => {
-    if (a.subdivision !== b.subdivision) return a.subdivision.localeCompare(b.subdivision);
-    return a.number.localeCompare(b.number, undefined, {numeric:true});
+    if ((a.community||'') !== (b.community||'')) return (a.community||'').localeCompare(b.community||'');
+    return (a.lot_number||'').localeCompare(b.lot_number||'', undefined, {numeric:true});
   });
 
   if (!filtered.length) {
-    document.getElementById('lots-table-body').innerHTML = '<div class="empty-state"><div class="icon">🏗</div><p>No lots match your filters</p></div>';
+    document.getElementById('lots-table-body').innerHTML = '<div class="empty-state"><div class="icon">🏗</div><p>No lots match your filters.</p></div>';
     return;
   }
 
   const rows = filtered.map(lot => {
-    const delta = calcHealthDelta(lot);
-    // Estimated completion date — 99 working days from start date
-    let estCompDate = '<span style="color:var(--muted)">—</span>';
-    if (lot.start_date) {
-      try {
-        const parts = lot.start_date.split('-');
-        const startD = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
-        let d = new Date(startD);
-        let wd = 0;
-        while (wd < 99) {
-          d.setDate(d.getDate() + 1);
-          if (d.getDay() !== 0 && d.getDay() !== 6) wd++;
-        }
-        const isOverdue = d < new Date();
-        const dateStr = d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
-        estCompDate = '<span style="color:' + (isOverdue ? 'var(--red)' : 'var(--ink)') + ';font-weight:' + (isOverdue ? '700' : '400') + '">' + dateStr + '</span>';
-      } catch(e) {}
+    const planned = calcPlannedCompletion(lot.construction_start_date);
+    let planHtml = '—';
+    if (planned) {
+      const overdue = planned < new Date() && lot.status !== 'closed' && !lot.completion_stamped_at;
+      planHtml = `<span style="color:${overdue?'var(--red)':'var(--ink)'};font-weight:${overdue?'700':'400'}">${planned.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>`;
     }
-    let healthBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No start date</span>';
-    if (delta !== null) {
-      if (delta > 3) healthBadge = `<span class="badge badge-health-ahead">+${delta}d ahead</span>`;
-      else if (delta < -3) healthBadge = `<span class="badge badge-health-behind" style="cursor:pointer" onclick="openDelayLog('${lot.id}','${lot.number} — ${lot.subdivision}')" title="Click to view delay log">${Math.abs(delta)}d behind ↗</span>`;
-      else healthBadge = `<span class="badge badge-health-ok">On track</span>`;
-    }
-    const lastUpdated = lot.updated_at ? new Date(lot.updated_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + new Date(lot.updated_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
-    const updBadge = lot.updated_this_week 
-      ? '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">✓ Updated</span><div style="font-size:11px;color:var(--muted);margin-top:2px">' + lastUpdated + '</div>'
-      : '<span class="badge" style="background:#fee2e2;color:var(--red);font-weight:700">⚠️ Not Updated</span>';
-
-    // Close status — single column, one source of truth
-    const hasCloseDate = !!lot.scheduled_close_date;
-    let closeBadge;
-    if (lot.is_closed) {
-      const closedOn = lot.closed_date ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.closed_date) + '</div>' : '';
-      closeBadge = '<span class="badge" style="background:#4C4C4C;color:#fff;font-weight:700">🏠 Closed</span>' + closedOn;
-    } else if (hasCloseDate) {
-      const schedOn = '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>';
-      closeBadge = '<span class="badge" style="background:#d5f5e3;color:#1E8449;font-weight:700">📅 Scheduled</span>' + schedOn;
-    } else if (parseFloat(lot.stage) >= 6) {
-      closeBadge = '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready to Schedule</span>';
-    } else {
-      closeBadge = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">Not Yet</span>';
-    }
-
+    const updBadge = lot.status === 'closed' ? '' :
+      isUpdatedRecently(lot.last_task_update)
+        ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">✓ Updated</span>'
+        : '<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ Stale</span>';
+    const id = lot.id.replace(/'/g,"\\'");
+    const num = (lot.lot_number||'').replace(/'/g,"\\'");
     return `<tr>
-      <td><span class="badge-sub ${SUB_COLORS[lot.subdivision]||''}">${lot.subdivision}</span></td>
-      <td><strong>${lot.number}</strong>${lot.plan?`<div style="font-size:11px;color:var(--muted)">${lot.plan}</div>`:''}</td>
-      <td>${lot.address||'<span style="color:var(--muted)">—</span>'}</td>
-      <td><span class="badge badge-stage">${lot.stage}</span><div style="font-size:11px;color:var(--muted);margin-top:2px">${STAGE_DESC[lot.stage]||''}</div></td>
-      <td>${lot.assigned_builder||'<span style="color:var(--muted)">Unassigned</span>'}</td>
-      <td>${fmtDate(lot.start_date)}</td>
-      <td>${estCompDate}</td>
-      <td>${healthBadge}</td>
-      <td>${closeBadge}</td>
+      <td>${subBadge(lot.community)}</td>
+      <td><strong>${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
+      <td>${lot.builder_name||'<span style="color:var(--muted)">Unassigned</span>'}</td>
+      <td>${stageCell(lot)}</td>
+      <td>${fmtDate(lot.construction_start_date)}</td>
+      <td>${planHtml}</td>
+      <td>${closeBadge(lot)}</td>
       <td>${updBadge}</td>
-      <td>
-        <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${lot.id}')">Edit</button>
-
-        <button class="btn btn-sm" onclick="openDeleteLotModal('${lot.id}','${lot.number}','${lot.subdivision}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
+      <td style="white-space:nowrap">
+        <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${id}')">Edit</button>
+        <button class="btn btn-sm" onclick="openDeleteLotModal('${id}','${num}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
       </td>
     </tr>`;
   }).join('');
 
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
-      <th>SD</th><th>Lot / Plan</th><th>Address</th><th>Stage</th>
-      <th>Builder</th><th>Start Date</th><th>Est. Completion</th><th>Health</th><th>Close Status</th><th>Update Status</th><th></th>
+      <th>Sub</th><th>Lot / Address</th><th>Builder</th><th>Stage</th>
+      <th>Start Date</th><th>Planned Completion</th><th>Close Status</th><th>Activity</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
 
-// ── BUILDERS TABLE ──
+// ── ADD LOT ──
+function openAddLotModal() {
+  if (!scheduleTemplates.length) { alert('No templates found. Check your connection.'); return; }
+  document.getElementById('add-template').innerHTML = scheduleTemplates.map(t =>
+    `<option value="${t.id}">${t.name}${t.total_days?' ('+t.total_days+' days)':''}</option>`
+  ).join('');
+  document.getElementById('add-lot-num').value = '';
+  document.getElementById('add-community').value = '';
+  document.getElementById('add-address').value = '';
+  document.getElementById('add-builder').innerHTML = builderOptionsHtml('');
+  document.getElementById('add-start-date').value = '';
+  document.getElementById('modal-add-lot').classList.add('open');
+}
+
+async function submitAddLot() {
+  const template_id   = document.getElementById('add-template').value;
+  const lot_number    = document.getElementById('add-lot-num').value.trim();
+  const community     = document.getElementById('add-community').value.trim().toUpperCase();
+  const address       = document.getElementById('add-address').value.trim();
+  const builder_name  = document.getElementById('add-builder').value || null;
+  const start_date    = document.getElementById('add-start-date').value || null;
+
+  if (!template_id || !lot_number || !community) {
+    alert('Template, lot number, and community are required.');
+    return;
+  }
+
+  const stampResult = await sbCall('stampLot', { template_id, lot_number, address, community });
+  if (!stampResult || !stampResult.success) return;
+
+  // Set builder_name and/or start date if provided
+  if (builder_name || start_date) {
+    const updates = { id: stampResult.lot_id };
+    if (builder_name) updates.builder_name = builder_name;
+    if (start_date) updates.construction_start_date = start_date;
+    await sbCall('updateScheduleLot', updates);
+  }
+
+  closeModal('modal-add-lot');
+  alert(`Lot ${lot_number} created — ${stampResult.task_count} tasks, ${stampResult.gate_count} gate(s).`);
+  await loadScheduleData();
+  populateFilters();
+  renderStats();
+  renderLotsTable();
+  renderSubdivisionsTable();
+}
+
+// ── EDIT LOT ──
+function openEditLotModal(id) {
+  const lot = scheduleLots.find(l => l.id === id);
+  if (!lot) return;
+
+  document.getElementById('edit-lot-id').value = id;
+  document.getElementById('edit-lot-sub').textContent = (lot.community||'') + (lot.lot_number?' — '+lot.lot_number:'');
+  document.getElementById('edit-lot-num').value = lot.lot_number || '';
+  document.getElementById('edit-community').value = lot.community || '';
+  document.getElementById('edit-address').value = lot.address || '';
+  document.getElementById('edit-builder').innerHTML = builderOptionsHtml(lot.builder_name||'');
+  document.getElementById('edit-start-date').value = lot.construction_start_date || '';
+  document.getElementById('edit-close-date').value = lot.scheduled_close_date || '';
+  document.getElementById('edit-manual-stage').value = lot.manual_stage || '';
+
+  // Close toggle
+  const isClosed = lot.status === 'closed';
+  const statusLabel = document.getElementById('edit-status-label');
+  const statusSub   = document.getElementById('edit-status-sub');
+  const toggleBtn   = document.getElementById('edit-close-toggle-btn');
+  if (isClosed) {
+    statusLabel.textContent = '🏠 Closed';
+    statusSub.textContent   = 'Lot is archived.';
+    toggleBtn.textContent   = 'Reopen Lot';
+    toggleBtn.style.cssText = 'background:#fee2e2;color:#dc2626;border:1px solid #fca5a5';
+  } else {
+    statusLabel.textContent = 'Active';
+    statusSub.textContent   = 'Mark closed when the real estate transaction is complete.';
+    toggleBtn.textContent   = 'Mark Closed';
+    toggleBtn.style.cssText = 'background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf';
+  }
+
+  document.getElementById('modal-edit-lot').classList.add('open');
+}
+
+async function submitEditLot() {
+  const id = document.getElementById('edit-lot-id').value;
+  const closeDate = document.getElementById('edit-close-date').value || null;
+  const updates = {
+    id,
+    lot_number:               document.getElementById('edit-lot-num').value.trim(),
+    community:                document.getElementById('edit-community').value.trim().toUpperCase(),
+    address:                  document.getElementById('edit-address').value.trim() || null,
+    builder_name:             document.getElementById('edit-builder').value || null,
+    construction_start_date:  document.getElementById('edit-start-date').value || null,
+    scheduled_close_date:     closeDate,
+    manual_stage:             document.getElementById('edit-manual-stage').value || null,
+  };
+
+  // If manual stage changed and no auto-stage has taken over, sync reported_stage too
+  const lot = scheduleLots.find(l => l.id === id);
+  const manualCodes = ['','0.3','0.9','1','1.1'];
+  if (lot && manualCodes.includes(lot.reported_stage||'')) {
+    if (updates.manual_stage) {
+      updates.reported_stage = updates.manual_stage;
+      updates.true_stage = updates.manual_stage;
+    }
+  }
+
+  const result = await sbCall('updateScheduleLot', updates);
+  if (result !== null) {
+    closeModal('modal-edit-lot');
+    await loadScheduleData();
+    populateFilters();
+    renderStats();
+    renderLotsTable();
+    renderSubdivisionsTable();
+  }
+}
+
+async function toggleLotClosed() {
+  const id  = document.getElementById('edit-lot-id').value;
+  const lot = scheduleLots.find(l => l.id === id);
+  if (!lot) return;
+
+  const updates = { id };
+  if (lot.status === 'closed') {
+    if (!confirm('Reopen ' + lot.lot_number + '? It will appear as active again.')) return;
+    updates.status = 'active';
+  } else {
+    updates.status = 'closed';
+    const closeDate = document.getElementById('edit-close-date').value || new Date().toISOString().split('T')[0];
+    updates.scheduled_close_date = closeDate;
+  }
+  const result = await sbCall('updateScheduleLot', updates);
+  if (result !== null) {
+    closeModal('modal-edit-lot');
+    await loadScheduleData();
+    populateFilters();
+    renderStats();
+    renderLotsTable();
+  }
+}
+
+// ── DELETE LOT ──
+function openDeleteLotModal(id, num) {
+  deleteLotTarget = {id, num};
+  document.getElementById('delete-lot-desc').textContent =
+    'This will permanently delete lot ' + num + ' and all its task data. This cannot be undone.';
+  document.getElementById('delete-lot-pin').value = '';
+  document.getElementById('delete-lot-error').textContent = '';
+  document.getElementById('modal-delete-lot').classList.add('open');
+}
+
+async function confirmDeleteLot() {
+  const pin = document.getElementById('delete-lot-pin').value;
+  const errEl = document.getElementById('delete-lot-error');
+  if (pin !== ADMIN_PIN) {
+    errEl.textContent = 'Incorrect PIN';
+    document.getElementById('delete-lot-pin').value = '';
+    return;
+  }
+  errEl.textContent = 'Deleting…';
+  const result = await sbCall('deleteScheduleLot', {id: deleteLotTarget.id});
+  if (result && result.success) {
+    closeModal('modal-delete-lot');
+    await loadScheduleData();
+    populateFilters();
+    renderStats();
+    renderLotsTable();
+    renderSubdivisionsTable();
+    alert(deleteLotTarget.num + ' deleted.');
+  } else {
+    errEl.textContent = 'Delete failed — try again';
+  }
+}
+
+// ── BUILDERS ──
 function renderBuildersTable() {
   if (!builders.length) {
     document.getElementById('builders-table-body').innerHTML = '<div class="empty-state"><div class="icon">👷</div><p>No builders found</p></div>';
@@ -764,13 +854,13 @@ function renderBuildersTable() {
   const rows = builders.map(b => {
     const subs = (b.subdivisions||[]).map(s=>`<span class="badge-sub ${SUB_COLORS[s]||''}" style="margin-right:3px">${s}</span>`).join('') || '<span style="color:var(--muted)">None</span>';
     const pinStatus = b.is_locked
-      ? '<span class="badge" style="background:#fee2e2;color:#dc2626;font-weight:700">🔒 Locked</span>'
-      : b.temp_pin 
-      ? '<span class="badge" style="background:#fef9e7;color:#e67e22">Temp PIN set</span>'
-      : b.pin_hash 
-        ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">PIN set</span>'
-        : '<span class="badge" style="background:#fee2e2;color:var(--red)">No PIN</span>';
-    const lotCount = lots.filter(l=>l.assigned_builder===b.name).length;
+      ? '<span class="badge" style="background:#fee2e2;color:#dc2626">🔒 Locked</span>'
+      : b.temp_pin
+        ? '<span class="badge" style="background:#fef9e7;color:#e67e22">Temp PIN</span>'
+        : b.pin_hash
+          ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">PIN set</span>'
+          : '<span class="badge" style="background:#fee2e2;color:var(--red)">No PIN</span>';
+    const lotCount = scheduleLots.filter(l=>l.builder_name===b.name).length;
     const unlockBtn = b.is_locked ? `<button class="btn btn-sm" style="background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf;margin-left:6px" onclick="unlockBuilder('${b.name}')">Unlock</button>` : '';
     const deleteBtn = b.is_admin ? '' : `<button class="btn btn-sm" style="background:#fee2e2;color:var(--red);margin-left:6px" onclick="deleteBuilder('${b.name}')">Delete</button>`;
     return `<tr>
@@ -780,166 +870,14 @@ function renderBuildersTable() {
       <td>${pinStatus}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="openSetPinModal('${b.name}')">Set PIN</button>
-        ${unlockBtn}
-        ${deleteBtn}
+        ${unlockBtn}${deleteBtn}
       </td>
     </tr>`;
   }).join('');
-
   document.getElementById('builders-table-body').innerHTML = `<table>
     <thead><tr><th>Name</th><th>Subdivisions</th><th>Lots</th><th>PIN Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
-}
-
-
-function renderSubdivisionsTable() {
-  const subs = Object.keys(SUB_NAMES);
-  const rows = subs.map(code => {
-    const subLots = lots.filter(l=>l.subdivision===code);
-    const active = subLots.filter(l=>l.stage!=='9.5').length;
-    const complete = subLots.filter(l=>l.stage==='9.5').length;
-    const updated = subLots.filter(l=>l.updated_this_week).length;
-    const pending = active - updated;
-    const assignedBuilders = builders
-      .filter(b => (b.subdivisions||[]).includes(code) && !b.is_admin)
-      .map(b=>b.name).join(', ') || '—';
-    const updateStatus = pending > 0
-      ? `<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ ${pending} pending</span>`
-      : active > 0
-        ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ All updated</span>`
-        : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">No active lots</span>`;
-    const closeScheduled = subLots.filter(l=>l.scheduled_close_date).length;
-    const readyToSchedule = subLots.filter(l=>parseFloat(l.stage)>=6 && !l.scheduled_close_date).length;
-    const closeStatus = readyToSchedule > 0
-      ? `<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ ${readyToSchedule} ready to schedule</span>`
-      : closeScheduled > 0
-        ? `<span class="badge" style="background:#d5f5e3;color:var(--green)">✓ ${closeScheduled} scheduled</span>`
-        : `<span class="badge" style="background:#f3f4f6;color:var(--muted)">—</span>`;
-    return `<tr>
-      <td><span class="badge-sub ${SUB_COLORS[code]||''}">${code}</span></td>
-      <td><strong>${SUB_NAMES[code]||code}</strong></td>
-      <td>${subLots.length}</td>
-      <td>${active}</td>
-      <td>${complete}</td>
-      <td>${updateStatus}</td>
-      <td>${closeStatus}</td>
-      <td>${assignedBuilders}</td>
-    </tr>`;
-  }).join('');
-
-  document.getElementById('subdivisions-table-body').innerHTML = `<table>
-    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Complete</th><th>Update Status</th><th>Close Status</th><th>Builders</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-
-function openAddLotModal() {
-  document.getElementById('new-num').value = '';
-  document.getElementById('new-addr').value = '';
-  document.getElementById('new-plan').value = '';
-  document.getElementById('new-sub').value = '';
-  document.getElementById('new-builder').value = '';
-  document.getElementById('new-start').value = '';
-  document.getElementById('new-stage').value = '1.1';
-  document.getElementById('modal-add-lot').classList.add('open');
-}
-
-async function submitAddLot() {
-  const sub = document.getElementById('new-sub').value;
-  const num = document.getElementById('new-num').value.trim();
-  const addr = document.getElementById('new-addr').value.trim();
-  const plan = document.getElementById('new-plan').value.trim();
-  const builder = document.getElementById('new-builder').value;
-  const start = document.getElementById('new-start').value;
-  const stage = document.getElementById('new-stage').value;
-  if (!sub || !num || !start) { alert('Subdivision, lot number, and start date are required'); return; }
-  const newLot = {
-    id: sub.toLowerCase() + num.replace(/\D/g,'') + '_' + Date.now(),
-    number: num, address: addr, plan: plan, subdivision: sub,
-    community: sub, stage: stage, completed_tasks: [],
-    task_overrides: {}, utilities: {gas:false,power:false,water:false},
-    start_date: start, updated_this_week: false, assigned_builder: builder,
-    scheduled_close_date: null, scheduled_close_date_note: '', scheduled_close_date_locked_at: null
-  };
-  const result = await sbCall('upsertLot', newLot);
-  if (result) {
-    closeModal('modal-add-lot');
-    await loadLots();
-    renderStats();
-    renderLotsTable();
-    renderSubdivisionsTable();
-  }
-}
-
-function openEditLotModal(id) {
-  const lot = lots.find(l=>l.id===id);
-  if (!lot) return;
-  document.getElementById('edit-lot-id').value = id;
-  document.getElementById('edit-lot-sub').textContent = lot.subdivision + ' — ' + lot.number + (lot.plan?' ('+lot.plan+')':'');
-  document.getElementById('edit-addr').value = lot.address || '';
-  document.getElementById('edit-plan').value = lot.plan || '';
-  document.getElementById('edit-builder').value = lot.assigned_builder || '';
-  document.getElementById('edit-start').value = lot.start_date || '';
-  document.getElementById('edit-stage').value = lot.stage || '';
-  if (document.getElementById('edit-close-date')) {
-    document.getElementById('edit-close-date').value = lot.scheduled_close_date || '';
-  }
-  // Populate close status toggle
-  const isClosed = lot.is_closed;
-  const closedDate = lot.closed_date;
-  const statusLabel = document.getElementById('edit-close-status-label');
-  const statusSub = document.getElementById('edit-close-status-sub');
-  const toggleBtn = document.getElementById('edit-close-toggle-btn');
-  if (isClosed) {
-    statusLabel.textContent = '🏠 Closed';
-    statusSub.textContent = closedDate ? 'Closed on ' + fmtDate(closedDate) : 'No close date recorded';
-    toggleBtn.textContent = 'Reverse Close';
-    toggleBtn.style.background = '#fee2e2';
-    toggleBtn.style.color = '#dc2626';
-    toggleBtn.style.border = '1px solid #fca5a5';
-  } else {
-    statusLabel.textContent = 'Not Closed';
-    statusSub.textContent = "Mark this lot as closed with today's date or the date above.";
-    toggleBtn.textContent = 'Mark Closed';
-    toggleBtn.style.background = '#d5f5e3';
-    toggleBtn.style.color = '#1E8449';
-    toggleBtn.style.border = '1px solid #a9dfbf';
-  }
-  document.getElementById('modal-edit-lot').classList.add('open');
-}
-
-async function submitEditLot() {
-  const id = document.getElementById('edit-lot-id').value;
-  const updates = {
-    id: id,
-    address: document.getElementById('edit-addr').value.trim(),
-    plan: document.getElementById('edit-plan').value.trim(),
-    assigned_builder: document.getElementById('edit-builder').value,
-    start_date: document.getElementById('edit-start').value || null,
-    stage: document.getElementById('edit-stage').value.trim(),
-  };
-  // Admin close date always wins — clear the builder lock so it can't revert
-  const closeDateEl = document.getElementById('edit-close-date');
-  if (closeDateEl && closeDateEl.value) {
-    updates.scheduled_close_date = closeDateEl.value;
-    updates.scheduled_close_date_locked_at = new Date().toISOString();
-    updates.scheduled_close_date_note = 'Admin override';
-  } else if (closeDateEl && !closeDateEl.value) {
-    updates.scheduled_close_date = null;
-    updates.scheduled_close_date_locked_at = null;
-    updates.scheduled_close_date_note = '';
-  }
-  const result = await sbCall('updateLot', updates);
-  if (result !== null) {
-    closeModal('modal-edit-lot');
-    await loadLots();
-    renderStats();
-    renderLotsTable();
-  }
 }
 
 function openSetPinModal(name) {
@@ -952,10 +890,10 @@ function openSetPinModal(name) {
 
 async function submitSetPin() {
   const name = document.getElementById('pin-builder-name').value;
-  const pin = document.getElementById('new-pin').value;
+  const pin  = document.getElementById('new-pin').value;
   const isTemp = document.getElementById('pin-is-temp').value === 'temp';
   if (!pin || pin.length !== 4 || !/^\d+$/.test(pin)) { alert('PIN must be exactly 4 digits'); return; }
-  const payload = { name };
+  const payload = {name};
   if (isTemp) { payload.temp_pin = pin; payload.pin_hash = null; }
   else { payload.pin_hash = pin; payload.temp_pin = null; }
   const result = await sbCall('updateBuilderPin', payload);
@@ -963,52 +901,7 @@ async function submitSetPin() {
     closeModal('modal-set-pin');
     await loadBuilders();
     renderBuildersTable();
-    alert((isTemp ? 'Temporary PIN' : 'PIN') + ' set for ' + name);
-  }
-}
-
-// Builder subdivision map
-const BUILDER_SUBS = {
-  'Matt Hines': ['CO','TB','TE'],
-  'Brendon Connor': ['RC','CW'],
-  'Dennis Duncan': ['CT','CW'],
-};
-
-async function autoAssignBuilders() {
-  // For CW (shared), Dennis gets primary assignment
-  // For each lot, assign builder based on subdivision
-  const assignments = {};
-  lots.forEach(l => {
-    if (l.assigned_builder) return; // skip already assigned
-    for (const [builder, subs] of Object.entries(BUILDER_SUBS)) {
-      if (subs.includes(l.subdivision)) {
-        // CW: if already assigned to Brendon, also give Dennis — use first match
-        if (!assignments[l.id]) assignments[l.id] = builder;
-      }
-    }
-  });
-  const unassigned = Object.keys(assignments);
-  if (!unassigned.length) { alert('All lots are already assigned.'); return; }
-  if (!confirm('Auto-assign ' + unassigned.length + ' unassigned lots to their default builders based on subdivision?')) return;
-  // Update each lot
-  let done = 0;
-  for (const [lotId, builder] of Object.entries(assignments)) {
-    await sbCall('updateLot', {id: lotId, assigned_builder: builder});
-    done++;
-  }
-  await loadLots();
-  renderStats();
-  renderLotsTable();
-  alert('Done — ' + done + ' lots assigned.');
-}
-
-async function deleteBuilder(name) {
-  if (!confirm('Delete builder ' + name + '? This cannot be undone. Their lots will remain but will be unassigned.')) return;
-  const result = await sbCall('deleteBuilder', {name});
-  if (result !== null) {
-    await loadBuilders();
-    renderBuildersTable();
-    alert(name + ' has been deleted.');
+    alert((isTemp?'Temporary PIN':'PIN') + ' set for ' + name);
   }
 }
 
@@ -1017,7 +910,7 @@ async function unlockBuilder(name) {
   if (result !== null) {
     await loadBuilders();
     renderBuildersTable();
-    alert(name + ' has been unlocked and their failed attempts reset.');
+    alert(name + ' unlocked.');
   }
 }
 
@@ -1030,13 +923,11 @@ function openAddBuilderModal() {
 
 async function submitAddBuilder() {
   const name = document.getElementById('builder-name').value.trim();
-  const pin = document.getElementById('builder-pin').value;
+  const pin  = document.getElementById('builder-pin').value;
   const subs = [...document.querySelectorAll('#modal-add-builder input[type=checkbox]:checked')].map(cb=>cb.value);
   if (!name) { alert('Name is required'); return; }
   if (!pin || pin.length !== 4) { alert('4-digit PIN is required'); return; }
-  const result = await sbCall('upsertBuilderRecord', {
-    name, subdivisions: subs, pin_hash: null, temp_pin: pin, is_admin: false
-  });
+  const result = await sbCall('upsertBuilderRecord', {name, subdivisions:subs, pin_hash:null, temp_pin:pin, is_admin:false});
   if (result !== null) {
     closeModal('modal-add-builder');
     await loadBuilders();
@@ -1044,24 +935,64 @@ async function submitAddBuilder() {
   }
 }
 
-// ── NAVIGATION ──
-function showSection(name) {
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('section-'+name).classList.add('active');
-  event.target.classList.add('active');
-  if (name === 'schedule' && typeof loadScheduleLots === 'function') loadScheduleLots();
-  if (name === 'flags' && typeof loadFlags === 'function') loadFlags();
+async function deleteBuilder(name) {
+  if (!confirm('Delete builder ' + name + '? Lot assignments remain.')) return;
+  const result = await sbCall('deleteBuilder', {name});
+  if (result !== null) {
+    await loadBuilders();
+    renderBuildersTable();
+    alert(name + ' deleted.');
+  }
 }
 
-// ── ADD SUBDIVISION ──
+// ── SUBDIVISIONS ──
+function renderSubdivisionsTable() {
+  // Known subs + any in data
+  const knownCodes = Object.keys(SUB_NAMES);
+  const dataCodes  = [...new Set(scheduleLots.map(l=>l.community).filter(Boolean))];
+  const allCodes   = [...new Set([...knownCodes, ...dataCodes])].sort();
+
+  const rows = allCodes.map(code => {
+    const subLots   = scheduleLots.filter(l=>l.community===code);
+    const active    = subLots.filter(l=>l.status!=='closed').length;
+    const closed    = subLots.filter(l=>l.status==='closed').length;
+    const updated   = subLots.filter(l=>isUpdatedRecently(l.last_task_update)).length;
+    const stale     = active - updated;
+    const readyClose= subLots.filter(l=>parseFloat(l.reported_stage||0)>=6&&l.status!=='closed'&&!l.scheduled_close_date).length;
+    const assignedBuilders = builders.filter(b=>(b.subdivisions||[]).includes(code)&&!b.is_admin).map(b=>b.name).join(', ')||'—';
+
+    const updateStatus = active === 0
+      ? '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No active lots</span>'
+      : stale > 0
+        ? `<span class="badge" style="background:#fee2e2;color:var(--red)">⚠️ ${stale} stale</span>`
+        : '<span class="badge" style="background:#d5f5e3;color:#1E8449">✓ All updated</span>';
+
+    const closeStatus = readyClose > 0
+      ? `<span class="badge" style="background:#fef9e7;color:#e67e22">⚠️ ${readyClose} ready</span>`
+      : '<span class="badge" style="background:#f3f4f6;color:var(--muted)">—</span>';
+
+    return `<tr>
+      <td><span class="badge-sub ${SUB_COLORS[code]||''}">${code}</span></td>
+      <td><strong>${SUB_NAMES[code]||code}</strong></td>
+      <td>${subLots.length}</td>
+      <td>${active}</td>
+      <td>${closed}</td>
+      <td>${updateStatus}</td>
+      <td>${closeStatus}</td>
+      <td>${assignedBuilders}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('subdivisions-table-body').innerHTML = `<table>
+    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Closed</th><th>Update Status</th><th>Close Status</th><th>Builders</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
 function openAddSubModal() {
   document.getElementById('sub-code').value = '';
   document.getElementById('sub-name').value = '';
-  document.getElementById('sub-color').value = 'blue';
-  // Populate builder list dynamically
-  const checksContainer = document.getElementById('sub-builder-checks');
-  checksContainer.innerHTML = builders.filter(b=>!b.is_admin).map(b=>
+  document.getElementById('sub-builder-checks').innerHTML = builders.filter(b=>!b.is_admin).map(b=>
     `<label style="text-transform:none;font-weight:500;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--rule);cursor:pointer">
       <input type="checkbox" value="${b.name}"> ${b.name}
     </label>`
@@ -1073,19 +1004,8 @@ async function submitAddSubdivision() {
   const code = document.getElementById('sub-code').value.trim().toUpperCase();
   const name = document.getElementById('sub-name').value.trim();
   if (!code || !name) { alert('Code and name are required'); return; }
-  if (!/^[A-Z]{2,4}$/.test(code)) { alert('Code must be 2-4 letters only'); return; }
-
-  const colorMap = {
-    blue:['#D6E4F7','#1A5276'], green:['#D5F5E3','#1E8449'],
-    gold:['#FEF9E7','#7D6608'], purple:['#F5EEF8','#6C3483'],
-    red:['#FDEDEC','#922B21'], teal:['#EBF5FB','#0E6655']
-  };
-  const [bg, color] = colorMap[document.getElementById('sub-color').value];
-
-  // Update builders that are assigned to this subdivision
+  if (!/^[A-Z]{2,4}$/.test(code)) { alert('Code must be 2–4 letters'); return; }
   const assignedBuilders = [...document.querySelectorAll('#sub-builder-checks input:checked')].map(cb=>cb.value);
-  
-  // Add sub to each assigned builder's subdivisions array
   for (const bname of assignedBuilders) {
     const builder = builders.find(b=>b.name===bname);
     if (builder) {
@@ -1093,431 +1013,25 @@ async function submitAddSubdivision() {
       await sbCall('updateBuilderPin', {name: bname, subdivisions: newSubs});
     }
   }
-
-  // Update local SUBDIVISIONS config — note this only persists in memory
-  // until next deploy; the field app's SUBDIVISIONS array needs manual update
   SUB_NAMES[code] = name;
-  SUB_COLORS[code] = 'sub-' + code;
-
   closeModal('modal-add-sub');
   await loadBuilders();
   renderBuildersTable();
   renderSubdivisionsTable();
-  alert('Subdivision ' + code + ' — ' + name + ' added. Note: you will also need to add this to the SUBDIVISIONS array in the field app code for it to appear for builders.');
+  alert('Subdivision ' + code + ' added. Add this code to the field app SUB_NAMES object before go-live.');
 }
 
-// ── DELAY LOG ──
-let currentDelayLotId = null;
-let currentDelays = [];
-
-async function openDelayLog(lotId, lotLabel) {
-  currentDelayLotId = lotId;
-  document.getElementById('delay-log-title').textContent = lotLabel;
-  document.getElementById('delay-log-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">Loading…</div>';
-  document.getElementById('modal-delay-log').classList.add('open');
-
-  const delays = await sbCall('getDelays', {lotId});
-  currentDelays = delays || [];
-
-  if (!currentDelays.length) {
-    document.getElementById('delay-log-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">No delay events recorded for this lot.</div>';
-    return;
-  }
-
-  document.getElementById('delay-log-list').innerHTML = currentDelays.map((d,i) => {
-    const date = new Date(d.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-    return `<div style="border:1px solid var(--rule);border-radius:10px;overflow:hidden">
-      <div style="padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;background:#f9fafb" onclick="toggleDelayNote(${i})">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:var(--ink)">${d.task_name}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${date} · ${d.builder_name} · <strong style="color:var(--red)">${d.reason}</strong></div>
-        </div>
-        <div style="font-size:12px;color:var(--muted)" id="delay-chevron-${i}">▼</div>
-      </div>
-      <div id="delay-note-${i}" style="display:none;padding:10px 14px;background:#fff;border-top:1px solid var(--rule);font-size:13px;color:var(--ink)">
-        ${d.note || '<span style="color:var(--muted);font-style:italic">No note provided</span>'}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function toggleDelayNote(i) {
-  const noteEl = document.getElementById('delay-note-'+i);
-  const chevEl = document.getElementById('delay-chevron-'+i);
-  const isOpen = noteEl.style.display !== 'none';
-  noteEl.style.display = isOpen ? 'none' : 'block';
-  chevEl.textContent = isOpen ? '▼' : '▲';
-}
-
-function exportDelayLog() {
-  if (!currentDelays.length) return;
-  const headers = ['Date','Lot','Subdivision','Builder','Task','Reason','Note'];
-  const rows = currentDelays.map(function(d) {
-    return [
-      new Date(d.created_at).toLocaleDateString(),
-      d.lot_number, d.subdivision, d.builder_name,
-      d.task_name, d.reason, d.note||''
-    ];
-  });
-  const csvRows = [headers].concat(rows).map(function(r) {
-    return r.map(function(c) {
-      return String(c).indexOf(',') > -1 || String(c).indexOf('"') > -1
-        ? '"' + String(c).replace(/"/g, '""') + '"'
-        : String(c);
-    }).join(',');
-  });
-  const csv = csvRows.join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'delay_log_' + currentDelayLotId + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-
-// ── EXPORT TO EXCEL ──
-function exportToExcel() {
-  const filterSub = document.getElementById('filter-sub').value;
-  // Default export excludes closed lots — they're archived
-  let filtered = filterSub ? lots.filter(l=>l.subdivision===filterSub && !l.is_closed) : lots.filter(l=>!l.is_closed);
-  filtered.sort((a,b)=>{
-    if(a.subdivision!==b.subdivision) return a.subdivision.localeCompare(b.subdivision);
-    return a.number.localeCompare(b.number,undefined,{numeric:true});
-  });
-
-  const headers = ['Subdivision','Lot Number','Address','Plan','Builder','Stage','Stage Description','Start Date','Updated This Week','Schedule Health'];
-  const rows = filtered.map(l=>{
-    const delta = calcHealthDelta(l);
-    let health = 'No start date';
-    if (delta !== null) health = delta > 3 ? '+'+delta+'d ahead' : delta < -3 ? Math.abs(delta)+'d behind' : 'On track';
-    return [
-      l.subdivision, l.number, l.address||'', l.plan||'',
-      l.assigned_builder||'', l.stage, STAGE_DESC[l.stage]||'',
-      l.start_date||'', l.updated_this_week?'Yes':'No', health
-    ];
-  });
-
-  // Build CSV
-  const csvRows = [headers, ...rows].map(r => r.map(cell => '"'+String(cell).replace(/"/g,'""')+'"').join(','));
-  const csv = csvRows.join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'Ashland_Stage_Report_' + new Date().toISOString().split('T')[0] + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ── TOGGLE LOT CLOSED FROM EDIT MODAL ──
-function toggleLotClosed() {
-  const lotId = document.getElementById('edit-lot-id').value;
-  const lot = lots.find(l => l.id === lotId);
-  if (!lot) return;
-
-  if (lot.is_closed) {
-    // Reversing close — warn first
-    if (!confirm('Are you sure you want to reverse the close on ' + lot.subdivision + ' ' + lot.number + '? This will mark it as active again.')) return;
-    sbCall('updateLot', {
-      id: lotId,
-      is_closed: false,
-      closed_date: null
-    }).then(result => {
-      if (result !== null) {
-        closeModal('modal-edit-lot');
-        loadLots().then(() => { renderStats(); renderLotsTable(); });
-      }
-    });
-  } else {
-    // Marking closed — use close date field or today
-    const closeDateVal = document.getElementById('edit-close-date').value || new Date().toISOString().split('T')[0];
-    sbCall('updateLot', {
-      id: lotId,
-      is_closed: true,
-      closed_date: closeDateVal,
-      scheduled_close_date: closeDateVal,
-      scheduled_close_date_locked_at: new Date().toISOString(),
-      scheduled_close_date_note: 'Admin marked closed'
-    }).then(result => {
-      if (result !== null) {
-        closeModal('modal-edit-lot');
-        loadLots().then(() => { renderStats(); renderLotsTable(); });
-      }
-    });
-  }
-}
-
-// ── MARK LOT CLOSED ──
-var markClosedTarget = {id: null, number: null, subdivision: null};
-
-function openMarkClosedModal(id, number, subdivision) {
-  markClosedTarget = {id: id, number: number, subdivision: subdivision};
-  document.getElementById('mark-closed-desc').textContent =
-    'Set the actual close date for ' + subdivision + ' ' + number + '.';
-  document.getElementById('mark-closed-date').value = new Date().toISOString().split('T')[0];
-  document.getElementById('mark-closed-error').textContent = '';
-  document.getElementById('modal-mark-closed').classList.add('open');
-}
-
-async function confirmMarkClosed() {
-  const closeDate = document.getElementById('mark-closed-date').value;
-  const errEl = document.getElementById('mark-closed-error');
-  if (!closeDate) { errEl.textContent = 'Please enter a close date'; return; }
-  errEl.textContent = 'Saving...';
-  const result = await sbCall('updateLot', {
-    id: markClosedTarget.id,
-    is_closed: true,
-    closed_date: closeDate,
-    scheduled_close_date: closeDate,
-    scheduled_close_date_locked_at: new Date().toISOString(),
-    scheduled_close_date_note: 'Admin marked closed'
-  });
-  if (result !== null) {
-    closeModal('modal-mark-closed');
-    await loadLots();
-    renderStats();
-    renderLotsTable();
-  } else {
-    errEl.textContent = 'Failed — try again';
-  }
-}
-
-// ── DELETE LOT ──
-var deleteLotTarget = {id: null, number: null, subdivision: null};
-
-function openDeleteLotModal(id, number, subdivision) {
-  deleteLotTarget = {id: id, number: number, subdivision: subdivision};
-  document.getElementById('delete-lot-desc').textContent =
-    'This will permanently delete ' + subdivision + ' ' + number + ' and all its data. This cannot be undone.';
-  document.getElementById('delete-lot-pin').value = '';
-  document.getElementById('delete-lot-error').textContent = '';
-  document.getElementById('modal-delete-lot').classList.add('open');
-}
-
-function closeDeleteLotModal() {
-  document.getElementById('modal-delete-lot').classList.remove('open');
-  deleteLotTarget = {id: null, number: null, subdivision: null};
-}
-
-async function confirmDeleteLot() {
-  var pin = document.getElementById('delete-lot-pin').value;
-  var errEl = document.getElementById('delete-lot-error');
-  if (pin !== ADMIN_PIN) {
-    errEl.textContent = 'Incorrect PIN';
-    document.getElementById('delete-lot-pin').value = '';
-    return;
-  }
-  errEl.textContent = 'Deleting...';
-  var result = await sbCall('deleteLot', {id: deleteLotTarget.id});
-  if (result !== null) {
-    closeDeleteLotModal();
-    await loadLots();
-    renderStats();
-    renderLotsTable();
-    alert(deleteLotTarget.subdivision + ' ' + deleteLotTarget.number + ' deleted successfully');
-  } else {
-    errEl.textContent = 'Delete failed - try again';
-  }
-}
-
-// ══════════════════════════════════════════════════════
-// SCHEDULE LOTS (engine) — Step 2b
-// ══════════════════════════════════════════════════════
-let scheduleLots = [];
-let scheduleTemplates = [];
-
-async function loadScheduleLots() {
-  document.getElementById('schedule-table-body').innerHTML = '<div class="loading">Loading schedule lots…</div>';
-  const [lotsData, tplData] = await Promise.all([
-    sbCall('getScheduleLots', {}),
-    sbCall('getTemplates', {})
-  ]);
-  scheduleLots = lotsData || [];
-  scheduleTemplates = tplData || [];
-  renderScheduleLots();
-}
-
-function renderScheduleLots() {
-  if (!scheduleLots.length) {
-    document.getElementById('schedule-table-body').innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>No schedule lots yet. Stamp one from a template to begin.</p></div>';
-    return;
-  }
-  const rows = scheduleLots.map(l => {
-    const tpl = scheduleTemplates.find(t => t.id === l.template_id);
-    const created = l.created_at ? new Date(l.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
-    const start = l.construction_start_date ? fmtDate(l.construction_start_date) : '<span style="color:var(--muted)">Not set</span>';
-    // Stage cell: show reported; if held (reported 5.9 but true higher), show the hold note
-    let stageCell;
-    if (l.reported_stage) {
-      const held = (l.reported_stage === '5.9' && l.true_stage && l.true_stage !== '5.9');
-      stageCell = '<span class="badge badge-stage">' + l.reported_stage + '</span>'
-        + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + l.true_stage + '</div>' : '');
-    } else {
-      stageCell = '<span style="color:var(--muted)">—</span>';
-    }
-    // freshness: days since last real task update
-    let freshCell;
-    if (l.last_task_update) {
-      const days = Math.floor((Date.now() - new Date(l.last_task_update).getTime()) / 86400000);
-      const label = days === 0 ? 'Today' : days === 1 ? '1 day ago' : days + ' days ago';
-      const stale = days >= 5;
-      freshCell = '<span class="badge" style="background:' + (stale?'#fee2e2':'#d5f5e3') + ';color:' + (stale?'var(--red)':'#1E8449') + ';font-weight:700">' + (stale?'⚠️ ':'') + label + '</span>';
-    } else {
-      freshCell = '<span class="badge" style="background:#f3f4f6;color:var(--muted)">No updates</span>';
-    }
-    return `<tr>
-      <td><strong>${l.lot_number}</strong></td>
-      <td>${l.community || '<span style="color:var(--muted)">—</span>'}</td>
-      <td>${l.builder_name || '<span style="color:var(--muted)">Unassigned</span>'}</td>
-      <td>${stageCell}</td>
-      <td>${freshCell}</td>
-      <td>${tpl ? tpl.name : '<span style="color:var(--muted)">—</span>'}</td>
-      <td>${start}</td>
-      <td>
-        <button class="btn btn-sm" onclick="openScheduleAssign('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#f5eef8;color:#6C3483;border:1px solid #d7bde2">Assign</button>
-        <button class="btn btn-sm" onclick="openScheduleStart('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;margin-left:4px">Set Start</button>
-        <button class="btn btn-sm" onclick="openScheduleStageModal('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#eafaf1;color:#1E8449;border:1px solid #a9dfbf;margin-left:4px">Set Stage</button>
-        <button class="btn btn-sm" onclick="deleteScheduleLot('${l.id}','${l.lot_number.replace(/'/g,"\\'")}')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;margin-left:4px">Delete</button>
-      </td>
-    </tr>`;
-  }).join('');
-  document.getElementById('schedule-table-body').innerHTML = `<table>
-    <thead><tr><th>Lot</th><th>Community</th><th>Builder</th><th>Stage</th><th>Schedule Currency</th><th>Template</th><th>Start Date</th><th></th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-function exportScheduleStages() {
-  if (!scheduleLots.length) { alert('No schedule lots to export.'); return; }
-  const headers = ['Lot','Community','Reported Stage','True Stage','Held','Start Date','Template'];
-  const rows = scheduleLots.map(l => {
-    const tpl = scheduleTemplates.find(t => t.id === l.template_id);
-    const held = (l.reported_stage === '5.9' && l.true_stage && l.true_stage !== '5.9') ? 'Yes' : '';
-    return [l.lot_number, l.community||'', l.reported_stage||'', l.true_stage||'', held, l.construction_start_date||'', tpl?tpl.name:''];
-  });
-  const csv = [headers, ...rows].map(r => r.map(c => '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'Schedule_Stage_Report_' + new Date().toISOString().split('T')[0] + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function openStampModal() {
-  const sel = document.getElementById('stamp-template');
-  if (!scheduleTemplates.length) {
-    alert('No templates loaded yet. Give it a moment and reopen the Schedule Lots tab.');
-    return;
-  }
-  sel.innerHTML = scheduleTemplates.map(t => `<option value="${t.id}">${t.name}${t.total_days?' ('+t.total_days+' days)':''}</option>`).join('');
-  document.getElementById('stamp-num').value = '';
-  document.getElementById('stamp-addr').value = '';
-  document.getElementById('stamp-comm').value = '';
-  document.getElementById('modal-stamp').classList.add('open');
-}
-
-async function submitStamp() {
-  const template_id = document.getElementById('stamp-template').value;
-  const lot_number = document.getElementById('stamp-num').value.trim();
-  const address = document.getElementById('stamp-addr').value.trim();
-  const community = document.getElementById('stamp-comm').value.trim();
-  if (!template_id || !lot_number) { alert('Template and lot number are required'); return; }
-  const result = await sbCall('stampLot', { template_id, lot_number, address, community });
-  if (result && result.success) {
-    closeModal('modal-stamp');
-    alert('Stamped ' + lot_number + ' — ' + result.task_count + ' tasks copied, ' + result.gate_count + ' gate(s).');
-    await loadScheduleLots();
-  }
-}
-
-async function deleteScheduleLot(id, num) {
-  if (!confirm('Delete schedule lot ' + num + '? This removes its full task copy.')) return;
-  const result = await sbCall('deleteScheduleLot', { id });
-  if (result && result.success) {
-    await loadScheduleLots();
-  }
-}
-
-function openScheduleStart(id, num) {
-  document.getElementById('sched-start-id').value = id;
-  document.getElementById('sched-start-sub').textContent = 'Set the construction start date for ' + num;
-  const lot = scheduleLots.find(l => l.id === id);
-  document.getElementById('sched-start-date').value = (lot && lot.construction_start_date) || '';
-  document.getElementById('modal-schedule-start').classList.add('open');
-}
-
-async function submitScheduleStart() {
-  const id = document.getElementById('sched-start-id').value;
-  const dateVal = document.getElementById('sched-start-date').value || null;
-  const result = await sbCall('updateScheduleLot', { id, construction_start_date: dateVal });
-  if (result !== null) {
-    closeModal('modal-schedule-start');
-    await loadScheduleLots();
-  }
-}
-
-function openScheduleStageModal(id, num) {
-  document.getElementById('sched-stage-id').value = id;
-  document.getElementById('sched-stage-sub').textContent = 'Set the pre-construction stage for ' + num;
-  const lot = scheduleLots.find(l => l.id === id);
-  document.getElementById('sched-stage-sel').value = (lot && lot.manual_stage) || '';
-  document.getElementById('modal-schedule-stage').classList.add('open');
-}
-
-async function submitScheduleStage() {
-  const id = document.getElementById('sched-stage-id').value;
-  const code = document.getElementById('sched-stage-sel').value || null;
-  const lot = scheduleLots.find(l => l.id === id);
-  const manualCodes = ['0.3','0.9','1','1.1',''];
-  const isAutoReported = lot && lot.reported_stage && !manualCodes.includes(lot.reported_stage);
-  const updates = { id, manual_stage: code };
-  // only set the reported/true stage from manual if an auto (construction) stage hasn't taken over
-  if (!isAutoReported) { updates.reported_stage = code; updates.true_stage = code; }
-  const result = await sbCall('updateScheduleLot', updates);
-  if (result !== null) {
-    closeModal('modal-schedule-stage');
-    await loadScheduleLots();
-  }
-}
-
-function openScheduleAssign(id, num) {
-  document.getElementById('sched-assign-id').value = id;
-  document.getElementById('sched-assign-sub').textContent = 'Assign a builder to ' + num;
-  const lot = scheduleLots.find(l => l.id === id);
-  const sel = document.getElementById('sched-assign-sel');
-  const list = (builders || []).filter(b => !b.is_admin);
-  sel.innerHTML = '<option value="">Unassigned</option>' + list.map(b => '<option value="' + b.name + '">' + b.name + '</option>').join('');
-  sel.value = (lot && lot.builder_name) || '';
-  document.getElementById('modal-schedule-assign').classList.add('open');
-}
-
-async function submitScheduleAssign() {
-  const id = document.getElementById('sched-assign-id').value;
-  const name = document.getElementById('sched-assign-sel').value || null;
-  const result = await sbCall('updateScheduleLot', { id, builder_name: name });
-  if (result !== null) {
-    closeModal('modal-schedule-assign');
-    await loadScheduleLots();
-  }
-}
-
-// ---- FLAGGED NOTES ----
-let flaggedNotes = [];
+// ── FLAGS ──
 async function loadFlags() {
   document.getElementById('flags-table-body').innerHTML = '<div class="loading">Loading flagged notes…</div>';
   const data = await sbCall('getFlaggedNotes', {});
   flaggedNotes = data || [];
   renderFlags();
 }
+
 function renderFlags() {
   const filter = document.getElementById('flag-filter').value;
-  let list = flaggedNotes;
-  if (filter !== 'all') list = list.filter(n => n.flag === filter);
-  // red first, then by newest
+  let list = filter === 'all' ? flaggedNotes : flaggedNotes.filter(n=>n.flag===filter);
   list = [...list].sort((a,b) => {
     if (a.flag !== b.flag) return a.flag === 'red' ? -1 : 1;
     return new Date(b.created_at) - new Date(a.created_at);
@@ -1525,10 +1039,11 @@ function renderFlags() {
   const el = document.getElementById('flags-table-body');
   if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="icon">🚩</div><p>No flagged notes.</p></div>'; return; }
   const rows = list.map(n => {
-    const when = new Date(n.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + ' ' + new Date(n.created_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    const when = new Date(n.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+      + ' ' + new Date(n.created_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
     const flagBadge = n.flag === 'red'
-      ? '<span class="badge" style="background:#fee2e2;color:#dc2626;font-weight:700">🔴 Management</span>'
-      : '<span class="badge" style="background:#fef9e7;color:#b7791f;font-weight:700">🟡 Reminder</span>';
+      ? '<span class="badge" style="background:#fee2e2;color:#dc2626">🔴 Management</span>'
+      : '<span class="badge" style="background:#fef9e7;color:#b7791f">🟡 Reminder</span>';
     const noteHtml = String(n.note||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
     return `<tr>
       <td style="white-space:nowrap">${flagBadge}</td>
@@ -1543,44 +1058,44 @@ function renderFlags() {
     <tbody>${rows}</tbody>
   </table>`;
 }
+
+// ── NAVIGATION ──
+function showSection(name, tabEl) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('section-'+name).classList.add('active');
+  if (tabEl) tabEl.classList.add('active');
+  if (name === 'flags') loadFlags();
+}
+
+// ── EXPORT ──
+function exportToExcel() {
+  const filterCom = document.getElementById('filter-community').value;
+  let data = filterCom ? scheduleLots.filter(l=>l.community===filterCom) : scheduleLots;
+  data = data.filter(l=>l.status!=='closed');
+  data.sort((a,b)=>{
+    if((a.community||'')!==(b.community||'')) return (a.community||'').localeCompare(b.community||'');
+    return (a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true});
+  });
+  const headers = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Planned Completion','Close Status','Scheduled Close Date'];
+  const rows = data.map(l => {
+    const planned = calcPlannedCompletion(l.construction_start_date);
+    const plannedStr = planned ? planned.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+    let closeStatus = l.status === 'closed' ? 'Closed' : l.scheduled_close_date ? 'Scheduled' : parseFloat(l.reported_stage||0)>=6 ? 'Ready' : 'Not Yet';
+    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',l.construction_start_date||'',plannedStr,closeStatus,l.scheduled_close_date||''];
+  });
+  const csv = [headers,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'Ashland_Lots_'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── UTILITY ──
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 </script>
-<!-- MARK CLOSED MODAL -->
-<div class="modal-overlay" id="modal-mark-closed">
-  <div class="modal" style="max-width:400px;width:90%">
-    <div style="font-size:32px;text-align:center;margin-bottom:12px">🏠</div>
-    <h2 style="text-align:center;margin-bottom:8px">Mark Lot Closed</h2>
-    <p id="mark-closed-desc" style="text-align:center;color:var(--muted);margin-bottom:20px;font-size:14px"></p>
-    <div class="field">
-      <label>Actual Close Date</label>
-      <input type="date" id="mark-closed-date" style="width:100%">
-    </div>
-    <div id="mark-closed-error" style="color:#dc2626;font-size:13px;text-align:center;margin-bottom:12px;min-height:18px"></div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal('modal-mark-closed')">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmMarkClosed()">Mark Closed →</button>
-    </div>
-  </div>
-</div>
-
-<!-- DELETE LOT MODAL -->
-<div class="modal-overlay" id="modal-delete-lot">
-  <div class="modal" style="max-width:400px;width:90%">
-    <div style="font-size:32px;text-align:center;margin-bottom:12px">⚠️</div>
-    <h2 style="text-align:center;color:#dc2626;margin-bottom:8px">Delete Lot?</h2>
-    <p id="delete-lot-desc" style="text-align:center;color:var(--muted);margin-bottom:20px;font-size:14px"></p>
-    <div class="field">
-      <label>Enter Admin PIN to confirm</label>
-      <input type="password" id="delete-lot-pin" maxlength="4" inputmode="numeric" placeholder="••••"
-        style="text-align:center;font-size:24px;letter-spacing:.4em"
-        onkeydown="if(event.key==='Enter')confirmDeleteLot()">
-    </div>
-    <div id="delete-lot-error" style="color:#dc2626;font-size:13px;text-align:center;margin-bottom:12px;min-height:18px"></div>
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeDeleteLotModal()">Cancel</button>
-      <button class="btn" onclick="confirmDeleteLot()" style="background:#dc2626;color:#fff">Delete Permanently</button>
-    </div>
-  </div>
-</div>
-
 </body>
 </html>
