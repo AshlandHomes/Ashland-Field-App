@@ -104,6 +104,21 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .pi-num{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);min-width:32px}
 .pi-name{font-size:13px;font-weight:500;line-height:1.3}
 .predbox-foot{padding:14px 16px;border-top:1px solid var(--line);flex-shrink:0}
+
+/* ── Stat cards (Items 5+6) ── */
+.stat-cards{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px}
+.stat-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;flex:1;min-width:76px;text-align:center;flex-shrink:0}
+.stat-card .sc-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:3px}
+.stat-card .sc-val{font-size:14px;font-weight:700;font-family:'DM Mono',monospace;color:var(--ink);white-space:nowrap}
+.stat-card .sc-val.behind{color:var(--red)}.stat-card .sc-val.ahead{color:var(--green)}
+
+/* ── Close-ready banner (Item 5) ── */
+.close-banner{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:#0369a1}
+
+/* ── Closed lot / completion banners (Items 3+4) ── */
+.arc-banner{border-radius:10px;padding:11px 14px;margin-bottom:12px;text-align:center;font-weight:700;font-size:13px;letter-spacing:.04em}
+.arc-banner.closed{background:#f3f4f6;border:2px solid var(--grey);color:var(--grey)}
+.arc-banner.done{background:#f0fdf4;border:1px solid #86efac;color:var(--green)}
 </style>
 </head>
 <body>
@@ -450,11 +465,52 @@ async function openLot(id){
 }
 
 function renderSchedule(){
-  recompute();
+  const {planEnd,projEnd}=recompute();
   const st=computeStage();
-  const projEnd=Math.max(...TASKS.map(t=>t._projected_ef));
-  let h='<div class="sbar"><div class="r"><div class="num">'+curLot.lot_number+'</div><div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div></div>';
-  h+='<div class="sub">'+(st.held?'⚡ Held at 5.9 — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(offToDate(projEnd))+'</div></div>';
+  const projEndDate=offToDate(projEnd);
+  const today=new Date();today.setHours(0,0,0,0);
+  const todayOff=wdBetween(startDate,today)+1;
+  const wdLeft=Math.max(0,projEnd-todayOff);
+  const weeksLeft=(wdLeft/5).toFixed(1);
+  const isClosed=(curLot.status==='closed');
+  const isStamped=!!curLot.completion_stamped_at;
+  // Health delta: positive = ahead, negative = behind. Freeze at stamp if all done.
+  const healthDelta=isStamped?(curLot.completion_health_delta||0):(planEnd-projEnd);
+  const stageNum=parseFloat(st.reportedCode)||0;
+
+  // ── Header bar ──
+  let h='<div class="sbar"><div class="r"><div class="num">'+curLot.lot_number
+    +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
+    +'</div><div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div></div>'
+    +'<div class="sub">'+(st.held?'⚡ Held at 5.9 — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(projEndDate)+'</div></div>';
+
+  // ── Stat cards (Items 5+6) ──
+  const hdCls=healthDelta>0?'ahead':(healthDelta<0?'behind':'');
+  const hdTxt=healthDelta>0?('+'+healthDelta+'d ahead'):(healthDelta<0?(Math.abs(healthDelta)+'d behind'):'On track');
+  h+='<div class="stat-cards">'
+    +'<div class="stat-card"><div class="sc-label">Completion</div><div class="sc-val">'+fmt(projEndDate)+'</div></div>'
+    +'<div class="stat-card"><div class="sc-label">Wks Out</div><div class="sc-val">'+(wdLeft<=0?'Done':weeksLeft+' wk')+'</div></div>'
+    +'<div class="stat-card"><div class="sc-label">Health</div><div class="sc-val '+hdCls+'">'+hdTxt+(isStamped?' 🔒':'')+'</div></div>';
+  if(curLot.scheduled_close_date){
+    h+='<div class="stat-card"><div class="sc-label">Sched Close</div><div class="sc-val">'+fmt(new Date(curLot.scheduled_close_date+'T00:00:00'))+'</div></div>';
+  }
+  h+='</div>';
+
+  // ── Item 3: Closed lot banner ──
+  if(isClosed){h+='<div class="arc-banner closed">🔒 LOT CLOSED — Schedule archived</div>';}
+
+  // ── Item 4: Completion stamp banner ──
+  if(isStamped&&!isClosed){
+    const elapsed=curLot.completion_wd_elapsed!=null?' — '+curLot.completion_wd_elapsed+' working days':'';
+    h+='<div class="arc-banner done">✅ All tasks complete'+elapsed+'</div>';
+  }
+
+  // ── Item 5: Stage 6.0 close-ready banner ──
+  if(!isClosed&&stageNum>=6.0){
+    const closeNote=curLot.scheduled_close_date?' · Closing: '+fmt(new Date(curLot.scheduled_close_date+'T00:00:00')):'';
+    h+='<div class="close-banner">🏠 Ready to schedule closing'+closeNote+'</div>';
+  }
+
   if(lotGates.length){
     const anyOpen=lotGates.some(g=>!g.confirmed);
     h+='<div class="gatebar"><div class="gh">'+(anyOpen?'Utilities — confirm when installed':'✓ All utilities confirmed')+'</div><div class="grow">';
@@ -532,6 +588,7 @@ async function saveTask(t){
   const a=act[t.num];
   await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null});
   await saveStage();
+  await checkCompletionStamp(); // Item 4
 }
 async function saveStage(){
   const st=computeStage();
@@ -543,12 +600,37 @@ async function startTask(n){
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
 }
 async function finishTask(n){
-  const t=bn[n];const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
+  const t=bn[n];
+  // ── Item 2: Soft predecessor warning ──
+  const incompletePreds=(t.preds||[]).filter(p=>bn[p]&&!(act[p]&&act[p].finished));
+  if(incompletePreds.length){
+    const names=incompletePreds.map(p=>'#'+p+(bn[p]?' — '+bn[p].name:'')).join('\n');
+    const ok=confirm('⚠️ Unfinished predecessors:\n\n'+names+'\n\nFinishing now may affect schedule accuracy. If these tasks are no longer required first, remove them in ⚙ Edit.\n\nFinish anyway?');
+    if(!ok)return;
+  }
+  const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};renderSchedule();await saveTask(t);
 }
 async function undoTask(n){
   const t=bn[n];act[n]={started:false,finished:false,start:null,finish:null};renderSchedule();await saveTask(t);
+}
+
+// ── Item 4: Completion stamp ──
+async function checkCompletionStamp(){
+  if(curLot.completion_stamped_at)return; // already stamped — don't overwrite
+  const allDone=TASKS.length>0&&TASKS.every(t=>act[t.num]&&act[t.num].finished);
+  if(!allDone)return;
+  const today=new Date();today.setHours(0,0,0,0);
+  const wdElapsed=wdBetween(startDate,today);
+  const {planEnd,projEnd}=recompute();
+  const healthDelta=planEnd-projEnd;
+  const stamped=new Date().toISOString();
+  await sbCall('stampLotComplete',{id:curLot.id,completion_stamped_at:stamped,completion_wd_elapsed:wdElapsed,completion_health_delta:healthDelta});
+  curLot.completion_stamped_at=stamped;
+  curLot.completion_wd_elapsed=wdElapsed;
+  curLot.completion_health_delta=healthDelta;
+  renderSchedule();
 }
 async function toggleGate(gateId,currentlyConfirmed){
   const g=lotGates.find(x=>x.id===gateId);if(!g)return;
