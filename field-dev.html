@@ -62,20 +62,54 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tname{font-size:14px;font-weight:600}
 .tnum{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--line);padding:1px 5px;border-radius:4px;margin-right:3px}
 .tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
-.tacts{display:flex;gap:6px;margin-top:10px}
-.ab{flex:1;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
-.ab.start{background:var(--start);color:#fff}.ab.fin{background:var(--green);color:#fff}.ab.undo{background:#eef0f2;color:var(--muted)}
+.tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.ab{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
+.ab.start{background:var(--start);color:#fff;flex:1}.ab.fin{background:var(--green);color:#fff;flex:1}.ab.undo{background:#eef0f2;color:var(--muted);flex:1}
 .critdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:6px;vertical-align:middle}
 .ticons{display:flex;gap:6px;font-size:18px;line-height:1}
 .notei{font-size:18px}.flagi{font-size:16px}
 .notect{font-size:11px;font-weight:700;color:var(--muted);vertical-align:super}
 .ab.note{background:#f5f3ff;color:#6C3483;border:1px solid #d7bde2;flex:0 0 auto;padding:9px 12px}
+.ab.edit{background:#fff8f0;color:#b45309;border:1px solid #fcd34d;flex:0 0 auto;padding:9px 12px}
 .flagbtn{font-family:inherit;font-size:13px;font-weight:600;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
 .flagbtn.sel{border-color:var(--brand);background:#e0f2fe;color:#0369a1}
+
+/* ── Task edit modal ── */
+.editmodal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:none;align-items:flex-end;justify-content:center}
+.editmodal.open{display:flex}
+.editbox{background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto}
+.edit-section{margin-bottom:18px}
+.edit-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px}
+.pred-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:26px}
+.pred-chip{background:#e0f2fe;color:#0369a1;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;padding:5px 9px;border-radius:6px;display:flex;align-items:center;gap:5px}
+.chip-x{cursor:pointer;font-size:16px;font-weight:700;color:#0369a1;background:none;border:none;padding:0 1px;line-height:1}
+.edit-pred-btn{width:100%;font-family:inherit;font-size:13px;font-weight:600;padding:11px;border-radius:8px;border:1px solid var(--brand);color:var(--brand);background:#f0f9ff;cursor:pointer}
+.edit-row{display:flex;gap:10px;margin-bottom:14px}
+.edit-field{flex:1}
+.edit-field label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px}
+.edit-field input,.edit-field select{width:100%;font-family:inherit;font-size:15px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.edit-btns{display:flex;gap:8px;margin-top:18px}
+
+/* ── Predecessor picker ── */
+.predpicker{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:none;align-items:flex-end;justify-content:center}
+.predpicker.open{display:flex}
+.predbox{background:#fff;border-radius:16px 16px 0 0;width:100%;max-width:480px;max-height:92vh;display:flex;flex-direction:column}
+.predbox-head{padding:16px 16px 12px;border-bottom:1px solid var(--line);flex-shrink:0}
+.predbox-head h3{font-size:15px;font-weight:700}
+.pred-search{width:100%;font-family:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;margin-top:10px}
+.predlist{flex:1;overflow-y:auto;padding:4px 0}
+.preditem{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer}
+.preditem:active{background:#f0f9ff}
+.preditem input[type=checkbox]{width:18px;height:18px;accent-color:var(--brand);flex-shrink:0;cursor:pointer}
+.pi-num{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);min-width:32px}
+.pi-name{font-size:13px;font-weight:500;line-height:1.3}
+.predbox-foot{padding:14px 16px;border-top:1px solid var(--line);flex-shrink:0}
 </style>
 </head>
 <body>
 <div class="devbanner">⚠ DEV / UAT — NOT FOR PRODUCTION ⚠</div>
+
+<!-- Date picker modal -->
 <div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:14px;padding:22px;width:300px;max-width:90vw">
     <div id="dpick-title" style="font-size:14px;font-weight:700;margin-bottom:14px"></div>
@@ -86,6 +120,8 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     </div>
   </div>
 </div>
+
+<!-- Note thread modal -->
 <div id="notemodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center">
   <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
     <div id="note-title" style="font-size:15px;font-weight:700;margin-bottom:12px"></div>
@@ -106,6 +142,55 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     </div>
   </div>
 </div>
+
+<!-- Task edit modal -->
+<div id="editmodal" class="editmodal">
+  <div class="editbox">
+    <div id="edit-title" style="font-size:15px;font-weight:700;margin-bottom:18px"></div>
+
+    <div class="edit-section">
+      <div class="edit-label">Current Predecessors</div>
+      <div class="pred-chips" id="edit-pred-chips"></div>
+      <button class="edit-pred-btn" onclick="openPredPicker()">⟳ Change Predecessors</button>
+    </div>
+
+    <div class="edit-row">
+      <div class="edit-field">
+        <label>Duration (days)</label>
+        <input type="number" id="edit-dur" min="1" max="99">
+      </div>
+      <div class="edit-field">
+        <label>Lag (days)</label>
+        <input type="number" id="edit-lag" min="0" max="99">
+      </div>
+    </div>
+
+    <div class="edit-field" style="margin-bottom:6px">
+      <label>Phase</label>
+      <select id="edit-phase"></select>
+    </div>
+
+    <div class="edit-btns">
+      <button onclick="closeEditTask()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:13px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
+      <button id="edit-save-btn" onclick="saveEditTask()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:13px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Predecessor picker modal -->
+<div id="predpicker" class="predpicker">
+  <div class="predbox">
+    <div class="predbox-head">
+      <h3>Select Predecessors</h3>
+      <input class="pred-search" id="pred-search" type="text" placeholder="Search by number or name…" oninput="filterPredList()">
+    </div>
+    <div class="predlist" id="predlist"></div>
+    <div class="predbox-foot">
+      <button onclick="closePredPicker()" style="width:100%;font-family:inherit;font-size:14px;font-weight:700;padding:13px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="screen active" id="screen-builders">
     <div class="brand"><h1>ASHLAND FIELD</h1><p>Select your name to sign in</p></div>
@@ -184,7 +269,7 @@ async function pinKey(k){
 async function tryPin(){
   const res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry});
   if(res&&res.valid){
-    if(res.is_temp){ startSetPin(); return; }  // forced PIN change on temp PIN
+    if(res.is_temp){startSetPin();return;}
     enterApp();
   } else if(res&&res.locked){
     document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
@@ -197,12 +282,9 @@ async function tryPin(){
   }
 }
 
-// ---- forced PIN change (temp PIN) ----
-let setPinEntry='', setPinConfirm='', setPinStage='new';
-function startSetPin(){
-  setPinEntry='';setPinConfirm='';setPinStage='new';
-  showScreen('screen-setpin');renderSetPin();
-}
+// ---- forced PIN change ----
+let setPinEntry='',setPinConfirm='',setPinStage='new';
+function startSetPin(){setPinEntry='';setPinConfirm='';setPinStage='new';showScreen('screen-setpin');renderSetPin();}
 function renderSetPin(){
   const entry=setPinStage==='new'?setPinEntry:setPinConfirm;
   document.getElementById('setpin-heading').textContent=setPinStage==='new'?'Create your PIN':'Confirm your PIN';
@@ -224,11 +306,7 @@ async function setPinKey(k){
     if(setPinConfirm.length>=4)return;
     setPinConfirm+=k;renderSetPin();
     if(setPinConfirm.length===4){
-      if(setPinConfirm!==setPinEntry){
-        err.textContent='PINs don\u2019t match — try again';
-        setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);
-        return;
-      }
+      if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
       const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
       if(r&&r.success){enterApp();}
       else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
@@ -245,40 +323,27 @@ function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScr
 async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
   const all=await sbCall('getScheduleLots',{})||[];
-  myLots=all.filter(l=>l.builder_name===currentBuilder && l.reported_stage && parseFloat(l.reported_stage)>=1.1);
+  myLots=all.filter(l=>l.builder_name===currentBuilder&&l.reported_stage&&parseFloat(l.reported_stage)>=1.1);
   renderSubs();
 }
 
 function renderSubs(){
   const el=document.getElementById('subs-list');
   if(!myLots.length){el.innerHTML='<div class="empty">No released lots assigned to you yet.</div>';return;}
-  // group by community
   const groups={};
   myLots.forEach(l=>{const c=l.community||'—';(groups[c]=groups[c]||[]).push(l);});
   const codes=Object.keys(groups).sort();
-  // if only one subdivision, skip straight to its lots
   if(codes.length===1){openSub(codes[0],true);return;}
   el.innerHTML=codes.map(c=>{
-    const n=groups[c].length;
-    const name=SUB_NAMES[c]||c;
+    const n=groups[c].length;const name=SUB_NAMES[c]||c;
     return '<div class="lotcard" onclick="openSub(\''+c+'\')">'
       +'<div class="lh"><div><div class="num">'+name+'</div><div class="comm">'+c+'</div></div>'
       +'<span class="stagebadge">'+n+' lot'+(n!==1?'s':'')+'</span></div></div>';
   }).join('');
 }
 
-function openSub(code,skipBack){
-  curSub=code;
-  document.getElementById('lots-subname').textContent=(SUB_NAMES[code]||code);
-  showScreen('screen-lots');
-  renderLots();
-}
-function backToSubs(){
-  // if builder has only one subdivision, back goes to builder list instead (no point showing 1-item picker)
-  const communities=new Set(myLots.map(l=>l.community||'—'));
-  if(communities.size<=1){showScreen('screen-subs');loadMyLots();return;}
-  curSub=null;showScreen('screen-subs');renderSubs();
-}
+function openSub(code,skipBack){curSub=code;document.getElementById('lots-subname').textContent=(SUB_NAMES[code]||code);showScreen('screen-lots');renderLots();}
+function backToSubs(){const communities=new Set(myLots.map(l=>l.community||'—'));if(communities.size<=1){showScreen('screen-subs');loadMyLots();return;}curSub=null;showScreen('screen-subs');renderSubs();}
 
 function renderLots(){
   const el=document.getElementById('lots-list');
@@ -295,10 +360,10 @@ function renderLots(){
 }
 function backToLots(){showScreen('screen-lots');renderLots();}
 
-// ============ SCHEDULE (engine) ============
-let TASKS=[], bn={}, act={}, startDate=null;
-let collapsedPhases={}, userToggledPhases=false;
-let curLot=null, stageMap=[], lotGates=[], curManual=null;
+// ============ SCHEDULE ENGINE ============
+let TASKS=[],bn={},act={},startDate=null;
+let collapsedPhases={},userToggledPhases=false;
+let curLot=null,stageMap=[],lotGates=[],curManual=null;
 
 function addWD(start,off){let d=new Date(start);d.setHours(0,0,0,0);let c=1;while(c<off){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==6)c++;}return d;}
 function wdBetween(a,b){let d1=new Date(a),d2=new Date(b);d1.setHours(0,0,0,0);d2.setHours(0,0,0,0);if(d1.getTime()===d2.getTime())return 0;const sign=d2>d1?1:-1;let cur=new Date(d1),c=0;while(cur.getTime()!==d2.getTime()){cur.setDate(cur.getDate()+sign);const w=cur.getDay();if(w!==0&&w!==6)c+=sign;}return c;}
@@ -335,18 +400,18 @@ function runEngine(mode){
   }
   return end;
 }
-function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return {planEnd:p,projEnd:pr};}
+function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return{planEnd:p,projEnd:pr};}
 
 function computeStage(){
-  const achieved=stageMap.filter(s=>!s.is_manual && s.triggers && s.triggers.length && s.triggers.every(bt=>act[bt]&&act[bt].finished));
+  const achieved=stageMap.filter(s=>!s.is_manual&&s.triggers&&s.triggers.length&&s.triggers.every(bt=>act[bt]&&act[bt].finished));
   let trueStage=null;
   achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
-  if(!trueStage && curManual){trueStage=stageMap.find(s=>s.code===curManual)||{code:curManual,label:'Pre-construction',order:0};}
+  if(!trueStage&&curManual){trueStage=stageMap.find(s=>s.code===curManual)||{code:curManual,label:'Pre-construction',order:0};}
   const gatesOpen=lotGates.some(g=>!g.confirmed);
-  let held=false, reportedCode, reportedLabel;
-  if(trueStage && gatesOpen && parseFloat(trueStage.code)>5.9){held=true;reportedCode='5.9';reportedLabel='Utility Hold';}
+  let held=false,reportedCode,reportedLabel;
+  if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){held=true;reportedCode='5.9';reportedLabel='Utility Hold';}
   else{reportedCode=trueStage?trueStage.code:'—';reportedLabel=trueStage?trueStage.label:'Pre-construction';}
-  return {reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
+  return{reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
 }
 
 function openDatePicker(title,defaultDate){
@@ -401,6 +466,7 @@ function renderSchedule(){
 }
 
 function renderTasks(){
+  const canEdit=true; // TODO: re-enable builder guard before go-live
   let h='';
   const phaseOrder=[];const seen={};
   TASKS.forEach(t=>{if(!seen[t.phase]){seen[t.phase]=true;phaseOrder.push(t.phase);}});
@@ -412,7 +478,8 @@ function renderTasks(){
   phaseOrder.forEach(ph=>{
     const inPhase=TASKS.filter(t=>t.phase===ph);
     if(!inPhase.length)return;
-    inPhase.sort((a,b)=>(a.order-b.order)||(a.num-b.num));
+    // sort by projected early start, then task order as tiebreak
+    inPhase.sort((a,b)=>(a._projected_es-b._projected_es)||(a.order-b.order)||(a.num-b.num));
     const collapsed=collapsedPhases[ph];
     const doneCt=inPhase.filter(t=>act[t.num]&&act[t.num].finished).length;
     const caret=collapsed?'▸':'▾';
@@ -424,21 +491,39 @@ function renderTasks(){
       const cls=a.finished?'done':(a.started?'started':'');
       const ps=offToDate(t._projected_es),pf=offToDate(t._projected_ef);
       let acts='';
-      if(a.finished){acts='<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';}
-      else if(a.started){acts='<button class="ab fin" data-a="finish" data-n="'+t.num+'">Finish</button><button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';}
-      else{acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';}
+      if(a.finished){
+        acts='<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';
+      } else if(a.started){
+        acts='<button class="ab fin" data-a="finish" data-n="'+t.num+'">Finish</button>'
+            +'<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';
+      } else {
+        acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';
+      }
+      acts+='<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button>';
+      if(canEdit){acts+='<button class="ab edit" data-a="edit" data-n="'+t.num+'">⚙ Edit</button>';}
       const tNotes=notesForTask(t.num);
-      const anyRed=tNotes.some(x=>x.flag==='red'), anyYellow=tNotes.some(x=>x.flag==='yellow');
+      const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
       const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
       const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
-      h+='<div class="t '+cls+'"><div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div><div class="ticons">'+flagIcon+noteIcon+'</div></div>'
+      h+='<div class="t '+cls+'">'
+        +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
+        +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+fmt(ps)+' → '+fmt(pf)+'</div>'
-        +'<div class="tacts">'+acts+'<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button></div></div>';
+        +'<div class="tacts">'+acts+'</div></div>';
     });
   });
   document.getElementById('sched').innerHTML=h;
   document.querySelectorAll('.ph').forEach(el=>{el.onclick=()=>{const p=+el.dataset.ph;userToggledPhases=true;collapsedPhases[p]=!collapsedPhases[p];renderTasks();};});
-  document.querySelectorAll('.ab').forEach(b=>{b.onclick=()=>{const n=+b.dataset.n,a=b.dataset.a;if(a==='start')startTask(n);else if(a==='finish')finishTask(n);else if(a==='undo')undoTask(n);else if(a==='note')openNote(n);};});
+  document.querySelectorAll('.ab').forEach(b=>{
+    b.onclick=()=>{
+      const n=+b.dataset.n,a=b.dataset.a;
+      if(a==='start')startTask(n);
+      else if(a==='finish')finishTask(n);
+      else if(a==='undo')undoTask(n);
+      else if(a==='note')openNote(n);
+      else if(a==='edit')openEditTask(n);
+    };
+  });
 }
 
 async function saveTask(t){
@@ -470,8 +555,128 @@ async function toggleGate(gateId,currentlyConfirmed){
   await saveStage();
 }
 
-// ---- notes thread + flags ----
-let lotNotes=[], noteTaskNum=null, noteFlag='none';
+// ============ TASK EDIT ============
+let editTaskNum=null, editPreds=[];
+
+function openEditTask(n){
+  editTaskNum=n;
+  const t=bn[n];
+  editPreds=[...(t.preds||[])];
+
+  document.getElementById('edit-title').textContent='Edit Task #'+n+' — '+t.name;
+  document.getElementById('edit-dur').value=t.dur;
+  document.getElementById('edit-lag').value=(t.lag||0);
+
+  // Build phase picker from all unique phases on this lot
+  const phases=[...new Set(TASKS.map(x=>x.phase))].sort((a,b)=>a-b);
+  const phaseNames={};TASKS.forEach(x=>phaseNames[x.phase]=x.phase_name);
+  document.getElementById('edit-phase').innerHTML=phases.map(ph=>
+    '<option value="'+ph+'"'+(ph===t.phase?' selected':'')+'>'+( phaseNames[ph]||('Phase '+ph))+'</option>'
+  ).join('');
+
+  renderEditPredChips();
+  document.getElementById('editmodal').classList.add('open');
+}
+
+function closeEditTask(){
+  document.getElementById('editmodal').classList.remove('open');
+  editTaskNum=null;
+  editPreds=[];
+}
+
+function renderEditPredChips(){
+  const el=document.getElementById('edit-pred-chips');
+  if(!editPreds.length){
+    el.innerHTML='<span style="font-size:13px;color:var(--muted)">None</span>';
+    return;
+  }
+  el.innerHTML=editPreds.map(p=>{
+    const pt=bn[p];
+    const label=pt?'#'+p+' '+pt.name:'#'+p;
+    return '<div class="pred-chip">'+escapeHtml(label)
+      +'<button class="chip-x" onclick="removePred('+p+')">×</button></div>';
+  }).join('');
+}
+
+function removePred(n){
+  editPreds=editPreds.filter(p=>p!==n);
+  renderEditPredChips();
+}
+
+function openPredPicker(){
+  document.getElementById('pred-search').value='';
+  renderPredList('');
+  document.getElementById('predpicker').classList.add('open');
+}
+
+function closePredPicker(){
+  document.getElementById('predpicker').classList.remove('open');
+  renderEditPredChips();
+}
+
+function renderPredList(filter){
+  const f=filter.toLowerCase();
+  const tasks=TASKS
+    .filter(t=>t.num!==editTaskNum)
+    .filter(t=>!f||('#'+t.num+' '+t.name).toLowerCase().includes(f))
+    .sort((a,b)=>a.num-b.num);
+  document.getElementById('predlist').innerHTML=tasks.map(t=>{
+    const checked=editPreds.includes(t.num);
+    return '<label class="preditem">'
+      +'<input type="checkbox"'+(checked?' checked':'')
+      +' onchange="togglePred('+t.num+',this.checked)">'
+      +'<span class="pi-num">#'+t.num+'</span>'
+      +'<span class="pi-name">'+escapeHtml(t.name)+'</span></label>';
+  }).join('');
+}
+
+function filterPredList(){
+  renderPredList(document.getElementById('pred-search').value);
+}
+
+function togglePred(n,checked){
+  if(checked&&!editPreds.includes(n))editPreds.push(n);
+  else if(!checked)editPreds=editPreds.filter(p=>p!==n);
+}
+
+async function saveEditTask(){
+  if(editTaskNum===null)return;
+  const t=bn[editTaskNum];
+  const dur=parseInt(document.getElementById('edit-dur').value);
+  const lag=parseInt(document.getElementById('edit-lag').value)||0;
+  const phaseEl=document.getElementById('edit-phase');
+  const newPhase=parseInt(phaseEl.value);
+  const newPhaseName=phaseEl.options[phaseEl.selectedIndex].text;
+
+  if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
+
+  const btn=document.getElementById('edit-save-btn');
+  btn.textContent='Saving…';btn.disabled=true;
+
+  // Update in-memory task
+  t.dur=dur;
+  t.lag=lag;
+  t.preds=[...editPreds];
+  t.phase=newPhase;
+  t.phase_name=newPhaseName;
+
+  // Persist to DB
+  await sbCall('editLotTask',{
+    task_id:t._id,
+    predecessors:editPreds,
+    lag:lag,
+    duration:dur,
+    phase_name:newPhaseName,
+    phase_order:newPhase
+  });
+
+  btn.textContent='Save Changes';btn.disabled=false;
+  closeEditTask();
+  renderSchedule(); // recompute + re-render with updated task
+}
+
+// ============ NOTES ============
+let lotNotes=[],noteTaskNum=null,noteFlag='none';
 function notesForTask(bt){return lotNotes.filter(n=>n.bt_num===bt).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));}
 function fmtNoteTime(iso){const d=new Date(iso);return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
 function flagBadge(f){if(f==='red')return '<span style="font-size:13px">🔴</span>';if(f==='yellow')return '<span style="font-size:13px">🟡</span>';return '';}
@@ -523,7 +728,8 @@ async function addNote(){
   if(!note){alert('Write a note first.');return;}
   const res=await sbCall('addTaskNote',{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder});
   const row=Array.isArray(res)?res[0]:res;
-  if(row&&row.id){lotNotes.push(row);}else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  if(row&&row.id){lotNotes.push(row);}
+  else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
   document.getElementById('note-text').value='';noteFlag='none';renderFlagBtns();
   renderThread();
 }
