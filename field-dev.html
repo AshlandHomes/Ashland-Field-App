@@ -128,9 +128,18 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
       <div class="pinerr" id="setpin-err"></div>
     </div>
   </div>
-  <div class="screen" id="screen-lots">
+  <div class="screen" id="screen-subs">
     <div class="topbar">
-      <div class="who">Signed in as<br><b id="lots-who"></b></div>
+      <div class="who">Signed in as<br><b id="subs-who"></b></div>
+      <button class="signout" onclick="signOut()">Sign Out</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:4px 0 10px">Choose a subdivision</div>
+    <div id="subs-list"><div class="loading">Loading…</div></div>
+  </div>
+  <div class="screen" id="screen-lots">
+    <button class="back" onclick="backToSubs()">← Subdivisions</button>
+    <div class="topbar" style="margin-top:4px">
+      <div class="who" id="lots-subname" style="font-size:16px;font-weight:700;color:var(--ink)"></div>
       <button class="signout" onclick="signOut()">Sign Out</button>
     </div>
     <div id="lots-list"><div class="loading">Loading your lots…</div></div>
@@ -227,16 +236,55 @@ async function setPinKey(k){
   }
 }
 
-function enterApp(){document.getElementById('lots-who').textContent=currentBuilder;showScreen('screen-lots');loadMyLots();}
-function signOut(){currentBuilder=null;pinEntry='';showScreen('screen-builders');}
+const SUB_NAMES={RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
+let curSub=null;
+
+function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots();}
+function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
 
 async function loadMyLots(){
-  document.getElementById('lots-list').innerHTML='<div class="loading">Loading your lots…</div>';
+  document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
   const all=await sbCall('getScheduleLots',{})||[];
   myLots=all.filter(l=>l.builder_name===currentBuilder && l.reported_stage && parseFloat(l.reported_stage)>=1.1);
-  const el=document.getElementById('lots-list');
+  renderSubs();
+}
+
+function renderSubs(){
+  const el=document.getElementById('subs-list');
   if(!myLots.length){el.innerHTML='<div class="empty">No released lots assigned to you yet.</div>';return;}
-  el.innerHTML=myLots.map(l=>{
+  // group by community
+  const groups={};
+  myLots.forEach(l=>{const c=l.community||'—';(groups[c]=groups[c]||[]).push(l);});
+  const codes=Object.keys(groups).sort();
+  // if only one subdivision, skip straight to its lots
+  if(codes.length===1){openSub(codes[0],true);return;}
+  el.innerHTML=codes.map(c=>{
+    const n=groups[c].length;
+    const name=SUB_NAMES[c]||c;
+    return '<div class="lotcard" onclick="openSub(\''+c+'\')">'
+      +'<div class="lh"><div><div class="num">'+name+'</div><div class="comm">'+c+'</div></div>'
+      +'<span class="stagebadge">'+n+' lot'+(n!==1?'s':'')+'</span></div></div>';
+  }).join('');
+}
+
+function openSub(code,skipBack){
+  curSub=code;
+  document.getElementById('lots-subname').textContent=(SUB_NAMES[code]||code);
+  showScreen('screen-lots');
+  renderLots();
+}
+function backToSubs(){
+  // if builder has only one subdivision, back goes to builder list instead (no point showing 1-item picker)
+  const communities=new Set(myLots.map(l=>l.community||'—'));
+  if(communities.size<=1){showScreen('screen-subs');loadMyLots();return;}
+  curSub=null;showScreen('screen-subs');renderSubs();
+}
+
+function renderLots(){
+  const el=document.getElementById('lots-list');
+  const lots=myLots.filter(l=>(l.community||'—')===curSub).sort((a,b)=>a.lot_number.localeCompare(b.lot_number,undefined,{numeric:true}));
+  if(!lots.length){el.innerHTML='<div class="empty">No lots here.</div>';return;}
+  el.innerHTML=lots.map(l=>{
     const held=(l.reported_stage==='5.9'&&l.true_stage&&l.true_stage!=='5.9');
     return '<div class="lotcard" onclick="openLot(\''+l.id+'\')">'
       +'<div class="lh"><div><div class="num">'+l.lot_number+'</div>'+(l.community?'<div class="comm">'+l.community+'</div>':'')+'</div>'
@@ -245,7 +293,7 @@ async function loadMyLots(){
       +'</div>';
   }).join('');
 }
-function backToLots(){showScreen('screen-lots');loadMyLots();}
+function backToLots(){showScreen('screen-lots');renderLots();}
 
 // ============ SCHEDULE (engine) ============
 let TASKS=[], bn={}, act={}, startDate=null;
