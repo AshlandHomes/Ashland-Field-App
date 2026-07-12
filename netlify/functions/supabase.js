@@ -475,6 +475,85 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(enriched) };
       }
 
+      // ══════════════════════════════════════════════════════
+      // SUBDIVISIONS
+      // ══════════════════════════════════════════════════════
+
+      case 'getSubdivisions': {
+        const { include_archived } = payload || {};
+        const filter = include_archived ? '' : '&is_archived=eq.false';
+        const r = await supabaseRequest('GET', `sched_subdivisions?select=*&order=code${filter}`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'upsertSubdivision': {
+        const { id, ...fields } = payload;
+        fields.updated_at = new Date().toISOString();
+        let r;
+        if (id) {
+          r = await supabaseRequest('PATCH', `sched_subdivisions?id=eq.${id}`, fields);
+        } else {
+          fields.created_at = new Date().toISOString();
+          r = await supabaseRequest('POST', 'sched_subdivisions', fields);
+        }
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getSubdivisionLots': {
+        const { subdivision_id } = payload || {};
+        const filter = subdivision_id ? `?subdivision_id=eq.${subdivision_id}&` : '?';
+        const r = await supabaseRequest('GET', `sched_subdivision_lots${filter}select=*&order=sort_order,lot_number`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'saveSubdivisionLots': {
+        const { subdivision_id, rows } = payload;
+        if (!subdivision_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'subdivision_id required' }) };
+        }
+        await supabaseRequest('DELETE', `sched_subdivision_lots?subdivision_id=eq.${subdivision_id}`);
+        if (rows && rows.length) {
+          const toInsert = rows
+            .filter(r => r.lot_number || r.address)
+            .map((r, i) => ({
+              subdivision_id,
+              lot_number: r.lot_number || null,
+              address: r.address || null,
+              lot_size: r.lot_size || null,
+              notes: r.notes || null,
+              sort_order: r.sort_order != null ? r.sort_order : i,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }));
+          if (toInsert.length) {
+            await supabaseRequest('POST', 'sched_subdivision_lots', toInsert);
+          }
+        }
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
+      case 'getSubdivisionTemplates': {
+        const { subdivision_id } = payload;
+        if (!subdivision_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'subdivision_id required' }) };
+        }
+        const r = await supabaseRequest('GET', `sched_subdivision_templates?subdivision_id=eq.${subdivision_id}&select=template_id`);
+        return { statusCode: 200, body: JSON.stringify((r.data || []).map(x => x.template_id)) };
+      }
+
+      case 'saveSubdivisionTemplates': {
+        const { subdivision_id, template_ids } = payload;
+        if (!subdivision_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'subdivision_id required' }) };
+        }
+        await supabaseRequest('DELETE', `sched_subdivision_templates?subdivision_id=eq.${subdivision_id}`);
+        if (template_ids && template_ids.length) {
+          const rows = template_ids.map(tid => ({ subdivision_id, template_id: tid }));
+          await supabaseRequest('POST', 'sched_subdivision_templates', rows);
+        }
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
       case 'setBuilderPin': {
         const { name, pin } = payload;
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
