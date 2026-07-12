@@ -161,7 +161,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
       </div>
       <div class="edit-field">
         <label>Lag (days)</label>
-        <input type="number" id="edit-lag" min="0" max="99">
+        <input type="number" id="edit-lag" min="-99" max="99">
       </div>
     </div>
 
@@ -643,7 +643,7 @@ async function saveEditTask(){
   if(editTaskNum===null)return;
   const t=bn[editTaskNum];
   const dur=parseInt(document.getElementById('edit-dur').value);
-  const lag=parseInt(document.getElementById('edit-lag').value)||0;
+  const lagRaw=document.getElementById('edit-lag').value;const lag=lagRaw!==''?parseInt(lagRaw):0;
   const phaseEl=document.getElementById('edit-phase');
   const newPhase=parseInt(phaseEl.value);
   const newPhaseName=phaseEl.options[phaseEl.selectedIndex].text;
