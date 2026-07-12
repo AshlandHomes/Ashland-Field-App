@@ -6,7 +6,6 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
 async function supabaseRequest(method, path, body) {
-  // Support both old REST API format and new format
   const url = `${SUPABASE_URL}/rest/v1/${path}`;
   const headers = {
     'Content-Type': 'application/json',
@@ -18,19 +17,19 @@ async function supabaseRequest(method, path, body) {
   }
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
-  
+
   const resp = await fetch(url, opts);
   const text = await resp.text();
-  
+
   if (!resp.ok) {
     console.error(`Supabase ${method} ${path} failed:`, resp.status, text);
     return { status: resp.status, data: null, error: text };
   }
-  
-  try { 
-    return { status: resp.status, data: JSON.parse(text) }; 
-  } catch(e) { 
-    return { status: resp.status, data: text }; 
+
+  try {
+    return { status: resp.status, data: JSON.parse(text) };
+  } catch(e) {
+    return { status: resp.status, data: text };
   }
 }
 
@@ -40,12 +39,12 @@ exports.handler = async function(event) {
   }
 
   if (!SUPABASE_URL || !SUPABASE_KEY) {
-    return { 
-      statusCode: 500, 
-      body: JSON.stringify({ error: 'Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables' }) 
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables' })
     };
   }
-// Shared-secret gate — rejects any caller without the secret header
+
   const SHARED_SECRET = process.env.API_SHARED_SECRET;
   if (SHARED_SECRET) {
     const provided = event.headers['x-api-secret'] || event.headers['X-Api-Secret'];
@@ -53,6 +52,7 @@ exports.handler = async function(event) {
       return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
     }
   }
+
   try {
     const { action, payload } = JSON.parse(event.body);
 
@@ -152,6 +152,7 @@ exports.handler = async function(event) {
         await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { failed_attempts: attempts, is_locked: lock, updated_at: new Date().toISOString() });
         return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'wrong_pin', locked: lock, attemptsLeft: Math.max(0, 5 - attempts) }) };
       }
+
       case 'addOverride': {
         const r = await supabaseRequest('POST', 'field_ops_overrides', payload);
         return { statusCode: 200, body: JSON.stringify(r.data) };
@@ -163,24 +164,26 @@ exports.handler = async function(event) {
       }
 
       case 'resetWeek': {
-        await supabaseRequest('PATCH', 'field_ops_lots?updated_this_week=eq.true', { 
-          updated_this_week: false, 
-          updated_at: new Date().toISOString() 
+        await supabaseRequest('PATCH', 'field_ops_lots?updated_this_week=eq.true', {
+          updated_this_week: false,
+          updated_at: new Date().toISOString()
         });
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
-     case 'ping': {
+      case 'ping': {
         const r = await supabaseRequest('GET', 'field_ops_lots?select=count&limit=1');
         return { statusCode: 200, body: JSON.stringify({ ok: true, status: r.status, error: r.error || null, url: SUPABASE_URL }) };
       }
-case 'keycheck': {
+
+      case 'keycheck': {
         return { statusCode: 200, body: JSON.stringify({
           keyStart: (SUPABASE_KEY || 'NONE').slice(0, 12),
           hasServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
           hasAnon: !!process.env.SUPABASE_ANON_KEY
         }) };
       }
+
       case 'deleteBuilder': {
         await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
@@ -206,9 +209,8 @@ case 'keycheck': {
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
       }
 
-      
-// ══════════════════════════════════════════════════════
-      // SCHEDULE ENGINE — template + lot stamping (Step 2a)
+      // ══════════════════════════════════════════════════════
+      // SCHEDULE ENGINE — template + lot stamping
       // ══════════════════════════════════════════════════════
 
       case 'getTemplates': {
@@ -298,7 +300,8 @@ case 'keycheck': {
 
         return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, task_count: lotTasks.length, gate_count: gates.length }) };
       }
-        case 'updateScheduleLot': {
+
+      case 'updateScheduleLot': {
         const { id, ...updates } = payload;
         if (!id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
@@ -307,7 +310,8 @@ case 'keycheck': {
         const r = await supabaseRequest('PATCH', `sched_lots?id=eq.${id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
-        case 'getScheduleLotTasks': {
+
+      case 'getScheduleLotTasks': {
         const { lot_id } = payload;
         if (!lot_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'lot_id is required' }) };
@@ -316,7 +320,8 @@ case 'keycheck': {
         const g = await supabaseRequest('GET', `sched_lot_gate_state?lot_id=eq.${lot_id}&select=*`);
         return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates: g.data || [] }) };
       }
-        case 'updateScheduleLotTask': {
+
+      case 'updateScheduleLotTask': {
         const { task_id, lot_id, status, actual_start, actual_finish } = payload;
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
@@ -331,7 +336,24 @@ case 'keycheck': {
         }
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
-        case 'getTemplateStageMap': {
+
+      // ── NEW: edit a single lot task (predecessors, lag, duration, phase) ──
+      case 'editLotTask': {
+        const { task_id, predecessors, lag, duration, phase_name, phase_order } = payload;
+        if (!task_id) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
+        }
+        const updates = { updated_at: new Date().toISOString() };
+        if (predecessors !== undefined) updates.predecessors = predecessors;
+        if (lag !== undefined) updates.lag = lag;
+        if (duration !== undefined) updates.duration = duration;
+        if (phase_name !== undefined) updates.phase_name = phase_name;
+        if (phase_order !== undefined) updates.phase_order = phase_order;
+        const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getTemplateStageMap': {
         const { template_id } = payload;
         if (!template_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'template_id is required' }) };
@@ -366,7 +388,8 @@ case 'keycheck': {
         const r = await supabaseRequest('PATCH', `sched_lot_gate_state?id=eq.${gate_id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
-        case 'updateScheduleLotTaskNote': {
+
+      case 'updateScheduleLotTaskNote': {
         const { task_id, note, flag } = payload;
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
@@ -377,7 +400,8 @@ case 'keycheck': {
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
-        case 'addTaskNote': {
+
+      case 'addTaskNote': {
         const { lot_task_id, lot_id, bt_num, note, flag, author } = payload;
         if (!lot_task_id || !note) {
           return { statusCode: 400, body: JSON.stringify({ error: 'lot_task_id and note are required' }) };
@@ -417,11 +441,10 @@ case 'keycheck': {
         await supabaseRequest('DELETE', `sched_lot_task_notes?id=eq.${payload.id}`);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
-        case 'getFlaggedNotes': {
-        // all red/yellow flagged notes across every lot, newest first, with lot context
+
+      case 'getFlaggedNotes': {
         const notes = await supabaseRequest('GET', `sched_lot_task_notes?flag=in.(red,yellow)&select=*&order=created_at.desc`);
         const rows = notes.data || [];
-        // attach lot number/community/builder for each note's lot
         const lotIds = [...new Set(rows.map(n => n.lot_id).filter(Boolean))];
         let lotMap = {};
         if (lotIds.length) {
@@ -436,7 +459,8 @@ case 'keycheck': {
         }));
         return { statusCode: 200, body: JSON.stringify(enriched) };
       }
-     case 'setBuilderPin': {
+
+      case 'setBuilderPin': {
         const { name, pin } = payload;
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
@@ -455,7 +479,8 @@ case 'keycheck': {
         });
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
-        case 'getTemplateTasks': {
+
+      case 'getTemplateTasks': {
         const { template_id } = payload;
         if (!template_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'template_id is required' }) };
@@ -540,6 +565,7 @@ case 'keycheck': {
 
         return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, tasks: lotTasks.length, completed: (completed||[]).length }) };
       }
+
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
@@ -549,5 +575,3 @@ case 'keycheck': {
     return { statusCode: 500, body: JSON.stringify({ error: err.toString() }) };
   }
 };
-
-// Note: upsertBuilderRecord added at end
