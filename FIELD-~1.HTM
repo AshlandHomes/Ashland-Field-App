@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ashland Field (DEV)</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--brand:#00A9D1;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b;--amber:#e67e22;--start:#2563eb}
+body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+.devbanner{background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.15em;padding:5px}
+.wrap{max-width:480px;margin:0 auto;padding:16px}
+.screen{display:none}.screen.active{display:block}
+.brand{text-align:center;margin:24px 0}
+.brand h1{font-family:'DM Mono',monospace;font-size:15px;letter-spacing:.2em;color:var(--grey)}
+.brand p{font-size:12px;color:var(--muted);margin-top:4px}
+.bpick{display:grid;grid-template-columns:1fr;gap:10px;margin-top:20px}
+.bbtn{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:16px;font-weight:600;text-align:left;cursor:pointer}
+.bbtn:active{background:#f0f9ff;border-color:var(--brand)}
+.pinwrap{text-align:center;margin-top:20px}
+.pindots{display:flex;justify-content:center;gap:12px;margin:20px 0}
+.pindot{width:16px;height:16px;border-radius:50%;border:2px solid var(--line)}
+.pindot.filled{background:var(--brand);border-color:var(--brand)}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:280px;margin:0 auto}
+.key{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:22px;font-weight:600;cursor:pointer;font-family:'DM Mono',monospace}
+.key:active{background:#f0f9ff}
+.key.blank{background:transparent;border:none;cursor:default}
+.pinerr{color:var(--red);font-size:13px;min-height:18px;margin-top:12px}
+.back{background:none;border:none;color:var(--brand);font-size:14px;font-weight:600;cursor:pointer;padding:8px 0}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.topbar .who{font-size:13px;color:var(--muted)}
+.topbar .who b{color:var(--ink);font-size:15px}
+.signout{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer}
+.lotcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;cursor:pointer}
+.lotcard:active{border-color:var(--brand)}
+.lotcard .lh{display:flex;justify-content:space-between;align-items:flex-start}
+.lotcard .num{font-size:18px;font-weight:700}
+.lotcard .comm{font-size:13px;color:var(--muted);margin-top:2px}
+.stagebadge{background:#e0f2fe;color:#0369a1;font-family:'DM Mono',monospace;font-weight:700;font-size:14px;padding:4px 10px;border-radius:8px}
+.stagebadge.held{background:#fef4e6;color:var(--amber)}
+.lotmeta{font-size:12px;color:var(--muted);margin-top:10px}
+.empty{text-align:center;padding:50px 20px;color:var(--muted)}
+.loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
+.sbar{background:var(--ink);color:#fff;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.sbar .r{display:flex;justify-content:space-between;align-items:center}
+.sbar .num{font-size:18px;font-weight:700}
+.sbar .stg{font-family:'DM Mono',monospace;font-weight:700;font-size:16px;background:rgba(255,255,255,.15);padding:4px 10px;border-radius:8px}
+.sbar .stg.held{background:#7d5a2e}
+.sbar .sub{font-size:12px;color:rgba(255,255,255,.6);margin-top:6px}
+.gatebar{background:#fff6ee;border:1px solid #f5d9b8;border-radius:12px;padding:12px;margin-bottom:12px}
+.gatebar .gh{font-size:11px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;letter-spacing:.05em}
+.grow{display:flex;gap:8px}
+.gbtn{flex:1;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer}
+.gbtn.on{background:var(--green);color:#fff;border-color:var(--green)}
+.ph{background:var(--ink);color:#fff;padding:9px 14px;font-size:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center;border-radius:8px;margin-top:8px;cursor:pointer}
+.ph .pc{font-weight:500;opacity:.6;font-size:11px}
+.active-badge{background:var(--green);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px}
+.t{background:#fff;border:1px solid var(--line);border-top:none;padding:12px 14px}
+.t.done{background:#f6fbf7}.t.started{background:#f5f9ff}
+.t .th{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.tname{font-size:14px;font-weight:600}
+.tnum{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--line);padding:1px 5px;border-radius:4px;margin-right:3px}
+.tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
+.tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.ab{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
+.ab.start{background:var(--start);color:#fff;flex:1}.ab.fin{background:var(--green);color:#fff;flex:1}.ab.undo{background:#eef0f2;color:var(--muted);flex:1}
+.critdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:6px;vertical-align:middle}
+.ticons{display:flex;gap:6px;font-size:18px;line-height:1}
+.notei{font-size:18px}.flagi{font-size:16px}
+.notect{font-size:11px;font-weight:700;color:var(--muted);vertical-align:super}
+.ab.note{background:#f5f3ff;color:#6C3483;border:1px solid #d7bde2;flex:0 0 auto;padding:9px 12px}
+.ab.edit{background:#fff8f0;color:#b45309;border:1px solid #fcd34d;flex:0 0 auto;padding:9px 12px}
+.flagbtn{font-family:inherit;font-size:13px;font-weight:600;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
+.flagbtn.sel{border-color:var(--brand);background:#e0f2fe;color:#0369a1}
+
+/* ── Task edit modal ── */
+.editmodal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:none;align-items:flex-end;justify-content:center}
+.editmodal.open{display:flex}
+.editbox{background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto}
+.edit-section{margin-bottom:18px}
+.edit-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px}
+.pred-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:26px}
+.pred-chip{background:#e0f2fe;color:#0369a1;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;padding:5px 9px;border-radius:6px;display:flex;align-items:center;gap:5px}
+.chip-x{cursor:pointer;font-size:16px;font-weight:700;color:#0369a1;background:none;border:none;padding:0 1px;line-height:1}
+.edit-pred-btn{width:100%;font-family:inherit;font-size:13px;font-weight:600;padding:11px;border-radius:8px;border:1px solid var(--brand);color:var(--brand);background:#f0f9ff;cursor:pointer}
+.edit-row{display:flex;gap:10px;margin-bottom:14px}
+.edit-field{flex:1}
+.edit-field label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px}
+.edit-field input,.edit-field select{width:100%;font-family:inherit;font-size:15px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.edit-btns{display:flex;gap:8px;margin-top:18px}
+
+/* ── Predecessor picker ── */
+.predpicker{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:none;align-items:flex-end;justify-content:center}
+.predpicker.open{display:flex}
+.predbox{background:#fff;border-radius:16px 16px 0 0;width:100%;max-width:480px;max-height:92vh;display:flex;flex-direction:column}
+.predbox-head{padding:16px 16px 12px;border-bottom:1px solid var(--line);flex-shrink:0}
+.predbox-head h3{font-size:15px;font-weight:700}
+.pred-search{width:100%;font-family:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;margin-top:10px}
+.predlist{flex:1;overflow-y:auto;padding:4px 0}
+.preditem{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer}
+.preditem:active{background:#f0f9ff}
+.preditem input[type=checkbox]{width:18px;height:18px;accent-color:var(--brand);flex-shrink:0;cursor:pointer}
+.pi-num{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);min-width:32px}
+.pi-name{font-size:13px;font-weight:500;line-height:1.3}
+.predbox-foot{padding:14px 16px;border-top:1px solid var(--line);flex-shrink:0}
+</style>
+</head>
+<body>
+<div class="devbanner">⚠ DEV / UAT — NOT FOR PRODUCTION ⚠</div>
+
+<!-- Date picker modal -->
+<div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:22px;width:300px;max-width:90vw">
+    <div id="dpick-title" style="font-size:14px;font-weight:700;margin-bottom:14px"></div>
+    <input type="date" id="dpick-input" style="width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:16px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="dpick-cancel" style="font-family:inherit;font-size:13px;font-weight:600;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
+      <button id="dpick-ok" style="font-family:inherit;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;border:none;background:var(--brand);color:#fff;cursor:pointer">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Note thread modal -->
+<div id="notemodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center">
+  <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <div id="note-title" style="font-size:15px;font-weight:700;margin-bottom:12px"></div>
+    <div id="note-thread" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+    <div style="border-top:1px solid var(--line);padding-top:14px">
+      <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Add a note</div>
+      <textarea id="note-text" rows="4" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate…"></textarea>
+      <button id="note-ai" onclick="aiCleanup()" style="width:100%;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid #7dd3fc;background:#e0f2fe;color:#0369a1;cursor:pointer;margin-top:10px">☁️ AI Cleanup</button>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="flagbtn" data-f="none" onclick="setNoteFlag('none')" style="flex:1">None</button>
+        <button class="flagbtn" data-f="yellow" onclick="setNoteFlag('yellow')" style="flex:1">🟡 Remind</button>
+        <button class="flagbtn" data-f="red" onclick="setNoteFlag('red')" style="flex:1">🔴 Mgmt</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="closeNote()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:12px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Done</button>
+      <button onclick="addNote()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:12px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Add Note</button>
+    </div>
+  </div>
+</div>
+
+<!-- Task edit modal -->
+<div id="editmodal" class="editmodal">
+  <div class="editbox">
+    <div id="edit-title" style="font-size:15px;font-weight:700;margin-bottom:18px"></div>
+
+    <div class="edit-section">
+      <div class="edit-label">Current Predecessors</div>
+      <div class="pred-chips" id="edit-pred-chips"></div>
+      <button class="edit-pred-btn" onclick="openPredPicker()">⟳ Change Predecessors</button>
+    </div>
+
+    <div class="edit-row">
+      <div class="edit-field">
+        <label>Duration (days)</label>
+        <input type="number" id="edit-dur" min="1" max="99">
+      </div>
+      <div class="edit-field">
+        <label>Lag (days)</label>
+        <input type="number" id="edit-lag" min="0" max="99">
+      </div>
+    </div>
+
+    <div class="edit-field" style="margin-bottom:6px">
+      <label>Phase</label>
+      <select id="edit-phase"></select>
+    </div>
+
+    <div class="edit-btns">
+      <button onclick="closeEditTask()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:13px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
+      <button id="edit-save-btn" onclick="saveEditTask()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:13px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Predecessor picker modal -->
+<div id="predpicker" class="predpicker">
+  <div class="predbox">
+    <div class="predbox-head">
+      <h3>Select Predecessors</h3>
+      <input class="pred-search" id="pred-search" type="text" placeholder="Search by number or name…" oninput="filterPredList()">
+    </div>
+    <div class="predlist" id="predlist"></div>
+    <div class="predbox-foot">
+      <button onclick="closePredPicker()" style="width:100%;font-family:inherit;font-size:14px;font-weight:700;padding:13px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="screen active" id="screen-builders">
+    <div class="brand"><h1>ASHLAND FIELD</h1><p>Select your name to sign in</p></div>
+    <div class="bpick" id="builder-list"><div class="loading">Loading…</div></div>
+  </div>
+  <div class="screen" id="screen-pin">
+    <button class="back" onclick="toBuilders()">← Back</button>
+    <div class="pinwrap">
+      <div class="brand" style="margin:12px 0"><h1 id="pin-name"></h1><p>Enter your 4-digit PIN</p></div>
+      <div class="pindots" id="pindots"></div>
+      <div class="keys" id="keys"></div>
+      <div class="pinerr" id="pinerr"></div>
+    </div>
+  </div>
+  <div class="screen" id="screen-setpin">
+    <div class="pinwrap">
+      <div class="brand" style="margin:12px 0"><h1 id="setpin-heading">Create your PIN</h1><p id="setpin-sub">Choose a new 4-digit PIN</p></div>
+      <div class="pindots" id="setpin-dots"></div>
+      <div class="keys" id="setpin-keys"></div>
+      <div class="pinerr" id="setpin-err"></div>
+    </div>
+  </div>
+  <div class="screen" id="screen-subs">
+    <div class="topbar">
+      <div class="who">Signed in as<br><b id="subs-who"></b></div>
+      <button class="signout" onclick="signOut()">Sign Out</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:4px 0 10px">Choose a subdivision</div>
+    <div id="subs-list"><div class="loading">Loading…</div></div>
+  </div>
+  <div class="screen" id="screen-lots">
+    <button class="back" onclick="backToSubs()">← Subdivisions</button>
+    <div class="topbar" style="margin-top:4px">
+      <div class="who" id="lots-subname" style="font-size:16px;font-weight:700;color:var(--ink)"></div>
+      <button class="signout" onclick="signOut()">Sign Out</button>
+    </div>
+    <div id="lots-list"><div class="loading">Loading your lots…</div></div>
+  </div>
+  <div class="screen" id="screen-schedule">
+    <button class="back" onclick="backToLots()">← My Lots</button>
+    <div id="sched-view"><div class="loading">Loading schedule…</div></div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_FN='/.netlify/functions/supabase';
+let API_SECRET=null;
+async function loadSecret(){if(API_SECRET)return API_SECRET;const r=await fetch('/.netlify/functions/config');const d=await r.json();API_SECRET=d.secret;return API_SECRET;}
+async function sbCall(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});const d=await r.json();if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
+
+let currentBuilder=null, pinEntry='', myLots=[];
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+
+async function loadBuilders(){
+  const bs=await sbCall('getBuilders',{})||[];
+  const list=bs.filter(b=>!b.is_admin);
+  const el=document.getElementById('builder-list');
+  if(!list.length){el.innerHTML='<div class="empty">No builders found.</div>';return;}
+  el.innerHTML=list.map(b=>'<button class="bbtn" onclick="pickBuilder(\''+b.name.replace(/'/g,"\\'")+'\')">'+b.name+'</button>').join('');
+}
+function pickBuilder(name){currentBuilder=name;pinEntry='';document.getElementById('pin-name').textContent=name;document.getElementById('pinerr').textContent='';renderPin();showScreen('screen-pin');}
+function toBuilders(){currentBuilder=null;pinEntry='';showScreen('screen-builders');}
+
+function renderPin(){
+  let dots='';for(let i=0;i<4;i++)dots+='<div class="pindot'+(i<pinEntry.length?' filled':'')+'"></div>';
+  document.getElementById('pindots').innerHTML=dots;
+  const keyEls=['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  document.getElementById('keys').innerHTML=keyEls.map(k=>{if(k==='')return '<div class="key blank"></div>';return '<button class="key" onclick="pinKey(\''+k+'\')">'+k+'</button>';}).join('');
+}
+async function pinKey(k){
+  if(k==='⌫'){pinEntry=pinEntry.slice(0,-1);renderPin();return;}
+  if(pinEntry.length>=4)return;
+  pinEntry+=k;renderPin();
+  if(pinEntry.length===4){await tryPin();}
+}
+async function tryPin(){
+  const res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry});
+  if(res&&res.valid){
+    if(res.is_temp){startSetPin();return;}
+    enterApp();
+  } else if(res&&res.locked){
+    document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
+    pinEntry='';renderPin();
+  } else {
+    const left=(res&&typeof res.attemptsLeft==='number')?res.attemptsLeft:null;
+    const msg=(left!==null)?('Incorrect PIN — '+left+' attempt'+(left===1?'':'s')+' left'):'Incorrect PIN';
+    document.getElementById('pinerr').textContent=msg;pinEntry='';
+    setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},1100);
+  }
+}
+
+// ---- forced PIN change ----
+let setPinEntry='',setPinConfirm='',setPinStage='new';
+function startSetPin(){setPinEntry='';setPinConfirm='';setPinStage='new';showScreen('screen-setpin');renderSetPin();}
+function renderSetPin(){
+  const entry=setPinStage==='new'?setPinEntry:setPinConfirm;
+  document.getElementById('setpin-heading').textContent=setPinStage==='new'?'Create your PIN':'Confirm your PIN';
+  document.getElementById('setpin-sub').textContent=setPinStage==='new'?'Choose a new 4-digit PIN':'Enter it again to confirm';
+  let dots='';for(let i=0;i<4;i++)dots+='<div class="pindot'+(i<entry.length?' filled':'')+'"></div>';
+  document.getElementById('setpin-dots').innerHTML=dots;
+  const keyEls=['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  document.getElementById('setpin-keys').innerHTML=keyEls.map(k=>{if(k==='')return '<div class="key blank"></div>';return '<button class="key" onclick="setPinKey(\''+k+'\')">'+k+'</button>';}).join('');
+}
+async function setPinKey(k){
+  const err=document.getElementById('setpin-err');err.textContent='';
+  if(setPinStage==='new'){
+    if(k==='⌫'){setPinEntry=setPinEntry.slice(0,-1);renderSetPin();return;}
+    if(setPinEntry.length>=4)return;
+    setPinEntry+=k;renderSetPin();
+    if(setPinEntry.length===4){setPinStage='confirm';setTimeout(renderSetPin,150);}
+  } else {
+    if(k==='⌫'){setPinConfirm=setPinConfirm.slice(0,-1);renderSetPin();return;}
+    if(setPinConfirm.length>=4)return;
+    setPinConfirm+=k;renderSetPin();
+    if(setPinConfirm.length===4){
+      if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
+      const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
+      if(r&&r.success){enterApp();}
+      else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
+    }
+  }
+}
+
+const SUB_NAMES={RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
+let curSub=null;
+
+function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots();}
+function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
+
+async function loadMyLots(){
+  document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
+  const all=await sbCall('getScheduleLots',{})||[];
+  myLots=all.filter(l=>l.builder_name===currentBuilder&&l.reported_stage&&parseFloat(l.reported_stage)>=1.1);
+  renderSubs();
+}
+
+function renderSubs(){
+  const el=document.getElementById('subs-list');
+  if(!myLots.length){el.innerHTML='<div class="empty">No released lots assigned to you yet.</div>';return;}
+  const groups={};
+  myLots.forEach(l=>{const c=l.community||'—';(groups[c]=groups[c]||[]).push(l);});
+  const codes=Object.keys(groups).sort();
+  if(codes.length===1){openSub(codes[0],true);return;}
+  el.innerHTML=codes.map(c=>{
+    const n=groups[c].length;const name=SUB_NAMES[c]||c;
+    return '<div class="lotcard" onclick="openSub(\''+c+'\')">'
+      +'<div class="lh"><div><div class="num">'+name+'</div><div class="comm">'+c+'</div></div>'
+      +'<span class="stagebadge">'+n+' lot'+(n!==1?'s':'')+'</span></div></div>';
+  }).join('');
+}
+
+function openSub(code,skipBack){curSub=code;document.getElementById('lots-subname').textContent=(SUB_NAMES[code]||code);showScreen('screen-lots');renderLots();}
+function backToSubs(){const communities=new Set(myLots.map(l=>l.community||'—'));if(communities.size<=1){showScreen('screen-subs');loadMyLots();return;}curSub=null;showScreen('screen-subs');renderSubs();}
+
+function renderLots(){
+  const el=document.getElementById('lots-list');
+  const lots=myLots.filter(l=>(l.community||'—')===curSub).sort((a,b)=>a.lot_number.localeCompare(b.lot_number,undefined,{numeric:true}));
+  if(!lots.length){el.innerHTML='<div class="empty">No lots here.</div>';return;}
+  el.innerHTML=lots.map(l=>{
+    const held=(l.reported_stage==='5.9'&&l.true_stage&&l.true_stage!=='5.9');
+    return '<div class="lotcard" onclick="openLot(\''+l.id+'\')">'
+      +'<div class="lh"><div><div class="num">'+l.lot_number+'</div>'+(l.community?'<div class="comm">'+l.community+'</div>':'')+'</div>'
+      +'<span class="stagebadge'+(held?' held':'')+'">'+l.reported_stage+'</span></div>'
+      +'<div class="lotmeta">'+(l.construction_start_date?'Start: '+l.construction_start_date:'No start date set')+(held?' · ⚡ held at 5.9':'')+'</div>'
+      +'</div>';
+  }).join('');
+}
+function backToLots(){showScreen('screen-lots');renderLots();}
+
+// ============ SCHEDULE ENGINE ============
+let TASKS=[],bn={},act={},startDate=null;
+let collapsedPhases={},userToggledPhases=false;
+let curLot=null,stageMap=[],lotGates=[],curManual=null;
+
+function addWD(start,off){let d=new Date(start);d.setHours(0,0,0,0);let c=1;while(c<off){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==6)c++;}return d;}
+function wdBetween(a,b){let d1=new Date(a),d2=new Date(b);d1.setHours(0,0,0,0);d2.setHours(0,0,0,0);if(d1.getTime()===d2.getTime())return 0;const sign=d2>d1?1:-1;let cur=new Date(d1),c=0;while(cur.getTime()!==d2.getTime()){cur.setDate(cur.getDate()+sign);const w=cur.getDay();if(w!==0&&w!==6)c+=sign;}return c;}
+function fmt(d){return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'})}
+function ymd(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')}
+function isValidDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(new Date(s+'T00:00:00').getTime());}
+function todayYmd(){return ymd(new Date());}
+function actOffset(iso){if(!startDate||!iso)return null;return wdBetween(startDate,new Date(iso+'T00:00:00'))+1;}
+function offToDate(off){if(off>=1)return addWD(startDate,off);let d=new Date(startDate);d.setHours(0,0,0,0);let c=1;while(c>off){d.setDate(d.getDate()-1);const w=d.getDay();if(w!==0&&w!==6)c--;}return d;}
+
+function runEngine(mode){
+  const memo={};
+  function ef(n,stk){
+    if(memo[n]!==undefined)return memo[n];
+    const t=bn[n];if(stk.includes(n))return t.rf||1;
+    let pd=null;
+    (t.preds||[]).forEach(p=>{if(bn[p]){const pe=ef(p,[...stk,n]);pd=(pd===null)?pe+1:Math.max(pd,pe+1);}});
+    let es;const a=act[n]||{};
+    const aStartOff=(mode==='projected'&&a.started&&a.start)?actOffset(a.start):null;
+    if(aStartOff!==null){es=aStartOff;}
+    else{const ps=(pd!==null)?pd+t.lag:null;const c=[];if(t.rs!==null&&t.rs!==undefined)c.push(t.rs);if(ps!==null)c.push(ps);es=c.length?Math.max(...c):(t.rs||1);}
+    let e;const aFinOff=(mode==='projected'&&a.finished&&a.finish)?actOffset(a.finish):null;
+    if(aFinOff!==null){e=aFinOff;}else{e=es+t.dur-1;}
+    memo[n]=e;t['_'+mode+'_es']=es;t['_'+mode+'_ef']=e;return e;
+  }
+  TASKS.forEach(t=>ef(t.num,[]));
+  const end=Math.max(...TASKS.map(t=>t['_'+mode+'_ef']));
+  if(mode==='planned'){
+    const succ={};TASKS.forEach(t=>succ[t.num]=[]);
+    TASKS.forEach(t=>(t.preds||[]).forEach(p=>{if(succ[p])succ[p].push(t.num)}));
+    const lf={};
+    function latef(n,stk){if(lf[n]!==undefined)return lf[n];if(stk.includes(n))return end;const ss=succ[n];let v=ss.length===0?end:Math.min(...ss.map(s=>latef(s,[...stk,n])-bn[s].dur+1-1-bn[s].lag));lf[n]=v;return v;}
+    TASKS.forEach(t=>{t._lf=latef(t.num,[]);t._ls=t._lf-t.dur+1;t._tf=t._ls-t._planned_es;t._crit=(t._tf<=0)});
+  }
+  return end;
+}
+function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return{planEnd:p,projEnd:pr};}
+
+function computeStage(){
+  const achieved=stageMap.filter(s=>!s.is_manual&&s.triggers&&s.triggers.length&&s.triggers.every(bt=>act[bt]&&act[bt].finished));
+  let trueStage=null;
+  achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
+  if(!trueStage&&curManual){trueStage=stageMap.find(s=>s.code===curManual)||{code:curManual,label:'Pre-construction',order:0};}
+  const gatesOpen=lotGates.some(g=>!g.confirmed);
+  let held=false,reportedCode,reportedLabel;
+  if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){held=true;reportedCode='5.9';reportedLabel='Utility Hold';}
+  else{reportedCode=trueStage?trueStage.code:'—';reportedLabel=trueStage?trueStage.label:'Pre-construction';}
+  return{reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
+}
+
+function openDatePicker(title,defaultDate){
+  return new Promise(resolve=>{
+    const ov=document.getElementById('dpick');
+    document.getElementById('dpick-title').textContent=title;
+    document.getElementById('dpick-input').value=defaultDate||todayYmd();
+    ov.style.display='flex';
+    const ok=document.getElementById('dpick-ok'),cancel=document.getElementById('dpick-cancel');
+    function done(v){ov.style.display='none';ok.onclick=null;cancel.onclick=null;resolve(v);}
+    ok.onclick=()=>{const v=document.getElementById('dpick-input').value;done(v||null);};
+    cancel.onclick=()=>done(null);
+  });
+}
+
+async function openLot(id){
+  curLot=myLots.find(l=>l.id===id);
+  if(!curLot)return;
+  showScreen('screen-schedule');
+  document.getElementById('sched-view').innerHTML='<div class="loading">Loading schedule…</div>';
+  const data=await sbCall('getScheduleLotTasks',{lot_id:id});
+  if(!data){return;}
+  const rows=data.tasks||[];
+  lotGates=data.gates||[];
+  curManual=curLot.manual_stage||null;
+  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none'}));
+  bn={};TASKS.forEach(t=>bn[t.num]=t);
+  act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish};});
+  startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
+  if(curLot.template_id){const sm=await sbCall('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
+  lotNotes=await sbCall('getTaskNotes',{lot_id:id})||[];
+  userToggledPhases=false;collapsedPhases={};
+  renderSchedule();
+}
+
+function renderSchedule(){
+  recompute();
+  const st=computeStage();
+  const projEnd=Math.max(...TASKS.map(t=>t._projected_ef));
+  let h='<div class="sbar"><div class="r"><div class="num">'+curLot.lot_number+'</div><div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div></div>';
+  h+='<div class="sub">'+(st.held?'⚡ Held at 5.9 — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(offToDate(projEnd))+'</div></div>';
+  if(lotGates.length){
+    const anyOpen=lotGates.some(g=>!g.confirmed);
+    h+='<div class="gatebar"><div class="gh">'+(anyOpen?'Utilities — confirm when installed':'✓ All utilities confirmed')+'</div><div class="grow">';
+    lotGates.forEach(g=>{h+='<button class="gbtn'+(g.confirmed?' on':'')+'" data-gid="'+g.id+'" data-cf="'+(g.confirmed?1:0)+'">'+g.gate_name+(g.confirmed?' ✓':'')+'</button>';});
+    h+='</div></div>';
+  }
+  h+='<div id="sched"></div>';
+  document.getElementById('sched-view').innerHTML=h;
+  document.querySelectorAll('.gbtn').forEach(b=>{b.onclick=()=>toggleGate(b.dataset.gid,b.dataset.cf==='1');});
+  renderTasks();
+}
+
+function renderTasks(){
+  const canEdit=(currentBuilder===curLot.builder_name);
+  let h='';
+  const phaseOrder=[];const seen={};
+  TASKS.forEach(t=>{if(!seen[t.phase]){seen[t.phase]=true;phaseOrder.push(t.phase);}});
+  phaseOrder.sort((a,b)=>a-b);
+  const phaseName={};TASKS.forEach(t=>phaseName[t.phase]=t.phase_name);
+  let activePhase=null,earliest=Infinity;
+  TASKS.forEach(t=>{if(!(act[t.num]&&act[t.num].finished)&&t._projected_es<earliest){earliest=t._projected_es;activePhase=t.phase;}});
+  if(!userToggledPhases){phaseOrder.forEach(ph=>{collapsedPhases[ph]=(ph!==activePhase);});}
+  phaseOrder.forEach(ph=>{
+    const inPhase=TASKS.filter(t=>t.phase===ph);
+    if(!inPhase.length)return;
+    // sort by projected early start, then task order as tiebreak
+    inPhase.sort((a,b)=>(a._projected_es-b._projected_es)||(a.order-b.order)||(a.num-b.num));
+    const collapsed=collapsedPhases[ph];
+    const doneCt=inPhase.filter(t=>act[t.num]&&act[t.num].finished).length;
+    const caret=collapsed?'▸':'▾';
+    const activeTag=(ph===activePhase)?'<span class="active-badge">active</span>':'';
+    h+='<div class="ph" data-ph="'+ph+'"><span>'+caret+' '+(phaseName[ph]||('Phase '+ph))+' '+activeTag+'</span><span class="pc">'+doneCt+'/'+inPhase.length+'</span></div>';
+    if(collapsed)return;
+    inPhase.forEach(t=>{
+      const a=act[t.num]||{};
+      const cls=a.finished?'done':(a.started?'started':'');
+      const ps=offToDate(t._projected_es),pf=offToDate(t._projected_ef);
+      let acts='';
+      if(a.finished){
+        acts='<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';
+      } else if(a.started){
+        acts='<button class="ab fin" data-a="finish" data-n="'+t.num+'">Finish</button>'
+            +'<button class="ab undo" data-a="undo" data-n="'+t.num+'">Undo</button>';
+      } else {
+        acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';
+      }
+      acts+='<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button>';
+      if(canEdit){acts+='<button class="ab edit" data-a="edit" data-n="'+t.num+'">⚙ Edit</button>';}
+      const tNotes=notesForTask(t.num);
+      const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
+      const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
+      const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
+      h+='<div class="t '+cls+'">'
+        +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
+        +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
+        +'<div class="tdate">'+fmt(ps)+' → '+fmt(pf)+'</div>'
+        +'<div class="tacts">'+acts+'</div></div>';
+    });
+  });
+  document.getElementById('sched').innerHTML=h;
+  document.querySelectorAll('.ph').forEach(el=>{el.onclick=()=>{const p=+el.dataset.ph;userToggledPhases=true;collapsedPhases[p]=!collapsedPhases[p];renderTasks();};});
+  document.querySelectorAll('.ab').forEach(b=>{
+    b.onclick=()=>{
+      const n=+b.dataset.n,a=b.dataset.a;
+      if(a==='start')startTask(n);
+      else if(a==='finish')finishTask(n);
+      else if(a==='undo')undoTask(n);
+      else if(a==='note')openNote(n);
+      else if(a==='edit')openEditTask(n);
+    };
+  });
+}
+
+async function saveTask(t){
+  const a=act[t.num];
+  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null});
+  await saveStage();
+}
+async function saveStage(){
+  const st=computeStage();
+  await sbCall('updateScheduleLot',{id:curLot.id,reported_stage:(st.reportedCode==='—'?null:st.reportedCode),true_stage:st.trueCode||null});
+}
+async function startTask(n){
+  const t=bn[n];const v=await openDatePicker('Start — #'+n+' '+t.name,todayYmd());
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+  act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
+}
+async function finishTask(n){
+  const t=bn[n];const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+  const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};renderSchedule();await saveTask(t);
+}
+async function undoTask(n){
+  const t=bn[n];act[n]={started:false,finished:false,start:null,finish:null};renderSchedule();await saveTask(t);
+}
+async function toggleGate(gateId,currentlyConfirmed){
+  const g=lotGates.find(x=>x.id===gateId);if(!g)return;
+  g.confirmed=!currentlyConfirmed;renderSchedule();
+  await sbCall('updateScheduleLotGate',{gate_id:gateId,confirmed:g.confirmed});
+  await saveStage();
+}
+
+// ============ TASK EDIT ============
+let editTaskNum=null, editPreds=[];
+
+function openEditTask(n){
+  editTaskNum=n;
+  const t=bn[n];
+  editPreds=[...(t.preds||[])];
+
+  document.getElementById('edit-title').textContent='Edit Task #'+n+' — '+t.name;
+  document.getElementById('edit-dur').value=t.dur;
+  document.getElementById('edit-lag').value=(t.lag||0);
+
+  // Build phase picker from all unique phases on this lot
+  const phases=[...new Set(TASKS.map(x=>x.phase))].sort((a,b)=>a-b);
+  const phaseNames={};TASKS.forEach(x=>phaseNames[x.phase]=x.phase_name);
+  document.getElementById('edit-phase').innerHTML=phases.map(ph=>
+    '<option value="'+ph+'"'+(ph===t.phase?' selected':'')+'>'+( phaseNames[ph]||('Phase '+ph))+'</option>'
+  ).join('');
+
+  renderEditPredChips();
+  document.getElementById('editmodal').classList.add('open');
+}
+
+function closeEditTask(){
+  document.getElementById('editmodal').classList.remove('open');
+  editTaskNum=null;
+  editPreds=[];
+}
+
+function renderEditPredChips(){
+  const el=document.getElementById('edit-pred-chips');
+  if(!editPreds.length){
+    el.innerHTML='<span style="font-size:13px;color:var(--muted)">None</span>';
+    return;
+  }
+  el.innerHTML=editPreds.map(p=>{
+    const pt=bn[p];
+    const label=pt?'#'+p+' '+pt.name:'#'+p;
+    return '<div class="pred-chip">'+escapeHtml(label)
+      +'<button class="chip-x" onclick="removePred('+p+')">×</button></div>';
+  }).join('');
+}
+
+function removePred(n){
+  editPreds=editPreds.filter(p=>p!==n);
+  renderEditPredChips();
+}
+
+function openPredPicker(){
+  document.getElementById('pred-search').value='';
+  renderPredList('');
+  document.getElementById('predpicker').classList.add('open');
+}
+
+function closePredPicker(){
+  document.getElementById('predpicker').classList.remove('open');
+  renderEditPredChips();
+}
+
+function renderPredList(filter){
+  const f=filter.toLowerCase();
+  const tasks=TASKS
+    .filter(t=>t.num!==editTaskNum)
+    .filter(t=>!f||('#'+t.num+' '+t.name).toLowerCase().includes(f))
+    .sort((a,b)=>a.num-b.num);
+  document.getElementById('predlist').innerHTML=tasks.map(t=>{
+    const checked=editPreds.includes(t.num);
+    return '<label class="preditem">'
+      +'<input type="checkbox"'+(checked?' checked':'')
+      +' onchange="togglePred('+t.num+',this.checked)">'
+      +'<span class="pi-num">#'+t.num+'</span>'
+      +'<span class="pi-name">'+escapeHtml(t.name)+'</span></label>';
+  }).join('');
+}
+
+function filterPredList(){
+  renderPredList(document.getElementById('pred-search').value);
+}
+
+function togglePred(n,checked){
+  if(checked&&!editPreds.includes(n))editPreds.push(n);
+  else if(!checked)editPreds=editPreds.filter(p=>p!==n);
+}
+
+async function saveEditTask(){
+  if(editTaskNum===null)return;
+  const t=bn[editTaskNum];
+  const dur=parseInt(document.getElementById('edit-dur').value);
+  const lag=parseInt(document.getElementById('edit-lag').value)||0;
+  const phaseEl=document.getElementById('edit-phase');
+  const newPhase=parseInt(phaseEl.value);
+  const newPhaseName=phaseEl.options[phaseEl.selectedIndex].text;
+
+  if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
+
+  const btn=document.getElementById('edit-save-btn');
+  btn.textContent='Saving…';btn.disabled=true;
+
+  // Update in-memory task
+  t.dur=dur;
+  t.lag=lag;
+  t.preds=[...editPreds];
+  t.phase=newPhase;
+  t.phase_name=newPhaseName;
+
+  // Persist to DB
+  await sbCall('editLotTask',{
+    task_id:t._id,
+    predecessors:editPreds,
+    lag:lag,
+    duration:dur,
+    phase_name:newPhaseName,
+    phase_order:newPhase
+  });
+
+  btn.textContent='Save Changes';btn.disabled=false;
+  closeEditTask();
+  renderSchedule(); // recompute + re-render with updated task
+}
+
+// ============ NOTES ============
+let lotNotes=[],noteTaskNum=null,noteFlag='none';
+function notesForTask(bt){return lotNotes.filter(n=>n.bt_num===bt).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));}
+function fmtNoteTime(iso){const d=new Date(iso);return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
+function flagBadge(f){if(f==='red')return '<span style="font-size:13px">🔴</span>';if(f==='yellow')return '<span style="font-size:13px">🟡</span>';return '';}
+
+function openNote(n){
+  noteTaskNum=n;const t=bn[n];noteFlag='none';
+  document.getElementById('note-title').textContent='#'+n+' '+t.name;
+  document.getElementById('note-text').value='';
+  renderFlagBtns();renderThread();
+  document.getElementById('notemodal').style.display='flex';
+}
+function closeNote(){document.getElementById('notemodal').style.display='none';noteTaskNum=null;renderTasks();}
+function setNoteFlag(f){noteFlag=f;renderFlagBtns();}
+function renderFlagBtns(){document.querySelectorAll('#notemodal .flagbtn').forEach(b=>{b.classList.toggle('sel',b.dataset.f===noteFlag);});}
+
+function renderThread(){
+  const list=notesForTask(noteTaskNum);
+  const el=document.getElementById('note-thread');
+  if(!list.length){el.innerHTML='<div style="font-size:13px;color:var(--muted)">No notes yet.</div>';return;}
+  el.innerHTML=list.map(nt=>{
+    return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fafafa">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+      +'<span style="font-size:11px;color:var(--muted);font-family:\'DM Mono\',monospace">'+fmtNoteTime(nt.created_at)+(nt.author?' · '+nt.author:'')+'</span>'
+      +'<span>'+flagBadge(nt.flag)+'</span></div>'
+      +'<div style="font-size:14px;white-space:pre-wrap">'+escapeHtml(nt.note)+'</div>'
+      +'<div style="display:flex;gap:6px;margin-top:8px">'
+      +'<button onclick="cycleNoteFlag(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer">Flag: '+(nt.flag==='none'?'none':nt.flag)+' ⟳</button>'
+      +'</div></div>';
+  }).join('');
+}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function aiCleanup(){
+  const ta=document.getElementById('note-text');const raw=ta.value.trim();
+  if(!raw){alert('Write a note first.');return;}
+  const btn=document.getElementById('note-ai');const orig=btn.textContent;btn.textContent='☁️ Cleaning…';btn.disabled=true;
+  try{
+    const r=await fetch('/.netlify/functions/cleanup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rawText:raw})});
+    const d=await r.json();
+    if(d.cleaned){ta.value=d.cleaned;}else{alert('Cleanup failed: '+(d.error||'unknown'));}
+  }catch(e){alert('Cleanup error: '+e);}
+  btn.textContent=orig;btn.disabled=false;
+}
+
+async function addNote(){
+  if(noteTaskNum===null)return;
+  const t=bn[noteTaskNum];
+  const note=document.getElementById('note-text').value.trim();
+  if(!note){alert('Write a note first.');return;}
+  const res=await sbCall('addTaskNote',{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder});
+  const row=Array.isArray(res)?res[0]:res;
+  if(row&&row.id){lotNotes.push(row);}
+  else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  document.getElementById('note-text').value='';noteFlag='none';renderFlagBtns();
+  renderThread();
+}
+
+async function cycleNoteFlag(id){
+  const nt=lotNotes.find(x=>x.id===id);if(!nt)return;
+  const order=['none','yellow','red'];nt.flag=order[(order.indexOf(nt.flag)+1)%3];
+  renderThread();
+  await sbCall('updateTaskNote',{id,flag:nt.flag});
+}
+
+loadBuilders();
+</script>
+</body>
+</html>
