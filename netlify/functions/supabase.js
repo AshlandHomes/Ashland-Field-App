@@ -308,6 +308,9 @@ exports.handler = async function(event) {
         }
         updates.updated_at = new Date().toISOString();
         const r = await supabaseRequest('PATCH', `sched_lots?id=eq.${id}`, updates);
+        if (r.error) {
+          return { statusCode: 200, body: JSON.stringify({ error: 'DB(' + r.status + '): ' + r.error }) };
+        }
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
