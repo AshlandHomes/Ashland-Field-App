@@ -133,7 +133,8 @@ exports.handler = async function(event) {
 
       case 'verifyAdminPin': {
         const { pin } = payload;
-        const valid = !!pin && pin === process.env.ADMIN_PIN;
+        const envPin = (process.env.ADMIN_PIN || '').trim();
+        const valid = !!pin && pin.trim() === envPin;
         return { statusCode: 200, body: JSON.stringify({ valid }) };
       }
 
@@ -673,3 +674,9 @@ exports.handler = async function(event) {
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
+
+  } catch(err) {
+    console.error('Handler error:', err);
+    return { statusCode: 500, body: JSON.stringify({ error: err.toString() }) };
+  }
+};
