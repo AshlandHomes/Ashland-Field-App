@@ -525,7 +525,6 @@ tr:hover td{background:#f9fafb}
 
 <script>
 // ── CONSTANTS ──
-const ADMIN_PIN = '0570';
 const SUPABASE_FN = '/.netlify/functions/supabase';
 const SESSION_KEY = 'ah_admin_session';
 const SESSION_HOURS = 8;
@@ -569,9 +568,13 @@ async function sbCall(action, payload) {
   }
 }
 
-function tryLogin() {
+async function tryLogin() {
   const pin = document.getElementById('pin-input').value;
-  if (pin === ADMIN_PIN) {
+  const btn = document.querySelector('.login-btn');
+  btn.textContent = '…'; btn.disabled = true;
+  const res = await sbCall('verifyAdminPin', {pin});
+  btn.textContent = 'Enter →'; btn.disabled = false;
+  if (res && res.valid) {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ts: Date.now()}));
     document.getElementById('login-wrap').style.display = 'none';
     document.getElementById('app').classList.add('open');
@@ -1116,7 +1119,9 @@ function openDeleteLotModal(id, num) {
 }
 
 async function confirmDeleteLot() {
-  if (document.getElementById('delete-lot-pin').value !== ADMIN_PIN) {
+  const pin = document.getElementById('delete-lot-pin').value;
+  const res = await sbCall('verifyAdminPin', {pin});
+  if (!res || !res.valid) {
     document.getElementById('delete-lot-error').textContent = 'Incorrect PIN';
     document.getElementById('delete-lot-pin').value='';
     return;
@@ -1485,8 +1490,3 @@ function exportCSV() {
   a.click();
 }
 
-// ── UTILITY ──
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-</script>
-</body>
-</html>
