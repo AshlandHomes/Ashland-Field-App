@@ -293,11 +293,15 @@ tr:hover td{background:#f9fafb}
         </div>
       </div>
       <div class="field" style="margin-top:14px">
-        <label>House Plan / Schedule</label>
-        <select id="add-template"><option value="">Select house plan…</option></select>
+        <label>Plan Name</label>
+        <input id="add-plan-name" type="text" placeholder="e.g. Magnolia 2100, Riverside 1800">
       </div>
       <div class="field">
-        <label>Builder <span style="font-weight:400;text-transform:none">(optional)</span></label>
+        <label>Schedule Type</label>
+        <select id="add-template"><option value="">Select schedule…</option></select>
+      </div>
+      <div class="field">
+        <label>Builder</label>
         <select id="add-builder"><option value="">Unassigned</option></select>
       </div>
       <div class="field">
@@ -486,13 +490,6 @@ tr:hover td{background:#f9fafb}
     <div class="modal-section">
       <div class="modal-section-label">Builders</div>
       <div class="check-grid" id="sub-detail-builders"></div>
-    </div>
-
-    <!-- House Plans -->
-    <div class="modal-section">
-      <div class="modal-section-label">House Plans Offered</div>
-      <div class="check-grid" id="sub-detail-templates"></div>
-      <div id="sub-detail-templates-loading" style="color:var(--muted);font-size:13px">Loading…</div>
     </div>
 
     <!-- Lot Inventory -->
@@ -946,12 +943,9 @@ async function onAddSubChange() {
   fieldsDiv.style.display = 'block';
 
   // Load lot inventory for this subdivision
-  const [subLots, subTplIds] = await Promise.all([
-    sbCall('getSubdivisionLots', {subdivision_id: subId}),
-    sbCall('getSubdivisionTemplates', {subdivision_id: subId})
-  ]);
+  const subLots = await sbCall('getSubdivisionLots', {subdivision_id: subId});
 
-  // Filter out lots already in construction for this community
+  // Filter out lots already in active construction for this community
   const activeLotNums = new Set(
     scheduleLots.filter(l=>l.community===subCode).map(l=>(l.lot_number||'').toLowerCase())
   );
@@ -961,35 +955,47 @@ async function onAddSubChange() {
   pickEl.innerHTML = '<option value="">Select from inventory…</option>'
     + available.map(l => `<option value="${l.id}" data-num="${esc(l.lot_number)}" data-addr="${esc(l.address)}">${l.lot_number||''}${l.address?' — '+l.address:''}</option>`).join('')
     + '<option value="custom">Custom (not in inventory)</option>';
-  document.getElementById('add-lot-num').value = '';
-  document.getElementById('add-lot-addr').value = '';
 
-  // Populate template dropdown (filtered by subdivision if templates assigned)
-  const tplEl = document.getElementById('add-template');
-  const tplIdSet = new Set(subTplIds||[]);
-  const availableTpls = tplIdSet.size
-    ? scheduleTemplates.filter(t=>tplIdSet.has(t.id))
-    : scheduleTemplates;
-  tplEl.innerHTML = '<option value="">Select house plan…</option>'
-    + availableTpls.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+  // Reset lot number/address to locked state
+  const numEl = document.getElementById('add-lot-num');
+  const addrEl = document.getElementById('add-lot-addr');
+  numEl.value = ''; numEl.readOnly = true; numEl.style.background = '#f3f4f6'; numEl.style.color = '#6b7280';
+  addrEl.value = ''; addrEl.readOnly = true; addrEl.style.background = '#f3f4f6'; addrEl.style.color = '#6b7280';
 
-  // Populate builder dropdown
+  // All schedule templates (no subdivision filtering)
+  document.getElementById('add-template').innerHTML = '<option value="">Select schedule…</option>'
+    + scheduleTemplates.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+
+  // Populate builder dropdown; auto-select if only one builder in this subdivision
   const sub = subdivisions.find(s=>s.id===subId);
   const subBuilders = sub ? builders.filter(b=>!b.is_admin&&(b.subdivisions||[]).includes(sub.code)) : builders.filter(b=>!b.is_admin);
-  document.getElementById('add-builder').innerHTML = '<option value="">Unassigned</option>'
+  const builderEl = document.getElementById('add-builder');
+  builderEl.innerHTML = '<option value="">Unassigned</option>'
     + subBuilders.map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
+  if (subBuilders.length === 1) builderEl.value = subBuilders[0].name;
 }
 
 function onAddLotPick() {
   const sel = document.getElementById('add-lot-pick');
   const opt = sel.options[sel.selectedIndex];
-  if (!opt || sel.value==='custom' || !sel.value) {
-    document.getElementById('add-lot-num').value = '';
-    document.getElementById('add-lot-addr').value = '';
-    return;
+  const numEl  = document.getElementById('add-lot-num');
+  const addrEl = document.getElementById('add-lot-addr');
+  const isCustom = sel.value === 'custom';
+  const isEmpty  = !sel.value;
+
+  if (isCustom) {
+    // Custom: unlock both fields for manual entry
+    numEl.value  = ''; numEl.readOnly  = false; numEl.style.background = ''; numEl.style.color = '';
+    addrEl.value = ''; addrEl.readOnly = false; addrEl.style.background = ''; addrEl.style.color = '';
+    numEl.focus();
+  } else if (isEmpty) {
+    numEl.value  = ''; numEl.readOnly  = true; numEl.style.background = '#f3f4f6'; numEl.style.color = '#6b7280';
+    addrEl.value = ''; addrEl.readOnly = true; addrEl.style.background = '#f3f4f6'; addrEl.style.color = '#6b7280';
+  } else {
+    // Inventory lot: auto-fill and lock
+    numEl.value  = opt.dataset.num  || ''; numEl.readOnly  = true; numEl.style.background = '#f3f4f6'; numEl.style.color = '#6b7280';
+    addrEl.value = opt.dataset.addr || ''; addrEl.readOnly = true; addrEl.style.background = '#f3f4f6'; addrEl.style.color = '#6b7280';
   }
-  document.getElementById('add-lot-num').value = opt.dataset.num || '';
-  document.getElementById('add-lot-addr').value = opt.dataset.addr || '';
 }
 
 async function submitAddLot() {
@@ -1044,12 +1050,14 @@ function openEditLotModal(id) {
   document.getElementById('edit-status-sub').textContent = sub;
   const btn = document.getElementById('edit-close-toggle-btn');
   if (isClosed || isCanceled) {
-    btn.textContent = 'Reopen Lot';
-    btn.style.cssText = 'background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf';
+    btn.textContent = '↩ Reopen Lot';
+    btn.style.cssText = 'background:#e0f6fb;color:#00A9D1;border:1px solid #b3e5f0;cursor:pointer;transition:opacity .15s';
   } else {
-    btn.textContent = 'Mark Closed';
-    btn.style.cssText = 'background:#f3f4f6;color:var(--ink);border:1px solid var(--rule)';
+    btn.textContent = '✓ Mark Closed';
+    btn.style.cssText = 'background:#4C4C4C;color:#fff;border:1px solid #4C4C4C;cursor:pointer;transition:opacity .15s';
   }
+  btn.onmouseover=()=>btn.style.opacity='.8';
+  btn.onmouseout=()=>btn.style.opacity='1';
   document.getElementById('modal-edit-lot').classList.add('open');
 }
 
@@ -1291,13 +1299,16 @@ async function openSubDetail(id) {
   const isArchived = sub.is_archived;
   document.getElementById('sub-archive-label').textContent = isArchived ? 'Archived' : 'Active Subdivision';
   const archBtn = document.getElementById('sub-archive-btn');
+  const archBase = 'padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;';
   if (isArchived) {
-    archBtn.textContent = 'Restore to Active';
-    archBtn.style.cssText = 'background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf';
+    archBtn.textContent = '↩ Restore to Active';
+    archBtn.style.cssText = archBase + 'background:#e0f6fb;color:#00A9D1;border:1px solid #b3e5f0';
   } else {
     archBtn.textContent = 'Archive Subdivision';
-    archBtn.style.cssText = 'background:#f3f4f6;color:var(--ink);border:1px solid var(--rule)';
+    archBtn.style.cssText = archBase + 'background:#4C4C4C;color:#fff;border:1px solid #4C4C4C';
   }
+  archBtn.onmouseover=()=>archBtn.style.opacity='.8';
+  archBtn.onmouseout=()=>archBtn.style.opacity='1';
 
   document.getElementById('modal-sub-detail').classList.add('open');
 
@@ -1385,11 +1396,14 @@ async function toggleSubArchive() {
   const label = document.getElementById('sub-archive-label');
   const btn = document.getElementById('sub-archive-btn');
   label.textContent = newArchived ? 'Archived' : 'Active Subdivision';
+  const bBase = 'padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;';
   if (newArchived) {
-    btn.textContent='Restore to Active'; btn.style.cssText='background:#d5f5e3;color:#1E8449;border:1px solid #a9dfbf';
+    btn.textContent='↩ Restore to Active'; btn.style.cssText=bBase+'background:#e0f6fb;color:#00A9D1;border:1px solid #b3e5f0';
   } else {
-    btn.textContent='Archive Subdivision'; btn.style.cssText='background:#f3f4f6;color:var(--ink);border:1px solid var(--rule)';
+    btn.textContent='Archive Subdivision'; btn.style.cssText=bBase+'background:#4C4C4C;color:#fff;border:1px solid #4C4C4C';
   }
+  btn.onmouseover=()=>btn.style.opacity='.8';
+  btn.onmouseout=()=>btn.style.opacity='1';
   // Will be saved when user clicks Save All
   sub._pendingArchive = newArchived;
 }
