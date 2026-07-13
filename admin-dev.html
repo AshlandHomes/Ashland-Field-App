@@ -513,7 +513,7 @@ tr:hover td{background:#f9fafb}
         <div style="font-size:14px;font-weight:600" id="sub-archive-label">Active Subdivision</div>
         <div style="font-size:12px;color:var(--muted)">Archive to hide from active views while preserving data</div>
       </div>
-      <button id="sub-archive-btn" onclick="toggleSubArchive()" style="padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;border:none"></button>
+      <button id="sub-archive-btn" onclick="toggleSubArchive()" class="btn"></button>
     </div>
 
     <div class="modal-btns">
@@ -1057,13 +1057,11 @@ function openEditLotModal(id) {
   const btn = document.getElementById('edit-close-toggle-btn');
   if (isClosed || isCanceled) {
     btn.textContent = '↩ Reopen Lot';
-    btn.style.cssText = 'background:#e0f6fb;color:#00A9D1;border:1px solid #b3e5f0;cursor:pointer;transition:opacity .15s';
+    btn.className = 'btn btn-primary';
   } else {
     btn.textContent = '✓ Mark Closed';
-    btn.style.cssText = 'background:#4C4C4C;color:#fff;border:1px solid #4C4C4C;cursor:pointer;transition:opacity .15s';
+    btn.className = 'btn btn-secondary';
   }
-  btn.onmouseover=()=>btn.style.opacity='.8';
-  btn.onmouseout=()=>btn.style.opacity='1';
   document.getElementById('modal-edit-lot').classList.add('open');
 }
 
@@ -1301,16 +1299,13 @@ async function openSubDetail(id) {
   const isArchived = sub.is_archived;
   document.getElementById('sub-archive-label').textContent = isArchived ? 'Archived' : 'Active Subdivision';
   const archBtn = document.getElementById('sub-archive-btn');
-  const archBase = 'padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;';
   if (isArchived) {
     archBtn.textContent = '↩ Restore to Active';
-    archBtn.style.cssText = archBase + 'background:#e0f6fb;color:#00A9D1;border:1px solid #b3e5f0';
+    archBtn.className = 'btn btn-primary';
   } else {
     archBtn.textContent = 'Archive Subdivision';
-    archBtn.style.cssText = archBase + 'background:#4C4C4C;color:#fff;border:1px solid #4C4C4C';
+    archBtn.className = 'btn btn-secondary';
   }
-  archBtn.onmouseover=()=>archBtn.style.opacity='.8';
-  archBtn.onmouseout=()=>archBtn.style.opacity='1';
 
   document.getElementById('modal-sub-detail').classList.add('open');
 
@@ -1386,14 +1381,11 @@ async function toggleSubArchive() {
   const label = document.getElementById('sub-archive-label');
   const btn = document.getElementById('sub-archive-btn');
   label.textContent = newArchived ? 'Archived' : 'Active Subdivision';
-  const bBase = 'padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;';
   if (newArchived) {
-    btn.textContent='↩ Restore to Active'; btn.style.cssText=bBase+'background:#e0f6fb;color:#00A9D1;border:1px solid #b3e5f0';
+    btn.textContent='↩ Restore to Active'; btn.className='btn btn-primary';
   } else {
-    btn.textContent='Archive Subdivision'; btn.style.cssText=bBase+'background:#4C4C4C;color:#fff;border:1px solid #4C4C4C';
+    btn.textContent='Archive Subdivision'; btn.className='btn btn-secondary';
   }
-  btn.onmouseover=()=>btn.style.opacity='.8';
-  btn.onmouseout=()=>btn.style.opacity='1';
   // Will be saved when user clicks Save All
   sub._pendingArchive = newArchived;
 }
