@@ -64,6 +64,8 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tname{font-size:14px;font-weight:600}
 .tnum{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--line);padding:1px 5px;border-radius:4px;margin-right:3px}
 .tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
+.tdate-edit{cursor:pointer;display:inline-block;border-radius:5px;padding:1px 5px;margin:-1px -5px;transition:background .1s}
+.tdate-edit:active{background:var(--brand-light)}
 .tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
 .ab{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
 .ab.start{background:var(--brand);color:#fff;flex:1}.ab.fin{background:var(--green);color:#fff;flex:1}.ab.undo{background:#eef0f2;color:var(--muted);flex:1}
@@ -237,7 +239,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
   <div class="screen" id="screen-subs">
     <div class="topbar">
       <div class="who">Signed in as<br><b id="subs-who"></b></div>
-      <button class="signout" onclick="signOut()">Sign Out</button>
+      <div style="display:flex;gap:8px">
+        <button class="signout" onclick="refreshView()" title="Refresh">↻</button>
+        <button class="signout" onclick="signOut()">Sign Out</button>
+      </div>
     </div>
     <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:4px 0 10px">Choose a subdivision</div>
     <div id="subs-list"><div class="loading">Loading…</div></div>
@@ -246,12 +251,18 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     <button class="back" onclick="backToSubs()">← Subdivisions</button>
     <div class="topbar" style="margin-top:4px">
       <div class="who" id="lots-subname" style="font-size:16px;font-weight:700;color:var(--ink)"></div>
-      <button class="signout" onclick="signOut()">Sign Out</button>
+      <div style="display:flex;gap:8px">
+        <button class="signout" onclick="refreshView()" title="Refresh">↻</button>
+        <button class="signout" onclick="signOut()">Sign Out</button>
+      </div>
     </div>
     <div id="lots-list"><div class="loading">Loading your lots…</div></div>
   </div>
   <div class="screen" id="screen-schedule">
-    <button class="back" onclick="backToLots()">← My Lots</button>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <button class="back" onclick="backToLots()">← My Lots</button>
+      <button class="signout" onclick="refreshView()" title="Refresh">↻ Refresh</button>
+    </div>
     <div id="sched-view"><div class="loading">Loading schedule…</div></div>
   </div>
 </div>
@@ -350,6 +361,12 @@ let curSub=null;
 
 function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots();}
 function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
+async function refreshView(){
+  const active=document.querySelector('.screen.active');if(!active)return;
+  const id=active.id;
+  if(id==='screen-subs'||id==='screen-lots'){await loadMyLots();}
+  else if(id==='screen-schedule'&&curLot){await openLot(curLot.id);}
+}
 
 async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
@@ -470,7 +487,7 @@ async function openLot(id){
   const rows=data.tasks||[];
   lotGates=data.gates||[];
   curManual=curLot.manual_stage||null;
-  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none'}));
+  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none',est_start_date:r.est_start_date||null}));
   bn={};TASKS.forEach(t=>bn[t.num]=t);
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish,vendor_confirmed:!!r.vendor_confirmed};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
@@ -583,10 +600,14 @@ function renderTasks(){
       const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
       const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
       const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
+      const dispStart=(!a.started&&t.est_start_date)?new Date(t.est_start_date+'T00:00:00'):ps;
+      const startLabel=(!a.started&&!a.finished)
+        ?'<span class="tdate-edit" data-a="est-date" data-n="'+t.num+'">'+fmt(dispStart)+(t.est_start_date?' ✏':'')+' → '+fmt(pf)+'</span>'
+        :(a.started?fmt(ps)+' → '+(a.finish?fmt(new Date(a.finish+'T00:00:00')):'…'):fmt(dispStart)+' → '+fmt(pf));
       h+='<div class="t '+cls+'">'
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
         +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
-        +'<div class="tdate">'+fmt(ps)+' → '+fmt(pf)+'</div>'
+        +'<div class="tdate">'+startLabel+'</div>'
         +'<div class="tacts">'+acts+'</div></div>';
     });
   });
@@ -602,6 +623,9 @@ function renderTasks(){
       else if(a==='edit')openEditTask(n);
       else if(a==='conf')toggleConfirm(n);
     };
+  });
+  document.querySelectorAll('.tdate-edit').forEach(el=>{
+    el.onclick=()=>setEstStartDate(+el.dataset.n);
   });
 }
 
@@ -624,9 +648,23 @@ async function toggleConfirm(n){
 }
 
 async function startTask(n){
-  const t=bn[n];const v=await openDatePicker('Start — #'+n+' '+t.name,todayYmd());
+  const t=bn[n];
+  const defaultDate=t.est_start_date||todayYmd();
+  const v=await openDatePicker('Start — #'+n+' '+t.name,defaultDate);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
+}
+async function setEstStartDate(n){
+  const t=bn[n];
+  const ps=offToDate(t._projected_es);
+  const current=t.est_start_date||ymd(ps);
+  const v=await openDatePicker('Est. Start — #'+n+' '+t.name,current);
+  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+  // Null out if same as calculated (clearing the override)
+  const saveVal=(v===ymd(ps))?null:v;
+  t.est_start_date=saveVal;
+  renderTasks();
+  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,est_start_date:saveVal});
 }
 async function finishTask(n){
   const t=bn[n];
