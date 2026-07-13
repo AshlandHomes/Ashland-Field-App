@@ -64,7 +64,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tname{font-size:14px;font-weight:600}
 .tnum{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--line);padding:1px 5px;border-radius:4px;margin-right:3px}
 .tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
-.tdate-edit{cursor:pointer;display:inline-block;border-radius:5px;padding:1px 5px;margin:-1px -5px;transition:background .1s}
+.tdate-edit{cursor:pointer;display:inline-block;color:var(--brand);text-decoration:underline;text-underline-offset:2px;text-decoration-style:dashed;border-radius:5px;padding:1px 5px;margin:-1px -5px;transition:background .1s}
 .tdate-edit:active{background:var(--brand-light)}
 .tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
 .ab{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
@@ -136,7 +136,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 <div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:14px;padding:22px;width:300px;max-width:90vw">
     <div id="dpick-title" style="font-size:14px;font-weight:700;margin-bottom:14px"></div>
-    <input type="date" id="dpick-input" style="width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:16px">
+    <input type="date" id="dpick-input" style="width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:16px;text-align:center">
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button id="dpick-cancel" style="font-family:inherit;font-size:13px;font-weight:600;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
       <button id="dpick-ok" style="font-family:inherit;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;border:none;background:var(--brand);color:#fff;cursor:pointer">OK</button>
@@ -151,7 +151,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     <div id="note-thread" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;flex:1"></div>
     <div style="border-top:1px solid var(--line);padding-top:14px">
       <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Add a note</div>
-      <textarea id="note-text" rows="4" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate…"></textarea>
+      <textarea id="note-text" rows="8" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate…"></textarea>
       <button id="note-ai" onclick="aiCleanup()" style="width:100%;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid var(--brand-border);background:var(--brand-light);color:var(--brand);cursor:pointer;margin-top:10px">☁️ AI Cleanup</button>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="flagbtn" data-f="none" onclick="setNoteFlag('none')" style="flex:1">None</button>
@@ -433,8 +433,10 @@ function runEngine(mode){
     const aStartOff=(mode==='projected'&&a.started&&a.start)?actOffset(a.start):null;
     const ps=(pd!==null)?pd+t.lag:null;
     if(aStartOff!==null){es=aStartOff;}
-    else if(ps!==null){es=ps;}
-    else{es=t.rs||1;}
+    else{
+      es=ps!==null?ps:(t.rs||1);
+      if(mode==='projected'&&!a.started&&t.est_start_date){const estOff=actOffset(t.est_start_date);if(estOff!==null)es=Math.max(es,estOff);}
+    }
     let e;const aFinOff=(mode==='projected'&&a.finished&&a.finish)?actOffset(a.finish):null;
     if(aFinOff!==null){e=aFinOff;}else{e=es+t.dur-1;}
     memo[n]=e;t['_'+mode+'_es']=es;t['_'+mode+'_ef']=e;return e;
