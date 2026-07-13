@@ -19,13 +19,15 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bbtn{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:16px;font-weight:600;text-align:left;cursor:pointer}
 .bbtn:active{background:#f0f9ff;border-color:var(--brand)}
 .pinwrap{text-align:center;margin-top:20px}
-.pindots{display:flex;justify-content:center;gap:12px;margin:20px 0}
-.pindot{width:16px;height:16px;border-radius:50%;border:2px solid var(--line)}
-.pindot.filled{background:var(--brand);border-color:var(--brand)}
-.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:280px;margin:0 auto}
-.key{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:22px;font-weight:600;cursor:pointer;font-family:'DM Mono',monospace}
-.key:active{background:#f0f9ff}
-.key.blank{background:transparent;border:none;cursor:default}
+.pindots{display:flex;justify-content:center;gap:16px;margin:24px 0}
+.pindot{width:14px;height:14px;border-radius:50%;border:1.5px solid #8e8e93}
+.pindot.filled{background:var(--ink);border-color:var(--ink)}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:300px;margin:0 auto}
+.key{background:#e9e9eb;border:none;border-radius:50%;width:76px;height:76px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;margin:0 auto;-webkit-tap-highlight-color:transparent;transition:background .08s}
+.key:active{background:#c7c7cc}
+.key.blank{background:transparent;cursor:default}
+.key-num{font-family:'Instrument Sans',sans-serif;font-size:28px;font-weight:300;color:var(--ink);line-height:1}
+.key-letters{font-family:'Instrument Sans',sans-serif;font-size:9px;font-weight:700;letter-spacing:.12em;color:var(--ink);opacity:.55;margin-top:2px}
 .pinerr{color:var(--red);font-size:13px;min-height:18px;margin-top:12px}
 .back{background:none;border:none;color:var(--brand);font-size:14px;font-weight:600;cursor:pointer;padding:8px 0}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
@@ -111,7 +113,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .stat-cards{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px}
 .stat-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;flex:1;min-width:76px;text-align:center;flex-shrink:0}
 .stat-card .sc-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:3px}
-.stat-card .sc-val{font-size:14px;font-weight:700;font-family:'DM Mono',monospace;color:var(--ink);white-space:nowrap}
+.stat-card .sc-val{font-size:12px;font-weight:700;font-family:'DM Mono',monospace;color:var(--ink);line-height:1.3;word-break:break-word}
 .stat-card .sc-val.behind{color:var(--red)}.stat-card .sc-val.ahead{color:var(--green)}
 
 /* ── Close-ready banner (Item 5) ── */
@@ -140,9 +142,9 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 
 <!-- Note thread modal -->
 <div id="notemodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center">
-  <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+  <div style="background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:480px;height:94vh;overflow-y:auto;display:flex;flex-direction:column">
     <div id="note-title" style="font-size:15px;font-weight:700;margin-bottom:12px"></div>
-    <div id="note-thread" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+    <div id="note-thread" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;flex:1"></div>
     <div style="border-top:1px solid var(--line);padding-top:14px">
       <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Add a note</div>
       <textarea id="note-text" rows="4" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate…"></textarea>
@@ -271,11 +273,17 @@ async function loadBuilders(){
 function pickBuilder(name){currentBuilder=name;pinEntry='';document.getElementById('pin-name').textContent=name;document.getElementById('pinerr').textContent='';renderPin();showScreen('screen-pin');}
 function toBuilders(){currentBuilder=null;pinEntry='';showScreen('screen-builders');}
 
+const KEY_LETTERS={'2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ','0':'+'};
+function keyHtml(k){
+  if(k==='')return '<div class="key blank"></div>';
+  if(k==='⌫')return '<button class="key" onclick="pinKey(\'⌫\')"><span class="key-num" style="font-size:22px;font-weight:400">⌫</span></button>';
+  const letters=KEY_LETTERS[k]||'';
+  return '<button class="key" onclick="pinKey(\''+k+'\')"><span class="key-num">'+k+'</span>'+(letters?'<span class="key-letters">'+letters+'</span>':'')+'</button>';
+}
 function renderPin(){
   let dots='';for(let i=0;i<4;i++)dots+='<div class="pindot'+(i<pinEntry.length?' filled':'')+'"></div>';
   document.getElementById('pindots').innerHTML=dots;
-  const keyEls=['1','2','3','4','5','6','7','8','9','','0','⌫'];
-  document.getElementById('keys').innerHTML=keyEls.map(k=>{if(k==='')return '<div class="key blank"></div>';return '<button class="key" onclick="pinKey(\''+k+'\')">'+k+'</button>';}).join('');
+  document.getElementById('keys').innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(keyHtml).join('');
 }
 async function pinKey(k){
   if(k==='⌫'){pinEntry=pinEntry.slice(0,-1);renderPin();return;}
@@ -308,8 +316,12 @@ function renderSetPin(){
   document.getElementById('setpin-sub').textContent=setPinStage==='new'?'Choose a new 4-digit PIN':'Enter it again to confirm';
   let dots='';for(let i=0;i<4;i++)dots+='<div class="pindot'+(i<entry.length?' filled':'')+'"></div>';
   document.getElementById('setpin-dots').innerHTML=dots;
-  const keyEls=['1','2','3','4','5','6','7','8','9','','0','⌫'];
-  document.getElementById('setpin-keys').innerHTML=keyEls.map(k=>{if(k==='')return '<div class="key blank"></div>';return '<button class="key" onclick="setPinKey(\''+k+'\')">'+k+'</button>';}).join('');
+  document.getElementById('setpin-keys').innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k=>{
+    if(k==='')return '<div class="key blank"></div>';
+    if(k==='⌫')return '<button class="key" onclick="setPinKey(\'⌫\')"><span class="key-num" style="font-size:22px;font-weight:400">⌫</span></button>';
+    const letters=KEY_LETTERS[k]||'';
+    return '<button class="key" onclick="setPinKey(\''+k+'\')"><span class="key-num">'+k+'</span>'+(letters?'<span class="key-letters">'+letters+'</span>':'')+'</button>';
+  }).join('');
 }
 async function setPinKey(k){
   const err=document.getElementById('setpin-err');err.textContent='';
@@ -528,7 +540,7 @@ function renderSchedule(){
 }
 
 function renderTasks(){
-  const canEdit=true; // TODO: re-enable builder guard before go-live
+  const canEdit=(currentBuilder===curLot.builder_name);
   let h='';
   const phaseOrder=[];const seen={};
   TASKS.forEach(t=>{if(!seen[t.phase]){seen[t.phase]=true;phaseOrder.push(t.phase);}});
