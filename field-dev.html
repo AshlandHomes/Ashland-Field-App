@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-:root{--brand:#00A9D1;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b;--amber:#e67e22;--start:#2563eb}
+:root{--brand:#00A9D1;--brand-light:#e0f6fb;--brand-border:#b3e5f0;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b}
 body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
 .devbanner{background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.15em;padding:5px}
 .wrap{max-width:480px;margin:0 auto;padding:16px}
@@ -39,12 +39,12 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .lotcard .lh{display:flex;justify-content:space-between;align-items:flex-start}
 .lotcard .num{font-size:18px;font-weight:700}
 .lotcard .comm{font-size:13px;color:var(--muted);margin-top:2px}
-.stagebadge{background:#e0f2fe;color:#0369a1;font-family:'DM Mono',monospace;font-weight:700;font-size:14px;padding:4px 10px;border-radius:8px}
+.stagebadge{background:var(--brand-light);color:var(--brand);font-family:'DM Mono',monospace;font-weight:700;font-size:14px;padding:4px 10px;border-radius:8px}
 .stagebadge.held{background:#fef4e6;color:var(--amber)}
 .lotmeta{font-size:12px;color:var(--muted);margin-top:10px}
 .empty{text-align:center;padding:50px 20px;color:var(--muted)}
 .loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
-.sbar{background:var(--ink);color:#fff;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.sbar{background:var(--grey);color:#fff;border-radius:12px;padding:14px 16px;margin-bottom:12px}
 .sbar .r{display:flex;justify-content:space-between;align-items:center}
 .sbar .num{font-size:18px;font-weight:700}
 .sbar .stg{font-family:'DM Mono',monospace;font-weight:700;font-size:16px;background:rgba(255,255,255,.15);padding:4px 10px;border-radius:8px}
@@ -54,10 +54,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .gatebar .gh{font-size:11px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;letter-spacing:.05em}
 .grow{display:flex;gap:8px}
 .gbtn{flex:1;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer}
-.gbtn.on{background:var(--green);color:#fff;border-color:var(--green)}
-.ph{background:var(--ink);color:#fff;padding:9px 14px;font-size:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center;border-radius:8px;margin-top:8px;cursor:pointer}
+.gbtn.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.ph{background:var(--grey);color:#fff;padding:9px 14px;font-size:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center;border-radius:8px;margin-top:8px;cursor:pointer}
 .ph .pc{font-weight:500;opacity:.6;font-size:11px}
-.active-badge{background:var(--green);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px}
+.active-badge{background:var(--brand);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px}
 .t{background:#fff;border:1px solid var(--line);border-top:none;padding:12px 14px}
 .t.done{background:#f6fbf7}.t.started{background:#f5f9ff}
 .t .th{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
@@ -66,15 +66,15 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
 .tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
 .ab{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;text-transform:uppercase;padding:9px;border-radius:8px;border:none;cursor:pointer}
-.ab.start{background:var(--start);color:#fff;flex:1}.ab.fin{background:var(--green);color:#fff;flex:1}.ab.undo{background:#eef0f2;color:var(--muted);flex:1}
+.ab.start{background:var(--brand);color:#fff;flex:1}.ab.fin{background:var(--green);color:#fff;flex:1}.ab.undo{background:#eef0f2;color:var(--muted);flex:1}
 .critdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:6px;vertical-align:middle}
 .ticons{display:flex;gap:6px;font-size:18px;line-height:1}
 .notei{font-size:18px}.flagi{font-size:16px}
 .notect{font-size:11px;font-weight:700;color:var(--muted);vertical-align:super}
-.ab.note{background:#f5f3ff;color:#6C3483;border:1px solid #d7bde2;flex:0 0 auto;padding:9px 12px}
-.ab.edit{background:#fff8f0;color:#b45309;border:1px solid #fcd34d;flex:0 0 auto;padding:9px 12px}
-.ab.conf{background:#f3f4f6;color:var(--muted);border:1px solid var(--line);flex:0 0 auto;padding:9px 12px}
-.ab.conf.confirmed{background:#d5f5e3;color:var(--green);border-color:#a9dfbf}
+.ab.note{background:#f0f0f0;color:var(--grey);border:1px solid #d0d0d0;flex:0 0 auto;padding:9px 12px}
+.ab.edit{background:var(--brand-light);color:var(--brand);border:1px solid var(--brand-border);flex:0 0 auto;padding:9px 12px}
+.ab.conf{background:#f0f0f0;color:var(--muted);border:1px solid #d0d0d0;flex:0 0 auto;padding:9px 12px}
+.ab.conf.confirmed{background:var(--brand-light);color:var(--brand);border-color:var(--brand-border)}
 .flagbtn{font-family:inherit;font-size:13px;font-weight:600;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
 .flagbtn.sel{border-color:var(--brand);background:#e0f2fe;color:#0369a1}
 
@@ -85,9 +85,9 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .edit-section{margin-bottom:18px}
 .edit-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px}
 .pred-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:26px}
-.pred-chip{background:#e0f2fe;color:#0369a1;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;padding:5px 9px;border-radius:6px;display:flex;align-items:center;gap:5px}
-.chip-x{cursor:pointer;font-size:16px;font-weight:700;color:#0369a1;background:none;border:none;padding:0 1px;line-height:1}
-.edit-pred-btn{width:100%;font-family:inherit;font-size:13px;font-weight:600;padding:11px;border-radius:8px;border:1px solid var(--brand);color:var(--brand);background:#f0f9ff;cursor:pointer}
+.pred-chip{background:var(--brand-light);color:var(--brand);font-family:'DM Mono',monospace;font-size:12px;font-weight:700;padding:5px 9px;border-radius:6px;display:flex;align-items:center;gap:5px}
+.chip-x{cursor:pointer;font-size:16px;font-weight:700;color:var(--brand);background:none;border:none;padding:0 1px;line-height:1}
+.edit-pred-btn{width:100%;font-family:inherit;font-size:13px;font-weight:600;padding:11px;border-radius:8px;border:1px solid var(--brand);color:var(--brand);background:var(--brand-light);cursor:pointer}
 .edit-row{display:flex;gap:10px;margin-bottom:14px}
 .edit-field{flex:1}
 .edit-field label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px}
@@ -117,7 +117,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .stat-card .sc-val.behind{color:var(--red)}.stat-card .sc-val.ahead{color:var(--green)}
 
 /* ── Close-ready banner (Item 5) ── */
-.close-banner{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:#0369a1}
+.close-banner{background:var(--brand-light);border:1px solid var(--brand-border);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:var(--brand)}
 
 /* ── Closed lot / completion banners (Items 3+4) ── */
 .arc-banner{border-radius:10px;padding:11px 14px;margin-bottom:12px;text-align:center;font-weight:700;font-size:13px;letter-spacing:.04em}
@@ -148,7 +148,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     <div style="border-top:1px solid var(--line);padding-top:14px">
       <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Add a note</div>
       <textarea id="note-text" rows="4" style="width:100%;font-family:inherit;font-size:15px;padding:12px;border:1px solid var(--line);border-radius:10px;resize:vertical" placeholder="Type or dictate…"></textarea>
-      <button id="note-ai" onclick="aiCleanup()" style="width:100%;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid #7dd3fc;background:#e0f2fe;color:#0369a1;cursor:pointer;margin-top:10px">☁️ AI Cleanup</button>
+      <button id="note-ai" onclick="aiCleanup()" style="width:100%;font-family:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;border:1px solid var(--brand-border);background:var(--brand-light);color:var(--brand);cursor:pointer;margin-top:10px">☁️ AI Cleanup</button>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="flagbtn" data-f="none" onclick="setNoteFlag('none')" style="flex:1">None</button>
         <button class="flagbtn" data-f="yellow" onclick="setNoteFlag('yellow')" style="flex:1">🟡 Remind</button>
