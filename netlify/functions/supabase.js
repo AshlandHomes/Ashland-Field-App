@@ -131,6 +131,12 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
+      case 'verifyAdminPin': {
+        const { pin } = payload;
+        const valid = !!pin && pin === process.env.ADMIN_PIN;
+        return { statusCode: 200, body: JSON.stringify({ valid }) };
+      }
+
       case 'verifyPin': {
         const { name, pin } = payload;
         const r = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=pin_hash,temp_pin,is_admin,failed_attempts,is_locked`);
@@ -667,9 +673,3 @@ exports.handler = async function(event) {
       default:
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
     }
-
-  } catch(err) {
-    console.error('Handler error:', err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.toString() }) };
-  }
-};
