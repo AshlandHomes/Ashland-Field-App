@@ -332,7 +332,7 @@ exports.handler = async function(event) {
       }
 
       case 'updateScheduleLotTask': {
-        const { task_id, lot_id, status, actual_start, actual_finish, vendor_confirmed } = payload;
+        const { task_id, lot_id, status, actual_start, actual_finish, vendor_confirmed, est_start_date } = payload;
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
         }
@@ -341,6 +341,7 @@ exports.handler = async function(event) {
         if (actual_start !== undefined) updates.actual_start = actual_start;
         if (actual_finish !== undefined) updates.actual_finish = actual_finish;
         if (vendor_confirmed !== undefined) updates.vendor_confirmed = vendor_confirmed;
+        if (est_start_date !== undefined) updates.est_start_date = est_start_date;
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
         if (lot_id) {
           await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: new Date().toISOString() });
@@ -484,6 +485,29 @@ exports.handler = async function(event) {
           builder_name: lotMap[n.lot_id] ? lotMap[n.lot_id].builder_name : null
         }));
         return { statusCode: 200, body: JSON.stringify(enriched) };
+      }
+
+      // ══════════════════════════════════════════════════════
+      // COMPANIES
+      // ══════════════════════════════════════════════════════
+
+      case 'getCompanies': {
+        const r = await supabaseRequest('GET', 'sched_companies?select=*&order=name');
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'addCompany': {
+        const { name } = payload;
+        if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
+        const r = await supabaseRequest('POST', 'sched_companies', { name, created_at: new Date().toISOString() });
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'deleteCompany': {
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+        await supabaseRequest('DELETE', `sched_companies?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       // ══════════════════════════════════════════════════════
