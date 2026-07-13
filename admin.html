@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ashland Homes — Admin Console</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -132,7 +133,6 @@ tr:hover td{background:#f9fafb}
 </head>
 <body>
 
-
 <!-- ── LOGIN ── -->
 <div class="login-wrap" id="login-wrap">
   <div class="login-box">
@@ -155,6 +155,9 @@ tr:hover td{background:#f9fafb}
     </div>
     <div class="topbar-right">
       <span style="font-size:12px;color:rgba(255,255,255,.45);font-family:'DM Mono',monospace" id="last-updated"></span>
+      <select id="company-filter" onchange="applyCompanyFilter()" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fff;font-family:'Instrument Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer">
+        <option value="">All Companies</option>
+      </select>
       <button class="topbar-btn" onclick="refreshAll()">↻ Refresh</button>
       <button class="topbar-btn primary" onclick="exportCSV()">↓ Export</button>
       <button class="topbar-btn" onclick="logout()">Sign Out</button>
@@ -219,6 +222,18 @@ tr:hover td{background:#f9fafb}
 
     <!-- SUBDIVISIONS -->
     <div class="section" id="section-subdivisions">
+      <!-- Companies card -->
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div class="table-header">
+          <h2>Companies</h2>
+          <div class="table-actions">
+            <input id="new-company-name" type="text" class="search-input" placeholder="New company name…" style="width:220px" onkeydown="if(event.key==='Enter')addCompanyUI()">
+            <button class="btn btn-primary" onclick="addCompanyUI()">+ Add</button>
+          </div>
+        </div>
+        <div style="padding:12px 20px" id="companies-list"><div class="loading">Loading…</div></div>
+      </div>
+      <!-- Subdivisions table -->
       <div class="table-wrap">
         <div class="table-header">
           <h2>Subdivisions</h2>
@@ -445,7 +460,7 @@ tr:hover td{background:#f9fafb}
 <div class="modal-overlay" id="modal-add-sub">
   <div class="modal">
     <h2>Add Subdivision</h2>
-    <div class="modal-sub">Enter the basics. You can configure lots, plans, and builders next.</div>
+    <div class="modal-sub">Enter the basics. You can configure lots and builders next.</div>
     <div class="field-row">
       <div class="field" style="margin-bottom:0">
         <label>Code (2–4 letters)</label>
@@ -455,6 +470,10 @@ tr:hover td{background:#f9fafb}
         <label>Full Name</label>
         <input id="sub-name" type="text" placeholder="e.g. Willowbrook">
       </div>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <label>Company</label>
+      <select id="sub-company"><option value="">— No Company —</option></select>
     </div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-add-sub')">Cancel</button>
@@ -480,6 +499,10 @@ tr:hover td{background:#f9fafb}
         <label>Full Name</label>
         <input id="sub-detail-name" type="text">
       </div>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <label>Company</label>
+      <select id="sub-detail-company"><option value="">— No Company —</option></select>
     </div>
 
     <!-- Builders -->
@@ -532,6 +555,7 @@ let scheduleLots = [];
 let builders = [];
 let scheduleTemplates = [];
 let subdivisions = [];
+let companies = [];
 let flaggedNotesByLot = {};
 let API_SECRET = null;
 let deleteLotTarget = {id:null, num:null};
@@ -609,6 +633,7 @@ async function loadAll() {
     loadScheduleData(),
     loadBuilders(),
     loadSubdivisions(),
+    loadCompanies(),
     loadFlaggedNotes()
   ]);
   populateFilters();
@@ -640,6 +665,65 @@ async function loadSubdivisions() {
   subdivisions.forEach(s => { SUB_NAMES[s.code] = s.name; });
 }
 
+async function loadCompanies() {
+  const data = await sbCall('getCompanies', {});
+  companies = data || [];
+  // Populate topbar filter
+  const sel = document.getElementById('company-filter');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All Companies</option>'
+    + companies.map(c=>`<option value="${c.id}"${c.id===prev?' selected':''}>${c.name}</option>`).join('');
+  // Populate companies list in subdivisions tab
+  renderCompaniesList();
+}
+
+function getActiveCompanyId() {
+  return document.getElementById('company-filter')?.value || '';
+}
+
+function getFilteredSubCodes() {
+  const cid = getActiveCompanyId();
+  if (!cid) return null; // null = no filter
+  return subdivisions.filter(s=>s.company_id===cid).map(s=>s.code);
+}
+
+function renderCompaniesList() {
+  const el = document.getElementById('companies-list');
+  if (!el) return;
+  if (!companies.length) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:13px">No companies yet. Add one to get started.</span>';
+    return;
+  }
+  el.innerHTML = companies.map(c => {
+    const subCount = subdivisions.filter(s=>s.company_id===c.id).length;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--rule)">
+      <div>
+        <span style="font-weight:600;font-size:14px">${c.name}</span>
+        <span style="margin-left:10px;font-size:12px;color:var(--muted)">${subCount} subdivision${subCount!==1?'s':''}</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="deleteCompanyUI('${c.id}','${c.name}',${subCount})"
+        style="color:var(--red);border-color:#fca5a5">Remove</button>
+    </div>`;
+  }).join('');
+}
+
+async function addCompanyUI() {
+  const input = document.getElementById('new-company-name');
+  const name = input.value.trim();
+  if (!name) { alert('Enter a company name'); return; }
+  if (companies.find(c=>c.name.toLowerCase()===name.toLowerCase())) { alert('Company already exists'); return; }
+  const r = await sbCall('addCompany', {name});
+  if (r) { input.value=''; await loadCompanies(); }
+}
+
+async function deleteCompanyUI(id, name, subCount) {
+  if (subCount > 0) { alert(`Cannot remove "${name}" — ${subCount} subdivision(s) are assigned to it. Reassign them first.`); return; }
+  if (!confirm(`Remove company "${name}"?`)) return;
+  await sbCall('deleteCompany', {id});
+  await loadCompanies();
+}
+
 async function loadFlaggedNotes() {
   const data = await sbCall('getFlaggedNotes', {});
   flaggedNotesByLot = {};
@@ -651,6 +735,12 @@ async function loadFlaggedNotes() {
 async function refreshAll() {
   document.getElementById('last-updated').textContent = 'Refreshing…';
   await loadAll();
+}
+
+function applyCompanyFilter() {
+  renderStats();
+  renderLotsTable();
+  renderSubdivisionsTable();
 }
 
 // ── CLOSING PROMPT ──
@@ -790,12 +880,14 @@ function esc(str) { return (str||'').replace(/"/g,'&quot;'); }
 
 // ── STATS ──
 function renderStats() {
-  const total = scheduleLots.length;
-  const active = scheduleLots.filter(l=>l.status==='active').length;
-  const updated = scheduleLots.filter(l=>isUpdatedRecently(l.last_task_update)).length;
+  const subCodes = getFilteredSubCodes();
+  const base = subCodes ? scheduleLots.filter(l=>subCodes.includes(l.community)) : scheduleLots;
+  const total = base.length;
+  const active = base.filter(l=>l.status==='active').length;
+  const updated = base.filter(l=>isUpdatedRecently(l.last_task_update)).length;
   const today = new Date().toISOString().split('T')[0];
-  const ready = scheduleLots.filter(l=>parseFloat(l.reported_stage||0)>=6&&l.status==='active'&&!l.scheduled_close_date).length;
-  const closed = scheduleLots.filter(l=>l.status==='closed').length;
+  const ready = base.filter(l=>parseFloat(l.reported_stage||0)>=6&&l.status==='active'&&!l.scheduled_close_date).length;
+  const closed = base.filter(l=>l.status==='closed').length;
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-active').textContent = active;
   document.getElementById('stat-updated').textContent = updated;
@@ -826,8 +918,10 @@ function renderLotsTable() {
   const filterFlags = document.getElementById('filter-flags').value;
   const search      = document.getElementById('lot-search').value.toLowerCase();
   const today       = new Date().toISOString().split('T')[0];
+  const subCodes    = getFilteredSubCodes();
 
   let list = scheduleLots.filter(l => {
+    if (subCodes && !subCodes.includes(l.community)) return false;
     if (filterCom && l.community !== filterCom) return false;
     if (filterBld && l.builder_name !== filterBld) return false;
     if (filterClose === 'active'    && l.status !== 'active') return false;
@@ -1224,11 +1318,13 @@ async function deleteBuilder(name) {
 // ── SUBDIVISIONS ──
 function renderSubdivisionsTable() {
   const filterStatus = document.getElementById('filter-sub-status').value;
+  const cid = getActiveCompanyId();
   let list = subdivisions.filter(s => {
     if (filterStatus==='active')   return !s.is_archived;
     if (filterStatus==='archived') return !!s.is_archived;
     return true;
   });
+  if (cid) list = list.filter(s => s.company_id === cid);
 
   if (!list.length) {
     document.getElementById('subdivisions-table-body').innerHTML = '<div class="empty-state"><div class="icon">🏘</div><p>No subdivisions.</p></div>';
@@ -1242,6 +1338,8 @@ function renderSubdivisionsTable() {
     const stale     = subLots.filter(l=>l.status==='active'&&!isUpdatedRecently(l.last_task_update)).length;
     const ready     = subLots.filter(l=>parseFloat(l.reported_stage||0)>=6&&l.status==='active'&&!l.scheduled_close_date).length;
     const assigned  = builders.filter(b=>!b.is_admin&&(b.subdivisions||[]).includes(sub.code)).map(b=>b.name).join(', ')||'—';
+    const co = companies.find(c=>c.id===sub.company_id);
+    const coName = co ? `<span style="font-size:12px;color:var(--brand);font-weight:600">${co.name}</span>` : '<span style="color:var(--muted);font-size:12px">—</span>';
 
     const activityBadge = active===0
       ? '<span style="color:var(--muted)">—</span>'
@@ -1258,6 +1356,7 @@ function renderSubdivisionsTable() {
     return `<tr>
       <td><span class="badge-sub ${SUB_COLORS[sub.code]||'sub-default'}">${sub.code}</span></td>
       <td><strong>${sub.name}</strong>${archiveBadge}</td>
+      <td>${coName}</td>
       <td>${subLots.length}</td>
       <td>${active}</td>
       <td>${closed}</td>
@@ -1269,7 +1368,7 @@ function renderSubdivisionsTable() {
   }).join('');
 
   document.getElementById('subdivisions-table-body').innerHTML = `<table>
-    <thead><tr><th>Code</th><th>Name</th><th>Total</th><th>Active</th><th>Closed</th><th>Activity</th><th>Close Status</th><th>Builders</th><th></th></tr></thead>
+    <thead><tr><th>Code</th><th>Name</th><th>Company</th><th>Total</th><th>Active</th><th>Closed</th><th>Activity</th><th>Close Status</th><th>Builders</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -1284,6 +1383,11 @@ async function openSubDetail(id) {
   document.getElementById('sub-detail-sub').textContent = sub.code;
   document.getElementById('sub-detail-code').value = sub.code;
   document.getElementById('sub-detail-name').value = sub.name;
+
+  // Populate and set company dropdown
+  const coSel = document.getElementById('sub-detail-company');
+  coSel.innerHTML = '<option value="">— No Company —</option>'
+    + companies.map(c=>`<option value="${c.id}"${c.id===sub.company_id?' selected':''}>${c.name}</option>`).join('');
 
   // Builders checkboxes
   const bGrid = document.getElementById('sub-detail-builders');
@@ -1381,113 +1485,4 @@ async function toggleSubArchive() {
   if (newArchived && !confirm('Archive ' + sub.name + '? It will be hidden from active views.')) return;
   const label = document.getElementById('sub-archive-label');
   const btn = document.getElementById('sub-archive-btn');
-  label.textContent = newArchived ? 'Archived' : 'Active Subdivision';
-  if (newArchived) {
-    btn.textContent='↩ Restore to Active'; btn.className='btn btn-primary';
-  } else {
-    btn.textContent='Archive Subdivision'; btn.className='btn btn-secondary';
-  }
-  // Will be saved when user clicks Save All
-  sub._pendingArchive = newArchived;
-}
-
-async function submitSubDetail() {
-  const id   = document.getElementById('sub-detail-id').value;
-  const code = document.getElementById('sub-detail-code').value.trim().toUpperCase();
-  const name = document.getElementById('sub-detail-name').value.trim();
-  if (!code||!name) { alert('Code and name are required'); return; }
-
-  const sub = subdivisions.find(s=>s.id===id);
-  const is_archived = sub && sub._pendingArchive !== undefined ? sub._pendingArchive : (sub ? sub.is_archived : false);
-
-  // Collect builders (who should have this sub)
-  const shouldHave = new Set(
-    [...document.querySelectorAll('#sub-detail-builders input:checked')].map(c=>c.value)
-  );
-
-  // Collect lot inventory
-  const lotRows = collectLotInventory();
-
-  // Save everything in parallel
-  const saves = [
-    sbCall('upsertSubdivision', {id, code, name, is_archived}),
-    sbCall('saveSubdivisionLots', {subdivision_id: id, rows: lotRows})
-  ];
-
-  // Update builder subdivision assignments
-  builders.filter(b=>!b.is_admin).forEach(b => {
-    const hasSub = (b.subdivisions||[]).includes(code);
-    const wantsSub = shouldHave.has(b.name);
-    if (hasSub !== wantsSub) {
-      let newSubs = [...(b.subdivisions||[])];
-      if (wantsSub) { if (!newSubs.includes(code)) newSubs.push(code); }
-      else          { newSubs = newSubs.filter(s=>s!==code); }
-      saves.push(sbCall('updateBuilderPin', {name: b.name, subdivisions: newSubs}));
-    }
-  });
-
-  await Promise.all(saves);
-  closeModal('modal-sub-detail');
-  await Promise.all([loadSubdivisions(), loadBuilders()]);
-  populateFilters();
-  renderSubdivisionsTable();
-  renderBuildersTable();
-}
-
-function openAddSubModal() {
-  document.getElementById('sub-code').value='';
-  document.getElementById('sub-name').value='';
-  document.getElementById('modal-add-sub').classList.add('open');
-}
-
-async function submitAddSubdivision() {
-  const code = document.getElementById('sub-code').value.trim().toUpperCase();
-  const name = document.getElementById('sub-name').value.trim();
-  if (!code||!name) { alert('Both fields are required'); return; }
-  if (!/^[A-Z]{2,4}$/.test(code)) { alert('Code must be 2–4 letters'); return; }
-  if (subdivisions.find(s=>s.code===code)) { alert('A subdivision with code ' + code + ' already exists'); return; }
-  const result = await sbCall('upsertSubdivision', {code, name, is_archived: false});
-  closeModal('modal-add-sub');
-  await loadSubdivisions();
-  renderSubdivisionsTable();
-  populateFilters();
-  // Open detail modal so they can configure it
-  const newSub = subdivisions.find(s=>s.code===code);
-  if (newSub) setTimeout(() => openSubDetail(newSub.id), 200);
-}
-
-// ── NAVIGATION ──
-function showSection(name, tabEl) {
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('section-'+name).classList.add('active');
-  if (tabEl) tabEl.classList.add('active');
-}
-
-// ── EXPORT ──
-function exportCSV() {
-  const today = new Date().toISOString().split('T')[0];
-  const data = scheduleLots.filter(l=>l.status==='active').sort((a,b)=>{
-    if ((a.community||'')!==(b.community||'')) return (a.community||'').localeCompare(b.community||'');
-    return (a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true});
-  });
-  const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Planned Completion','Close Status','Scheduled Close'];
-  const rows = data.map(l => {
-    const planned = calcPlannedCompletion(l.construction_start_date);
-    const planStr = planned ? planned.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
-    const closeStatus = l.scheduled_close_date && l.scheduled_close_date<today ? 'Past Due'
-      : l.scheduled_close_date ? 'Scheduled'
-      : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
-      : 'Not Yet';
-    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',l.construction_start_date||'',planStr,closeStatus,l.scheduled_close_date||''];
-  });
-  const csv = [hdrs,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:'Ashland_Lots_'+today+'.csv'});
-  a.click();
-}
-
-// ── UTILITY ──
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-</script>
-</body>
-</html>
+  label.textContent = newArchived ? 'Archived' : 'Active Subdivision
