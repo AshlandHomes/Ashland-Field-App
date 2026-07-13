@@ -71,6 +71,8 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .notect{font-size:11px;font-weight:700;color:var(--muted);vertical-align:super}
 .ab.note{background:#f5f3ff;color:#6C3483;border:1px solid #d7bde2;flex:0 0 auto;padding:9px 12px}
 .ab.edit{background:#fff8f0;color:#b45309;border:1px solid #fcd34d;flex:0 0 auto;padding:9px 12px}
+.ab.conf{background:#f3f4f6;color:var(--muted);border:1px solid var(--line);flex:0 0 auto;padding:9px 12px}
+.ab.conf.confirmed{background:#d5f5e3;color:var(--green);border-color:#a9dfbf}
 .flagbtn{font-family:inherit;font-size:13px;font-weight:600;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
 .flagbtn.sel{border-color:var(--brand);background:#e0f2fe;color:#0369a1}
 
@@ -456,7 +458,7 @@ async function openLot(id){
   curManual=curLot.manual_stage||null;
   TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none'}));
   bn={};TASKS.forEach(t=>bn[t.num]=t);
-  act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish};});
+  act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish,vendor_confirmed:!!r.vendor_confirmed};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
   if(curLot.template_id){const sm=await sbCall('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
   lotNotes=await sbCall('getTaskNotes',{lot_id:id})||[];
@@ -559,6 +561,7 @@ function renderTasks(){
       } else {
         acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';
       }
+      acts+='<button class="ab conf'+(a.vendor_confirmed?' confirmed':'')+'" data-a="conf" data-n="'+t.num+'">'+(a.vendor_confirmed?'✓ Conf':'Confirm')+'</button>';
       acts+='<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button>';
       if(canEdit){acts+='<button class="ab edit" data-a="edit" data-n="'+t.num+'">⚙ Edit</button>';}
       const tNotes=notesForTask(t.num);
@@ -582,6 +585,7 @@ function renderTasks(){
       else if(a==='undo')undoTask(n);
       else if(a==='note')openNote(n);
       else if(a==='edit')openEditTask(n);
+      else if(a==='conf')toggleConfirm(n);
     };
   });
 }
@@ -596,6 +600,14 @@ async function saveStage(){
   const st=computeStage();
   await sbCall('updateScheduleLot',{id:curLot.id,reported_stage:(st.reportedCode==='—'?null:st.reportedCode),true_stage:st.trueCode||null});
 }
+async function toggleConfirm(n){
+  const t=bn[n];
+  const a=act[n]||{};
+  act[n]={...a,vendor_confirmed:!a.vendor_confirmed};
+  renderTasks();
+  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,vendor_confirmed:act[n].vendor_confirmed});
+}
+
 async function startTask(n){
   const t=bn[n];const v=await openDatePicker('Start — #'+n+' '+t.name,todayYmd());
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
