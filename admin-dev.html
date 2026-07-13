@@ -530,6 +530,8 @@ tr:hover td{background:#f9fafb}
 // ── CONSTANTS ──
 const ADMIN_PIN = '0570';
 const SUPABASE_FN = '/.netlify/functions/supabase';
+const SESSION_KEY = 'ah_admin_session';
+const SESSION_HOURS = 8;
 let SUB_NAMES = {};
 const SUB_COLORS = {RC:'sub-RC',CO:'sub-CO',TB:'sub-TB',CT:'sub-CT',TE:'sub-TE',CW:'sub-CW'};
 
@@ -573,6 +575,7 @@ async function sbCall(action, payload) {
 function tryLogin() {
   const pin = document.getElementById('pin-input').value;
   if (pin === ADMIN_PIN) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ts: Date.now()}));
     document.getElementById('login-wrap').style.display = 'none';
     document.getElementById('app').classList.add('open');
     loadAll();
@@ -585,10 +588,23 @@ function tryLogin() {
 document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
 function logout() {
+  localStorage.removeItem(SESSION_KEY);
   document.getElementById('app').classList.remove('open');
   document.getElementById('login-wrap').style.display = 'flex';
   document.getElementById('pin-input').value = '';
 }
+
+// ── AUTO-RESTORE SESSION ──
+(function() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY));
+    if (s && s.ts && (Date.now() - s.ts) < SESSION_HOURS * 3600000) {
+      document.getElementById('login-wrap').style.display = 'none';
+      document.getElementById('app').classList.add('open');
+      loadAll();
+    }
+  } catch(e) {}
+})();
 
 // ── DATA ──
 async function loadAll() {
