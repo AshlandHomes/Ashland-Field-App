@@ -322,7 +322,7 @@ exports.handler = async function(event) {
       }
 
       case 'updateScheduleLotTask': {
-        const { task_id, lot_id, status, actual_start, actual_finish } = payload;
+        const { task_id, lot_id, status, actual_start, actual_finish, vendor_confirmed } = payload;
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
         }
@@ -330,6 +330,7 @@ exports.handler = async function(event) {
         if (status !== undefined) updates.status = status;
         if (actual_start !== undefined) updates.actual_start = actual_start;
         if (actual_finish !== undefined) updates.actual_finish = actual_finish;
+        if (vendor_confirmed !== undefined) updates.vendor_confirmed = vendor_confirmed;
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
         if (lot_id) {
           await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: new Date().toISOString() });
@@ -483,9 +484,6 @@ exports.handler = async function(event) {
         const { include_archived } = payload || {};
         const filter = include_archived ? '' : '&is_archived=eq.false';
         const r = await supabaseRequest('GET', `sched_subdivisions?select=*&order=code${filter}`);
-        if (r.error) {
-          return { statusCode: 200, body: JSON.stringify({ error: 'DB(' + r.status + '): ' + r.error }) };
-        }
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
       }
 
