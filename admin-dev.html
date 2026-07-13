@@ -369,7 +369,7 @@ tr:hover td{background:#f9fafb}
           <div style="font-size:14px;font-weight:600" id="edit-status-label">Active</div>
           <div style="font-size:12px;color:var(--muted)" id="edit-status-sub"></div>
         </div>
-        <button id="edit-close-toggle-btn" onclick="toggleLotClosed()" style="padding:8px 18px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;border:none"></button>
+        <button id="edit-close-toggle-btn" onclick="toggleLotClosed()" class="btn"></button>
       </div>
     </div>
     <div class="modal-btns">
@@ -928,7 +928,9 @@ async function openAddLotModal() {
       ).join('');
   document.getElementById('add-lot-num').value = '';
   document.getElementById('add-lot-addr').value = '';
+  document.getElementById('add-plan-name').value = '';
   document.getElementById('add-start-date').value = '';
+  document.getElementById('add-lot-fields').style.display = 'none';
   document.getElementById('modal-add-lot').classList.add('open');
 }
 
@@ -1002,22 +1004,26 @@ async function submitAddLot() {
   const subSel = document.getElementById('add-subdivision');
   const subOpt = subSel.options[subSel.selectedIndex];
   const subCode = subOpt ? subOpt.dataset.code : '';
-  const template_id = document.getElementById('add-template').value;
-  const lot_number  = document.getElementById('add-lot-num').value.trim();
-  const address     = document.getElementById('add-lot-addr').value.trim();
+  const template_id  = document.getElementById('add-template').value;
+  const lot_number   = document.getElementById('add-lot-num').value.trim();
+  const address      = document.getElementById('add-lot-addr').value.trim();
+  const plan_name    = document.getElementById('add-plan-name').value.trim();
   const builder_name = document.getElementById('add-builder').value || null;
-  const start_date  = document.getElementById('add-start-date').value || null;
+  const start_date   = document.getElementById('add-start-date').value || null;
 
-  if (!subCode || !lot_number || !template_id) {
-    alert('Subdivision, lot number, and house plan are required.');
-    return;
-  }
+  if (!subCode)    { alert('Select a subdivision.'); return; }
+  if (!lot_number) { alert('Lot number is required.'); return; }
+  if (!template_id){ alert('Select a schedule type.'); return; }
 
   const stampResult = await sbCall('stampLot', {template_id, lot_number, address: address||null, community: subCode});
   if (!stampResult || !stampResult.success) return;
 
-  if (builder_name || start_date) {
-    await sbCall('updateScheduleLot', {id: stampResult.lot_id, builder_name, construction_start_date: start_date});
+  const updates = {};
+  if (builder_name) updates.builder_name = builder_name;
+  if (start_date)   updates.construction_start_date = start_date;
+  if (plan_name)    updates.plan_name = plan_name;
+  if (Object.keys(updates).length) {
+    await sbCall('updateScheduleLot', {id: stampResult.lot_id, ...updates});
   }
 
   closeModal('modal-add-lot');
@@ -1287,10 +1293,6 @@ async function openSubDetail(id) {
     return `<label class="check-label"><input type="checkbox" ${checked} value="${b.name}"> ${b.name}</label>`;
   }).join('') || '<span style="color:var(--muted);font-size:13px">No builders added yet</span>';
 
-  // Templates — load async
-  document.getElementById('sub-detail-templates').innerHTML = '';
-  document.getElementById('sub-detail-templates-loading').style.display = 'block';
-
   // Lot inventory — load async
   document.getElementById('lot-inv-tbody').innerHTML = '';
   document.getElementById('lot-inv-loading').style.display = 'block';
@@ -1312,20 +1314,8 @@ async function openSubDetail(id) {
 
   document.getElementById('modal-sub-detail').classList.add('open');
 
-  // Load templates and lots in parallel
-  const [tplIds, lots] = await Promise.all([
-    sbCall('getSubdivisionTemplates', {subdivision_id: id}),
-    sbCall('getSubdivisionLots', {subdivision_id: id})
-  ]);
-
-  // Render templates
-  const tplIdSet = new Set(tplIds||[]);
-  document.getElementById('sub-detail-templates').innerHTML = scheduleTemplates.map(t =>
-    `<label class="check-label"><input type="checkbox" ${tplIdSet.has(t.id)?'checked':''} value="${t.id}"> ${t.name}</label>`
-  ).join('') || '<span style="color:var(--muted);font-size:13px">No templates found</span>';
-  document.getElementById('sub-detail-templates-loading').style.display = 'none';
-
-  // Render lot inventory
+  // Load lot inventory
+  const lots = await sbCall('getSubdivisionLots', {subdivision_id: id});
   document.getElementById('lot-inv-loading').style.display = 'none';
   renderLotInventory(lots||[]);
 }
@@ -1417,9 +1407,6 @@ async function submitSubDetail() {
   const sub = subdivisions.find(s=>s.id===id);
   const is_archived = sub && sub._pendingArchive !== undefined ? sub._pendingArchive : (sub ? sub.is_archived : false);
 
-  // Collect template IDs
-  const template_ids = [...document.querySelectorAll('#sub-detail-templates input:checked')].map(c=>c.value);
-
   // Collect builders (who should have this sub)
   const shouldHave = new Set(
     [...document.querySelectorAll('#sub-detail-builders input:checked')].map(c=>c.value)
@@ -1431,7 +1418,6 @@ async function submitSubDetail() {
   // Save everything in parallel
   const saves = [
     sbCall('upsertSubdivision', {id, code, name, is_archived}),
-    sbCall('saveSubdivisionTemplates', {subdivision_id: id, template_ids}),
     sbCall('saveSubdivisionLots', {subdivision_id: id, rows: lotRows})
   ];
 
