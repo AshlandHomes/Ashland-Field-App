@@ -429,32 +429,66 @@ function actOffset(iso){if(!startDate||!iso)return null;return wdBetween(startDa
 function offToDate(off){if(off>=1)return addWD(startDate,off);let d=new Date(startDate);d.setHours(0,0,0,0);let c=1;while(c>off){d.setDate(d.getDate()-1);const w=d.getDay();if(w!==0&&w!==6)c--;}return d;}
 
 function runEngine(mode){
-  const memo={};
-  function ef(n,stk){
-    if(memo[n]!==undefined)return memo[n];
-    const t=bn[n];if(stk.includes(n))return t.rf||1;
-    let pd=null;
-    (t.preds||[]).forEach(p=>{if(bn[p]){const pe=ef(p,[...stk,n]);pd=(pd===null)?pe+1:Math.max(pd,pe+1);}});
-    let es;const a=act[n]||{};
-    const aStartOff=(mode==='projected'&&a.started&&a.start)?actOffset(a.start):null;
-    const ps=(pd!==null)?pd+t.lag:null;
-    if(aStartOff!==null){es=aStartOff;}
-    else{
-      es=ps!==null?ps:(t.rs||1);
-      if(mode==='projected'&&!a.started&&t.est_start_date){const estOff=actOffset(t.est_start_date);if(estOff!==null)es=Math.max(es,estOff);}
+  // If predecessor data exists in DB: full recursive CPM engine
+  const hasPreds=TASKS.some(t=>t.preds&&t.preds.length>0);
+  if(hasPreds){
+    const memo={};
+    function ef(n,stk){
+      if(memo[n]!==undefined)return memo[n];
+      const t=bn[n];if(stk.includes(n))return t.rf||1;
+      let pd=null;
+      (t.preds||[]).forEach(p=>{if(bn[p]){const pe=ef(p,[...stk,n]);pd=(pd===null)?pe+1:Math.max(pd,pe+1);}});
+      let es;const a=act[n]||{};
+      const aStartOff=(mode==='projected'&&a.started&&a.start)?actOffset(a.start):null;
+      const ps=(pd!==null)?pd+t.lag:null;
+      if(aStartOff!==null){es=aStartOff;}
+      else{
+        es=ps!==null?ps:(t.rs||1);
+        if(mode==='projected'&&!a.started&&t.est_start_date){const estOff=actOffset(t.est_start_date);if(estOff!==null)es=Math.max(es,estOff);}
+      }
+      let e;const aFinOff=(mode==='projected'&&a.finished&&a.finish)?actOffset(a.finish):null;
+      if(aFinOff!==null){e=aFinOff;}else{e=es+t.dur-1;}
+      memo[n]=e;t['_'+mode+'_es']=es;t['_'+mode+'_ef']=e;return e;
     }
-    let e;const aFinOff=(mode==='projected'&&a.finished&&a.finish)?actOffset(a.finish):null;
-    if(aFinOff!==null){e=aFinOff;}else{e=es+t.dur-1;}
-    memo[n]=e;t['_'+mode+'_es']=es;t['_'+mode+'_ef']=e;return e;
+    TASKS.forEach(t=>ef(t.num,[]));
+    const end=Math.max(...TASKS.map(t=>t['_'+mode+'_ef']));
+    if(mode==='planned'){
+      const succ={};TASKS.forEach(t=>succ[t.num]=[]);
+      TASKS.forEach(t=>(t.preds||[]).forEach(p=>{if(succ[p])succ[p].push(t.num)}));
+      const lf={};
+      function latef(n,stk){if(lf[n]!==undefined)return lf[n];if(stk.includes(n))return end;const ss=succ[n];let v=ss.length===0?end:Math.min(...ss.map(s=>latef(s,[...stk,n])-bn[s].dur+1-1-bn[s].lag));lf[n]=v;return v;}
+      TASKS.forEach(t=>{t._lf=latef(t.num,[]);t._ls=t._lf-t.dur+1;t._tf=t._ls-t._planned_es;t._crit=(t._tf<=0)});
+    }
+    return end;
   }
-  TASKS.forEach(t=>ef(t.num,[]));
+  // No predecessor data in DB: sequential slip-propagation engine.
+  // Processes tasks in relative_start order, accumulating the maximum schedule slip
+  // seen so far and applying it to all subsequent tasks. This correctly cascades
+  // delays through the schedule without requiring predecessor relationships.
+  const sorted=[...TASKS].sort((a,b)=>(a.rs||1)-(b.rs||1)||(a.order||0)-(b.order||0));
+  let maxSlip=0;
+  if(mode==='projected'){
+    sorted.forEach(t=>{
+      const a=act[t.num]||{};
+      const aStartOff=(a.started&&a.start)?actOffset(a.start):null;
+      const aFinOff=(a.finished&&a.finish)?actOffset(a.finish):null;
+      const estOff=(!a.started&&t.est_start_date)?actOffset(t.est_start_date):null;
+      // How many WD is this task displaced from its planned position?
+      let slip=0;
+      if(aFinOff!==null){slip=aFinOff-((t.rs||1)+t.dur-1);}
+      else if(aStartOff!==null){slip=aStartOff-(t.rs||1);}
+      else if(estOff!==null){slip=Math.max(0,estOff-(t.rs||1));}
+      maxSlip=Math.max(maxSlip,slip);
+      const es=(t.rs||1)+maxSlip;
+      t['_projected_es']=es;t['_projected_ef']=aFinOff!==null?aFinOff:es+t.dur-1;
+    });
+  }else{
+    sorted.forEach(t=>{t['_planned_es']=t.rs||1;t['_planned_ef']=(t.rs||1)+t.dur-1;});
+  }
   const end=Math.max(...TASKS.map(t=>t['_'+mode+'_ef']));
   if(mode==='planned'){
-    const succ={};TASKS.forEach(t=>succ[t.num]=[]);
-    TASKS.forEach(t=>(t.preds||[]).forEach(p=>{if(succ[p])succ[p].push(t.num)}));
-    const lf={};
-    function latef(n,stk){if(lf[n]!==undefined)return lf[n];if(stk.includes(n))return end;const ss=succ[n];let v=ss.length===0?end:Math.min(...ss.map(s=>latef(s,[...stk,n])-bn[s].dur+1-1-bn[s].lag));lf[n]=v;return v;}
-    TASKS.forEach(t=>{t._lf=latef(t.num,[]);t._ls=t._lf-t.dur+1;t._tf=t._ls-t._planned_es;t._crit=(t._tf<=0)});
+    // Float relative to end; use is_crit from DB to mark actual critical path tasks
+    TASKS.forEach(t=>{t._lf=end;t._ls=t._lf-t.dur+1;t._tf=t._ls-(t._planned_es||t.rs||1);t._crit=(t._tf<=0)||!!t.is_crit;});
   }
   return end;
 }
@@ -495,7 +529,7 @@ async function openLot(id){
   const rows=data.tasks||[];
   lotGates=data.gates||[];
   curManual=curLot.manual_stage||null;
-  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none',est_start_date:r.est_start_date||null}));
+  TASKS=rows.map(r=>({_id:r.id,num:r.bt_num,name:r.name,rs:r.relative_start,dur:r.duration,lag:r.lag,rf:r.relative_finish,preds:r.predecessors||[],phase:r.phase_order,phase_name:r.phase_name,type:r.task_type,order:r.task_order,note:r.note||'',flag:r.flag||'none',est_start_date:r.est_start_date||null,is_crit:!!r.is_critical}));
   bn={};TASKS.forEach(t=>bn[t.num]=t);
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish,vendor_confirmed:!!r.vendor_confirmed};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
