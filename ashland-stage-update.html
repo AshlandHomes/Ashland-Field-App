@@ -642,7 +642,7 @@ function renderTasks(){
       const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
       const dispStart=(!a.started&&t.est_start_date)?new Date(t.est_start_date+'T00:00:00'):ps;
       const startLabel=(!a.started&&!a.finished)
-        ?'<span class="tdate-edit" data-a="est-date" data-n="'+t.num+'">'+fmt(dispStart)+(t.est_start_date?' ✏':'')+' → '+fmt(pf)+'</span>'
+        ?fmt(dispStart)+' → '+fmt(pf)
         :(a.started?fmt(ps)+' → '+(a.finish?fmt(new Date(a.finish+'T00:00:00')):'…'):fmt(dispStart)+' → '+fmt(pf));
       h+='<div class="t '+cls+'">'
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
@@ -663,9 +663,6 @@ function renderTasks(){
       else if(a==='edit')openEditTask(n);
       else if(a==='conf')toggleConfirm(n);
     };
-  });
-  document.querySelectorAll('.tdate-edit').forEach(el=>{
-    el.onclick=()=>setEstStartDate(+el.dataset.n);
   });
 }
 
@@ -693,17 +690,6 @@ async function startTask(n){
   const v=await openDatePicker('Start — #'+n+' '+t.name,defaultDate);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
-}
-async function setEstStartDate(n){
-  const t=bn[n];
-  const ps=offToDate(t._projected_es);
-  const current=t.est_start_date||ymd(ps);
-  const v=await openDatePicker('Est. Start — #'+n+' '+t.name,current);
-  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
-  const saveVal=(v===ymd(ps))?null:v;
-  t.est_start_date=saveVal;
-  renderSchedule();
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,est_start_date:saveVal});
 }
 async function finishTask(n){
   const t=bn[n];
