@@ -5,17 +5,8 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-// TABLE_PREFIX drives dev/live isolation within ONE Supabase project.
-//   Live Netlify site : TABLE_PREFIX unset (or '')  -> sched_lots
-//   Dev  Netlify site : TABLE_PREFIX='dev_'          -> dev_sched_lots
-// Prefixing here (one place) covers every call — no call site names a table twice.
-const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
-
 async function supabaseRequest(method, path, body) {
-  // Prepend TABLE_PREFIX to the table token (everything before the first ? or /).
-  const _m = path.match(/^([a-zA-Z0-9_]+)(.*)$/);
-  const _path = _m ? (TABLE_PREFIX + _m[1] + _m[2]) : path;
-  const url = `${SUPABASE_URL}/rest/v1/${_path}`;
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
   const headers = {
     'Content-Type': 'application/json',
     'apikey': SUPABASE_KEY,
@@ -31,7 +22,7 @@ async function supabaseRequest(method, path, body) {
   const text = await resp.text();
 
   if (!resp.ok) {
-    console.error(`Supabase ${method} ${_path} failed:`, resp.status, text);
+    console.error(`Supabase ${method} ${path} failed:`, resp.status, text);
     return { status: resp.status, data: null, error: text };
   }
 
@@ -338,6 +329,37 @@ exports.handler = async function(event) {
         const t = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lot_id}&select=*&order=task_order`);
         const g = await supabaseRequest('GET', `sched_lot_gate_state?lot_id=eq.${lot_id}&select=*`);
         return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates: g.data || [] }) };
+      }
+
+      case 'bulkUpdateLotTasks': {
+        // One round-trip from the browser; N task writes done server-side.
+        // payload.updates = [{task_id, status?, actual_start?, actual_finish?, vendor_confirmed?, est_start_date?}, ...]
+        // payload.lot_id (optional) + payload.reported_stage/true_stage (optional) => one lot stage write at the end.
+        const { updates, lot_id, reported_stage, true_stage } = payload;
+        if (!Array.isArray(updates)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'updates array is required' }) };
+        }
+        const stamp = new Date().toISOString();
+        let done = 0; const failed = [];
+        for (const u of updates) {
+          if (!u || !u.task_id) { failed.push({ task_id: u && u.task_id, error: 'missing task_id' }); continue; }
+          const upd = { updated_at: stamp };
+          if (u.status !== undefined) upd.status = u.status;
+          if (u.actual_start !== undefined) upd.actual_start = u.actual_start;
+          if (u.actual_finish !== undefined) upd.actual_finish = u.actual_finish;
+          if (u.vendor_confirmed !== undefined) upd.vendor_confirmed = u.vendor_confirmed;
+          if (u.est_start_date !== undefined) upd.est_start_date = u.est_start_date;
+          const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${u.task_id}`, upd);
+          if (r.status && r.status >= 400) failed.push({ task_id: u.task_id, error: r.error }); else done++;
+        }
+        // one lot-level write: stage (if provided) + touch timestamp
+        if (lot_id) {
+          const lotUpd = { last_task_update: stamp };
+          if (reported_stage !== undefined) lotUpd.reported_stage = reported_stage;
+          if (true_stage !== undefined) lotUpd.true_stage = true_stage;
+          await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, lotUpd);
+        }
+        return { statusCode: 200, body: JSON.stringify({ done, failed }) };
       }
 
       case 'updateScheduleLotTask': {
