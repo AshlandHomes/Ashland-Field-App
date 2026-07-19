@@ -321,6 +321,42 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
+      case 'getAllLotPhases': {
+        // For every active lot: compute active phase (phase of earliest unfinished task)
+        // and a per-phase task snapshot. One call, computed server-side.
+        // Returns { [lot_id]: { activePhase, activePhaseName, phases: { [phase_order]: {name, tasks:[{num,name,status}]} } } }
+        const lots = await supabaseRequest('GET', 'sched_lots?select=id,status&status=eq.active');
+        const lotRows = lots.data || [];
+        const ids = lotRows.map(l => l.id);
+        const out = {};
+        if (ids.length) {
+          const inList = ids.join(',');
+          const tt = await supabaseRequest('GET',
+            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order&order=task_order`);
+          const rows = tt.data || [];
+          const byLot = {};
+          rows.forEach(r => { (byLot[r.lot_id] = byLot[r.lot_id] || []).push(r); });
+          Object.keys(byLot).forEach(lotId => {
+            const ts = byLot[lotId];
+            // active phase = phase of first task (task_order) whose status !== 'finished'
+            let activePhase = null, activePhaseName = null;
+            for (const r of ts) {
+              if (r.status !== 'finished') { activePhase = r.phase_order; activePhaseName = r.phase_name; break; }
+            }
+            if (activePhase === null && ts.length) { // all finished — use last phase
+              const last = ts[ts.length - 1]; activePhase = last.phase_order; activePhaseName = last.phase_name;
+            }
+            const phases = {};
+            ts.forEach(r => {
+              const p = r.phase_order;
+              (phases[p] = phases[p] || { name: r.phase_name, tasks: [] }).tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started' });
+            });
+            out[lotId] = { activePhase, activePhaseName, phases };
+          });
+        }
+        return { statusCode: 200, body: JSON.stringify(out) };
+      }
+
       case 'getScheduleLotTasks': {
         const { lot_id } = payload;
         if (!lot_id) {
