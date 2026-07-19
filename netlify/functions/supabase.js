@@ -321,6 +321,65 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
+      case 'getStaleCriticalTasks': {
+        // Flags critical tasks that became "next in line" (all predecessors finished)
+        // but weren't completed within duration + GRACE working days.
+        // Eligible date = max(actual_finish of predecessors). Ticker starts then.
+        // Computed live from existing data — no stamping, works retroactively.
+        const GRACE = (payload && payload.grace_days != null) ? payload.grace_days : 3;
+        const addWD = (start, off) => { // off working days after start (off=0 => same day)
+          const d = new Date(start); d.setHours(0,0,0,0); let c = 0;
+          while (c < off) { d.setDate(d.getDate()+1); const w=d.getDay(); if(w!==0&&w!==6) c++; }
+          return d;
+        };
+        const today = new Date(); today.setHours(0,0,0,0);
+
+        const lots = await supabaseRequest('GET', 'sched_lots?select=id,lot_number,community,builder_name,status&status=eq.active');
+        const lotRows = lots.data || [];
+        const ids = lotRows.map(l=>l.id);
+        const lotById = {}; lotRows.forEach(l=>lotById[l.id]=l);
+        const stale = [];
+        if (ids.length) {
+          const tt = await supabaseRequest('GET',
+            `sched_lot_tasks?lot_id=in.(${ids.join(',')})&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical`);
+          const rows = tt.data || [];
+          const byLot = {};
+          rows.forEach(r=>{ (byLot[r.lot_id]=byLot[r.lot_id]||{})[r.bt_num]=r; });
+          rows.forEach(r=>{
+            if (!r.is_critical) return;
+            if (r.status === 'finished') return;
+            const lotTasks = byLot[r.lot_id];
+            const preds = r.predecessors || [];
+            // eligible only if ALL predecessors are finished
+            let eligible = null, allDone = true;
+            if (preds.length === 0) { eligible = null; } // no preds: can't anchor a start; skip
+            for (const p of preds) {
+              const pt = lotTasks[p];
+              if (!pt || pt.status !== 'finished' || !pt.actual_finish) { allDone = false; break; }
+              const f = new Date(pt.actual_finish); if (!eligible || f > eligible) eligible = f;
+            }
+            if (!allDone || !eligible) return; // not yet next-in-line, or no anchor date
+            const dur = r.duration || 1;
+            const expectedDone = addWD(eligible, dur + GRACE);
+            if (today > expectedDone) {
+              const L = lotById[r.lot_id] || {};
+              // working days overdue
+              let od=0, cur=new Date(expectedDone);
+              while (cur < today) { cur.setDate(cur.getDate()+1); const w=cur.getDay(); if(w!==0&&w!==6) od++; }
+              stale.push({
+                lot_id: r.lot_id, lot_number: L.lot_number, community: L.community, builder_name: L.builder_name,
+                bt_num: r.bt_num, task_name: r.name, status: r.status||'not_started',
+                eligible_date: eligible.toISOString().slice(0,10),
+                expected_done: expectedDone.toISOString().slice(0,10),
+                days_overdue: od
+              });
+            }
+          });
+        }
+        stale.sort((a,b)=> b.days_overdue - a.days_overdue);
+        return { statusCode: 200, body: JSON.stringify(stale) };
+      }
+
       case 'getAllLotPhases': {
         // For every active lot: compute active phase (phase of earliest unfinished task)
         // and a per-phase task snapshot. One call, computed server-side.
