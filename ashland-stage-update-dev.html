@@ -9,7 +9,6 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--brand:#00A9D1;--brand-light:#e0f6fb;--brand-border:#b3e5f0;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b}
 body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
-.devbanner{background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.15em;padding:5px}
 .wrap{max-width:480px;margin:0 auto;padding:16px}
 .screen{display:none}.screen.active{display:block}
 .brand{text-align:center;margin:24px 0}
@@ -130,7 +129,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 </style>
 </head>
 <body>
-<div class="devbanner">⚠ DEV / UAT — NOT FOR PRODUCTION ⚠</div>
+<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠</div><div style="height:30px"></div>
 
 <!-- Date picker modal -->
 <div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
