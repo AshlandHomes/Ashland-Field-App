@@ -163,6 +163,11 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .ab.push{background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5}
 /* whole-lot push button in schedule header */
 .bp-lotbtn{display:inline-block;margin-left:8px;background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:middle}
+/* progress */
+.bp-progbar{height:12px;background:#ecf0f1;border-radius:7px;overflow:hidden;margin:6px 0}
+.bp-progfill{height:100%;background:#27ae60;border-radius:7px;transition:width .25s ease}
+.bp-prog-detail{font-size:12px;color:#7f8c8d;min-height:16px;margin-top:4px}
+.bp-prog-warn{font-size:12px;color:#95a5a6;margin-top:12px;text-align:center}
 
 </style>
 </head>
@@ -1121,14 +1126,40 @@ function _bpToPreview(){
 }
 
 // ---- step 3: apply ----
+function _bpProgressScreen(total){
+  _bpClose();
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Applying push…</div></div>'
+    +'<div class="bp-subtitle" id="bp-prog-label">Starting…</div>'
+    +'<div class="bp-progbar"><div class="bp-progfill" id="bp-progfill" style="width:0%"></div></div>'
+    +'<div class="bp-prog-detail" id="bp-prog-detail"></div>'
+    +'<div class="bp-prog-warn">Please keep this screen open until it finishes.</div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function _bpProgress(lotIdx, lotTotal, lotLabel, taskDone, taskTotal){
+  const pct=Math.round((lotIdx/lotTotal)*100);
+  const lbl=document.getElementById('bp-prog-label');
+  const fill=document.getElementById('bp-progfill');
+  const det=document.getElementById('bp-prog-detail');
+  if(lbl) lbl.textContent='Lot '+lotIdx+' of '+lotTotal+'  ('+lotLabel+')';
+  if(fill) fill.style.width=pct+'%';
+  if(det) det.textContent=(taskTotal>1)?('task '+taskDone+' / '+taskTotal):'';
+}
+
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
-  const btn=document.querySelector('#bp-overlay .bp-apply');
-  if(btn){btn.disabled=true;btn.textContent='Applying…';}
+  _bpProgressScreen(chosen.length);
 
   let ok=0, fail=0; const errors=[];
+  const doneLots=[], failedLots=[];
+  let lotIdx=0;
 
   for(const lot of chosen){
+    lotIdx++;
+    let lotHadError=false;
+    _bpProgress(lotIdx, chosen.length, lot.lot_number, 0, 1);
     try{
       // fetch this target lot's own task rows (its own task_ids per bt_num)
       const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
@@ -1144,7 +1175,7 @@ async function _bpApply(){
       const pushOne=async(btNum)=>{
         const src=act[btNum]; if(!src) return;
         const tgt=byNum[btNum];
-        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); fail++; return; }
+        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); fail++; lotHadError=true; return; }
         const status=src.finished?'finished':(src.started?'started':'not_started');
         await sbCall('updateScheduleLotTask',{
           task_id:tgt.id, lot_id:lot.id,
@@ -1169,7 +1200,9 @@ async function _bpApply(){
           }
         }
       } else {
-        for(const t of TASKS){ if(act[t.num]) await pushOne(t.num); }
+        const pushable=TASKS.filter(t=>act[t.num]);
+        let ti=0;
+        for(const t of pushable){ ti++; await pushOne(t.num); _bpProgress(lotIdx, chosen.length, lot.lot_number, ti, pushable.length); }
       }
 
       // ---- recompute this target lot's stage from its NEW task set ----
@@ -1185,14 +1218,17 @@ async function _bpApply(){
       if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){ reportedCode='5.9'; }
       else { reportedCode=trueStage?trueStage.code:null; }
       await sbCall('updateScheduleLot',{id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
+      if(lotHadError) failedLots.push(lot.lot_number); else doneLots.push(lot.lot_number);
     }catch(e){
-      fail++; errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
+      fail++; lotHadError=true; failedLots.push(lot.lot_number);
+      errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
     }
   }
 
   _bpClose();
-  let msg='Push complete: '+ok+' task update'+(ok===1?'':'s')+' across '+chosen.length+' lot'+(chosen.length===1?'':'s')+'.';
-  if(fail){ msg+='\n\n'+fail+' problem'+(fail===1?'':'s')+':\n'+errors.slice(0,8).join('\n'); }
+  let msg=doneLots.length+' of '+chosen.length+' lots updated.';
+  if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
+  if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
   alert(msg);
 
   // refresh current view so the user sees a clean state
