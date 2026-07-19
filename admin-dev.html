@@ -285,6 +285,17 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-lot-phase">
+  <div class="modal">
+    <h2>📍 Phase of Construction</h2>
+    <div class="modal-sub" id="phase-modal-lot-label"></div>
+    <div id="phase-modal-list"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-lot-phase')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADD LOT -->
 <div class="modal-overlay" id="modal-add-lot">
   <div class="modal">
@@ -563,6 +574,7 @@ let scheduleTemplates = [];
 let subdivisions = [];
 let companies = [];
 let flaggedNotesByLot = {};
+let lotPhases = {}; // {lot_id:{activePhase,activePhaseName,phases}}
 let API_SECRET = null;
 let deleteLotTarget = {id:null, num:null};
 
@@ -640,7 +652,8 @@ async function loadAll() {
     loadBuilders(),
     loadSubdivisions(),
     loadCompanies(),
-    loadFlaggedNotes()
+    loadFlaggedNotes(),
+    loadLotPhases()
   ]);
   populateFilters();
   renderStats();
@@ -658,6 +671,11 @@ async function loadScheduleData() {
   ]);
   scheduleLots = lotsData || [];
   scheduleTemplates = tplData || [];
+}
+
+async function loadLotPhases() {
+  const data = await sbCall('getAllLotPhases', {});
+  lotPhases = data || {};
 }
 
 async function loadBuilders() {
@@ -975,6 +993,7 @@ function renderLotsTable() {
       <td><strong>${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
       <td>${lot.builder_name||'<span style="color:var(--muted)">—</span>'}</td>
       <td>${stageCell(lot)}</td>
+      <td>${phaseCell(lot)}</td>
       <td>${fmtDate(lot.construction_start_date)}</td>
       <td>${planHtml}</td>
       <td>${closeBadgeHtml(lot)}</td>
@@ -990,11 +1009,37 @@ function renderLotsTable() {
 
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
-      <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th>
+      <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
       <th>Start</th><th>Planned Completion</th><th>Close</th><th>Activity</th><th>Flags</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+// ── PHASE COLUMN + MODAL ──
+function phaseCell(lot){
+  const p = lotPhases[lot.id];
+  if(!p || p.activePhase==null) return '<span style=\"color:var(--muted)\">—</span>';
+  return '<button class=\"badge\" style=\"background:#eef2ff;color:#4338ca;border:none;cursor:pointer;font-weight:700\" '
+    + 'onclick=\"openPhaseModal(\''+lot.id+'\')\" title=\"'+(p.activePhaseName||'')+'\">'+p.activePhase+'</button>';
+}
+function openPhaseModal(lotId){
+  const lot = scheduleLots.find(l=>l.id===lotId);
+  const p = lotPhases[lotId];
+  document.getElementById('phase-modal-lot-label').textContent =
+    (lot?(lot.community||'')+' '+(lot.lot_number||''):'') + (p&&p.activePhaseName?' · Phase '+p.activePhase+': '+p.activePhaseName:'');
+  const ph = p && p.phases && p.phases[p.activePhase];
+  if(!ph){ document.getElementById('phase-modal-list').innerHTML='<p style=\"color:var(--muted);text-align:center;padding:20px\">No task data</p>'; }
+  else {
+    const dot = s => s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>');
+    const lbl = s => s==='finished'?'Finished':(s==='started'?'Started':'Not started');
+    document.getElementById('phase-modal-list').innerHTML = ph.tasks.map(t =>
+      '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px\">'
+      +'<div>'+dot(t.status)+' <strong>#'+t.num+'</strong> '+(t.name||'')+'</div>'
+      +'<div class=\"flag-meta\" style=\"white-space:nowrap\">'+lbl(t.status)+'</div></div>'
+    ).join('');
+  }
+  document.getElementById('modal-lot-phase').classList.add('open');
 }
 
 // ── FLAGS MODAL ──
