@@ -1232,42 +1232,29 @@ async function _bpApply(){
       const tgtAct={};
       rows.forEach(r=>{ tgtAct[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish}; });
 
-      const pushOne=async(btNum)=>{
+      // collect the writes for this lot, then send them in ONE batch call
+      const batch=[]; let noteToPush=null;
+      const collect=(btNum)=>{
         const src=act[btNum]; if(!src) return;
         const tgt=byNum[btNum];
-        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); fail++; lotHadError=true; return; }
+        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); lotHadError=true; return; }
         const status=src.finished?'finished':(src.started?'started':'not_started');
-        await sbCall('updateScheduleLotTask',{
-          task_id:tgt.id, lot_id:lot.id,
-          status:status,
-          actual_start:src.start||null,
-          actual_finish:src.finish||null
-        });
+        batch.push({task_id:tgt.id,status:status,actual_start:src.start||null,actual_finish:src.finish||null});
         tgtAct[btNum]={started:!!src.started||!!src.finished,finished:!!src.finished,start:src.start||null,finish:src.finish||null};
-        ok++;
       };
 
       if(_bpMode==='task'){
-        await pushOne(_bpBtNum);
+        collect(_bpBtNum);
         if(_bpIncludeNote && (_bpNoteText||'').trim()){
           const tgt=byNum[_bpBtNum];
-          if(tgt){
-            await sbCall('addTaskNote',{
-              lot_task_id:tgt.id, lot_id:lot.id, bt_num:_bpBtNum,
-              note:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')',
-              flag:_bpNoteFlag, author:currentBuilder
-            });
-          }
+          if(tgt){ noteToPush={lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpBtNum,note:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')',flag:_bpNoteFlag,author:currentBuilder}; }
         }
       } else {
         const pushable=TASKS.filter(t=>act[t.num]);
-        let ti=0;
-        for(const t of pushable){ ti++; await pushOne(t.num); _bpProgress(lotIdx, chosen.length, lot.lot_number, ti, pushable.length); }
+        pushable.forEach(t=>collect(t.num));
       }
 
-      // ---- recompute this target lot's stage from its NEW task set ----
-      // mirrors computeStage(): highest-order non-manual stage whose triggers are all finished,
-      // held to 5.9 if any utility gate is open and true stage > 5.9.
+      // ---- compute this target lot's stage from its NEW task set (client-side) ----
       let sm=[];
       if(lot.template_id){ const r=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); sm=(r&&r.stages)||[]; }
       let trueStage=null;
@@ -1277,7 +1264,12 @@ async function _bpApply(){
       let reportedCode, trueCode=trueStage?trueStage.code:null;
       if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){ reportedCode='5.9'; }
       else { reportedCode=trueStage?trueStage.code:null; }
-      await sbCall('updateScheduleLot',{id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
+
+      // ONE round-trip: all task writes + the lot stage write
+      _bpProgress(lotIdx, chosen.length, lot.lot_number, batch.length, batch.length);
+      const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
+      if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
+      if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
       if(lotHadError) failedLots.push(lot.lot_number); else doneLots.push(lot.lot_number);
     }catch(e){
       fail++; lotHadError=true; failedLots.push(lot.lot_number);
