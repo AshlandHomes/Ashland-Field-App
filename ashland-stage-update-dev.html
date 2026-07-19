@@ -201,7 +201,8 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
         <button class="flagbtn" data-f="red" onclick="setNoteFlag('red')" style="flex:1">🔴 Mgmt</button>
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:16px">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="note-multi" style="width:16px;height:16px"> Also post this note to other lots</label>
+    <div style="display:flex;gap:8px;margin-top:12px">
       <button onclick="closeNote()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:12px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Done</button>
       <button onclick="addNote()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:12px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Add Note</button>
     </div>
@@ -932,6 +933,7 @@ function renderThread(){
       +'<div style="font-size:14px;white-space:pre-wrap">'+escapeHtml(nt.note)+'</div>'
       +'<div style="display:flex;gap:6px;margin-top:8px">'
       +'<button onclick="cycleNoteFlag(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer">Flag: '+(nt.flag==='none'?'none':nt.flag)+' ⟳</button>'
+      +'<button onclick="_bpPushNoteFlow('+nt.bt_num+',this.getAttribute(\'data-n\'),\''+nt.flag+'\')" data-n="'+escapeHtml(nt.note)+'" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid #d3e6f5;background:#eaf4fb;color:#2980b9;cursor:pointer">⧉ Push</button>'
       +'</div></div>';
   }).join('');
 }
@@ -958,8 +960,13 @@ async function addNote(){
   const row=Array.isArray(res)?res[0]:res;
   if(row&&row.id){lotNotes.push(row);}
   else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  const multi=document.getElementById('note-multi');
+  const wantMulti=multi&&multi.checked;
+  const savedText=note, savedFlag=(row&&row.flag)||noteFlag, savedBt=t.num;
   document.getElementById('note-text').value='';noteFlag='none';renderFlagBtns();
+  if(multi)multi.checked=false;
   renderThread();
+  if(wantMulti){ _bpPushNoteFlow(savedBt, savedText, savedFlag); }
 }
 
 async function cycleNoteFlag(id){
@@ -972,6 +979,59 @@ async function cycleNoteFlag(id){
 loadBuilders();
 
 // ===== BULK PUSH MODULE =====
+// ---- NOTE PUSH: send a single note to same-subdivision active lots ----
+let _bpNote=null; // {bt_num, text, flag}
+function _bpPushNoteFlow(bt_num, text, flag){
+  if(!curLot){alert('Open a lot first.');return;}
+  const cand=_bpCandidateLots();
+  if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
+  _bpNote={bt_num:bt_num, text:text, flag:flag||'none'};
+  _bpTargets=cand; _bpSelected={};
+  _bpRenderNotePicker();
+}
+function _bpRenderNotePicker(){
+  _bpClose();
+  const subName=SUB_NAMES[curLot.community]||curLot.community;
+  const rows=_bpTargets.map(l=>{
+    const checked=_bpSelected[l.id]?'checked':'';
+    return '<label class="bp-lot"><input type="checkbox" data-id="'+l.id+'" '+checked+'><span class="bp-lotnum">'+l.lot_number+'</span><span class="bp-lotstage">stage '+(l.reported_stage||'—')+'</span></label>';
+  }).join('');
+  const preview=_bpNote.text.length>120?_bpNote.text.slice(0,120)+'…':_bpNote.text;
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Push note to other lots</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-pv"><div class="bp-pv-line"><b>Task #'+_bpNote.bt_num+'</b> · '+(_bpNote.flag==='none'?'no flag':_bpNote.flag)+'</div><div class="bp-pv-line" style="white-space:pre-wrap">"'+preview.replace(/</g,'&lt;')+'"</div></div>'
+    +'<div class="bp-section-label">Post to these lots in '+subName+':</div>'
+    +'<div class="bp-select-row"><button type="button" class="bp-selall" onclick="_bpSelectAll(true)">Select all</button><button type="button" class="bp-selall" onclick="_bpSelectAll(false)">Clear</button></div>'
+    +'<div class="bp-lots">'+rows+'</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">Cancel</button><button class="bp-apply" onclick="_bpApplyNote()">Post to selected</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.querySelectorAll('#bp-overlay .bp-lot input').forEach(cb=>{cb.onchange=()=>{_bpSelected[cb.dataset.id]=cb.checked;};});
+}
+async function _bpApplyNote(){
+  const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
+  if(!chosen.length){alert('Select at least one lot.');return;}
+  _bpProgressScreen(chosen.length);
+  const doneLots=[],failedLots=[]; let i=0;
+  for(const lot of chosen){
+    i++; _bpProgress(i,chosen.length,lot.lot_number,0,1);
+    try{
+      const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
+      const rows=(data&&data.tasks)||[];
+      const tgt=rows.find(r=>r.bt_num===_bpNote.bt_num);
+      if(!tgt){failedLots.push(lot.lot_number+' (no task #'+_bpNote.bt_num+')');continue;}
+      await sbCall('addTaskNote',{lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpNote.bt_num,note:_bpNote.text+'  (pushed from '+curLot.lot_number+')',flag:_bpNote.flag,author:currentBuilder});
+      doneLots.push(lot.lot_number);
+    }catch(e){failedLots.push(lot.lot_number);}
+  }
+  _bpClose();
+  let msg='Note posted to '+doneLots.length+' of '+chosen.length+' lots.';
+  if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
+  if(failedLots.length) msg+='\n\n✗ Not posted: '+failedLots.join(', ');
+  alert(msg);
+}
+
 // ============================================================
 // BULK PUSH — push a task's status (+ optional note) from the current lot
 // to other ACTIVE lots in the SAME subdivision. Built for the real
