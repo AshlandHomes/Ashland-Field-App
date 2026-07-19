@@ -1033,12 +1033,12 @@ function _bpRenderPicker(){
   } else {
     const done=TASKS.filter(t=>act[t.num]&&act[t.num].finished).length;
     const started=TASKS.filter(t=>act[t.num]&&act[t.num].started&&!act[t.num].finished).length;
-    title='Push Entire Lot Status — Lot '+curLot.lot_number;
+    title='Push Entire Lot Status — '+curLot.lot_number;
     sub=done+' finished, '+started+' started across '+TASKS.length+' tasks';
   }
   let rows=_bpTargets.map(l=>{
     const checked=_bpSelected[l.id]?'checked':'';
-    return '<label class="bp-lot"><input type="checkbox" data-id="'+l.id+'" '+checked+'><span class="bp-lotnum">Lot '+l.lot_number+'</span><span class="bp-lotstage">stage '+(l.reported_stage||'—')+'</span></label>';
+    return '<label class="bp-lot"><input type="checkbox" data-id="'+l.id+'" '+checked+'><span class="bp-lotnum">'+l.lot_number+'</span><span class="bp-lotstage">stage '+(l.reported_stage||'—')+'</span></label>';
   }).join('');
 
   const noteBlock = _bpMode==='task' ? (
@@ -1103,11 +1103,11 @@ function _bpToPreview(){
   } else {
     const done=TASKS.filter(t=>act[t.num]&&act[t.num].finished).length;
     const started=TASKS.filter(t=>act[t.num]&&act[t.num].started&&!act[t.num].finished).length;
-    what='<div class="bp-pv-line">Copy <b>all task statuses</b> from Lot '+curLot.lot_number+'</div>'
+    what='<div class="bp-pv-line">Copy <b>all task statuses</b> from '+curLot.lot_number+'</div>'
       +'<div class="bp-pv-line">'+done+' finished · '+started+' started · with their actual dates</div>'
       +'<div class="bp-pv-warn">⚠ This overwrites task status on the target lots. Tasks further along on a target may be pulled back to match this lot.</div>';
   }
-  const lotList=chosen.map(l=>'Lot '+l.lot_number).join(', ');
+  const lotList=chosen.map(l=>l.lot_number).join(', ');
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
     +'<div class="bp-head"><div class="bp-title">Confirm push</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
@@ -1144,7 +1144,7 @@ async function _bpApply(){
       const pushOne=async(btNum)=>{
         const src=act[btNum]; if(!src) return;
         const tgt=byNum[btNum];
-        if(!tgt){ errors.push('Lot '+lot.lot_number+': task #'+btNum+' not found'); fail++; return; }
+        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); fail++; return; }
         const status=src.finished?'finished':(src.started?'started':'not_started');
         await sbCall('updateScheduleLotTask',{
           task_id:tgt.id, lot_id:lot.id,
@@ -1163,7 +1163,7 @@ async function _bpApply(){
           if(tgt){
             await sbCall('addTaskNote',{
               lot_task_id:tgt.id, lot_id:lot.id, bt_num:_bpBtNum,
-              note:_bpNoteText.trim()+'  (pushed from Lot '+curLot.lot_number+')',
+              note:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')',
               flag:_bpNoteFlag, author:currentBuilder
             });
           }
@@ -1186,7 +1186,7 @@ async function _bpApply(){
       else { reportedCode=trueStage?trueStage.code:null; }
       await sbCall('updateScheduleLot',{id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
     }catch(e){
-      fail++; errors.push('Lot '+lot.lot_number+': '+(e&&e.message?e.message:'error'));
+      fail++; errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
     }
   }
 
