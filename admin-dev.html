@@ -296,6 +296,17 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-lot-stale">
+  <div class="modal">
+    <h2>⏰ Stale Critical Tasks</h2>
+    <div class="modal-sub" id="stale-modal-lot-label"></div>
+    <div id="stale-modal-list"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-lot-stale')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADD LOT -->
 <div class="modal-overlay" id="modal-add-lot">
   <div class="modal">
@@ -575,6 +586,7 @@ let subdivisions = [];
 let companies = [];
 let flaggedNotesByLot = {};
 let lotPhases = {}; // {lot_id:{activePhase,activePhaseName,phases}}
+let staleTasks = []; let staleByLot = {}; // stale critical tasks
 let API_SECRET = null;
 let deleteLotTarget = {id:null, num:null};
 
@@ -653,7 +665,8 @@ async function loadAll() {
     loadSubdivisions(),
     loadCompanies(),
     loadFlaggedNotes(),
-    loadLotPhases()
+    loadLotPhases(),
+    loadStaleTasks()
   ]);
   populateFilters();
   renderStats();
@@ -676,6 +689,13 @@ async function loadScheduleData() {
 async function loadLotPhases() {
   const data = await sbCall('getAllLotPhases', {});
   lotPhases = data || {};
+}
+
+async function loadStaleTasks() {
+  const data = await sbCall('getStaleCriticalTasks', { grace_days: 3 });
+  staleTasks = data || [];
+  staleByLot = {};
+  staleTasks.forEach(t => { (staleByLot[t.lot_id] = staleByLot[t.lot_id] || []).push(t); });
 }
 
 async function loadBuilders() {
@@ -999,6 +1019,7 @@ function renderLotsTable() {
       <td>${closeBadgeHtml(lot)}</td>
       <td>${updBadge}</td>
       <td>${flagCell}</td>
+      <td>${staleCell(lot)}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="openEditLotModal('${id}')">Edit</button>
         <button class="btn btn-sm" onclick="openDeleteLotModal('${id}','${num}')"
@@ -1010,10 +1031,31 @@ function renderLotsTable() {
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
-      <th>Start</th><th>Planned Completion</th><th>Close</th><th>Activity</th><th>Flags</th><th></th>
+      <th>Start</th><th>Planned Completion</th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+// ── STALE CRITICAL TASKS ──
+function staleCell(lot){
+  const s = staleByLot[lot.id];
+  if(!s || !s.length) return '<span style=\"color:#e5e7eb\">—</span>';
+  return '<button class=\"flag-btn\" style=\"background:#fef2f2;color:#b91c1c;border:1px solid #fecaca\" '
+    +'onclick=\"openStaleModal(\''+lot.id+'\')\" title=\"'+s.length+' stale critical task(s)\">\u23f0 '+s.length+'</button>';
+}
+function openStaleModal(lotId){
+  const lot = scheduleLots.find(l=>l.id===lotId);
+  const s = staleByLot[lotId] || [];
+  document.getElementById('stale-modal-lot-label').textContent = lot?(lot.community||'')+' '+(lot.lot_number||''):'';
+  document.getElementById('stale-modal-list').innerHTML = s.length
+    ? s.map(t =>
+        '<div class=\"flag-item\">'
+        +'<div>\u23f0 <strong>#'+t.bt_num+'</strong> '+(t.task_name||'')+'</div>'
+        +'<div class=\"flag-meta\">'+t.days_overdue+' working day(s) overdue \u00b7 was due '+t.expected_done+' \u00b7 became ready '+t.eligible_date+'</div>'
+        +'</div>').join('')
+    : '<p style=\"color:var(--muted);text-align:center;padding:20px\">None</p>';
+  document.getElementById('modal-lot-stale').classList.add('open');
 }
 
 // ── PHASE COLUMN + MODAL ──
