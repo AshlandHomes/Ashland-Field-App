@@ -5,8 +5,11 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
+const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
 async function supabaseRequest(method, path, body) {
-  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+  const _m = path.match(/^([a-zA-Z0-9_]+)(.*)$/);
+  const _path = _m ? (TABLE_PREFIX + _m[1] + _m[2]) : path;
+  const url = `${SUPABASE_URL}/rest/v1/${_path}`;
   const headers = {
     'Content-Type': 'application/json',
     'apikey': SUPABASE_KEY,
