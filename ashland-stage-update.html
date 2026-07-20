@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Ashland Field</title>
+<title>Ashland Field (DEV)</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -126,9 +126,53 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .arc-banner{border-radius:10px;padding:11px 14px;margin-bottom:12px;text-align:center;font-weight:700;font-size:13px;letter-spacing:.04em}
 .arc-banner.closed{background:#f3f4f6;border:2px solid var(--grey);color:var(--grey)}
 .arc-banner.done{background:#f0fdf4;border:1px solid #86efac;color:var(--green)}
+
+/* ===== BULK PUSH ===== */
+.bp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:flex-end;justify-content:center}
+.bp-modal{background:#fff;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
+@media(min-width:600px){.bp-overlay{align-items:center}.bp-modal{border-radius:16px}}
+.bp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.bp-title{font-weight:700;font-size:16px;color:#2c3e50;line-height:1.25}
+.bp-x{background:none;border:none;font-size:20px;color:#999;cursor:pointer;padding:0 4px}
+.bp-subtitle{font-size:12px;color:#7f8c8d;margin-bottom:14px}
+.bp-section-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#95a5a6;margin:12px 0 6px}
+.bp-select-row{display:flex;gap:8px;margin-bottom:8px}
+.bp-selall{background:#ecf0f1;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;color:#34495e}
+.bp-lots{display:flex;flex-direction:column;gap:6px}
+.bp-lot{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid #e4e8eb;border-radius:9px;cursor:pointer}
+.bp-lot input{width:18px;height:18px;flex-shrink:0}
+.bp-lotnum{font-weight:600;color:#2c3e50}
+.bp-lotstage{margin-left:auto;font-size:12px;color:#95a5a6}
+.bp-note-wrap{margin-top:14px;border-top:1px solid #eee;padding-top:12px}
+.bp-note-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:#34495e;cursor:pointer}
+.bp-note-toggle input{width:16px;height:16px}
+#bp-note-fields textarea{width:100%;margin-top:8px;min-height:64px;border:1px solid #dfe4e7;border-radius:8px;padding:8px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
+.bp-flags{display:flex;gap:6px;margin-top:8px}
+.bp-flag{border:1px solid #dfe4e7;background:#fff;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
+.bp-flag.on{border-color:#3498db;background:#eaf4fb;font-weight:600}
+.bp-foot{display:flex;gap:10px;margin-top:18px}
+.bp-cancel{flex:1;background:#ecf0f1;border:none;border-radius:9px;padding:13px;font-size:14px;font-weight:600;color:#7f8c8d;cursor:pointer}
+.bp-next,.bp-apply{flex:2;background:#00A9D1;border:none;border-radius:9px;padding:13px;font-size:14px;font-weight:700;color:#fff;cursor:pointer}
+.bp-apply{background:#27ae60}
+.bp-apply:disabled{opacity:.6;cursor:default}
+.bp-pv{background:#f8fafb;border:1px solid #e4e8eb;border-radius:9px;padding:12px;margin:8px 0}
+.bp-pv-line{font-size:13px;color:#34495e;margin:3px 0}
+.bp-pv-warn{font-size:12px;color:#c0392b;margin-top:8px;line-height:1.35}
+.bp-pv-lots{font-size:13px;color:#2c3e50;font-weight:600;line-height:1.5}
+/* task-row push button — matches .ab action buttons */
+.ab.push{background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5}
+/* whole-lot push button in schedule header */
+.bp-lotbtn{display:inline-block;margin-left:8px;background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:middle}
+/* progress */
+.bp-progbar{height:12px;background:#ecf0f1;border-radius:7px;overflow:hidden;margin:6px 0}
+.bp-progfill{height:100%;background:#27ae60;border-radius:7px;transition:width .25s ease}
+.bp-prog-detail{font-size:12px;color:#7f8c8d;min-height:16px;margin-top:4px}
+.bp-prog-warn{font-size:12px;color:#95a5a6;margin-top:12px;text-align:center}
+
 </style>
 </head>
 <body>
+<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠</div><div style="height:30px"></div>
 
 <!-- Date picker modal -->
 <div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
@@ -157,7 +201,8 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
         <button class="flagbtn" data-f="red" onclick="setNoteFlag('red')" style="flex:1">🔴 Mgmt</button>
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:16px">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="note-multi" style="width:16px;height:16px"> Also post this note to other lots</label>
+    <div style="display:flex;gap:8px;margin-top:12px">
       <button onclick="closeNote()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:12px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Done</button>
       <button onclick="addNote()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:12px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Add Note</button>
     </div>
@@ -556,6 +601,7 @@ function renderSchedule(){
     +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
     +'</div><div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div></div>'
     +'<div class="sub">'+(st.held?'⚡ Held at 5.9 — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(projEndDate)+'</div></div>';
+  h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button></div>';
 
   // ── Stat cards (Items 5+6) ──
   const hdCls=healthDelta>0?'ahead':(healthDelta<0?'behind':'');
@@ -634,7 +680,7 @@ function renderTasks(){
         acts='<button class="ab start" data-a="start" data-n="'+t.num+'">Start</button>';
       }
       acts+='<button class="ab conf'+(a.vendor_confirmed?' confirmed':'')+'" data-a="conf" data-n="'+t.num+'">'+(a.vendor_confirmed?'✓ Conf':'Confirm')+'</button>';
-      acts+='<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button>';
+      acts+='<button class="ab note" data-a="note" data-n="'+t.num+'">✎ Note</button>';acts+='<button class="ab push" data-a="push" data-n="'+t.num+'">⧉ Push</button>';
       if(canEdit){acts+='<button class="ab edit" data-a="edit" data-n="'+t.num+'">⚙ Edit</button>';}
       const tNotes=notesForTask(t.num);
       const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
@@ -662,6 +708,7 @@ function renderTasks(){
       else if(a==='note')openNote(n);
       else if(a==='edit')openEditTask(n);
       else if(a==='conf')toggleConfirm(n);
+      else if(a==='push')openBulkPushTask(n);
     };
   });
 }
@@ -886,6 +933,7 @@ function renderThread(){
       +'<div style="font-size:14px;white-space:pre-wrap">'+escapeHtml(nt.note)+'</div>'
       +'<div style="display:flex;gap:6px;margin-top:8px">'
       +'<button onclick="cycleNoteFlag(\''+nt.id+'\')" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer">Flag: '+(nt.flag==='none'?'none':nt.flag)+' ⟳</button>'
+      +'<button onclick="_bpPushNoteFlow('+nt.bt_num+',this.getAttribute(\'data-n\'),\''+nt.flag+'\')" data-n="'+escapeHtml(nt.note)+'" style="font-family:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid #d3e6f5;background:#eaf4fb;color:#2980b9;cursor:pointer">⧉ Push</button>'
       +'</div></div>';
   }).join('');
 }
@@ -912,8 +960,13 @@ async function addNote(){
   const row=Array.isArray(res)?res[0]:res;
   if(row&&row.id){lotNotes.push(row);}
   else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  const multi=document.getElementById('note-multi');
+  const wantMulti=multi&&multi.checked;
+  const savedText=note, savedFlag=(row&&row.flag)||noteFlag, savedBt=t.num;
   document.getElementById('note-text').value='';noteFlag='none';renderFlagBtns();
+  if(multi)multi.checked=false;
   renderThread();
+  if(wantMulti){ _bpPushNoteFlow(savedBt, savedText, savedFlag); }
 }
 
 async function cycleNoteFlag(id){
@@ -924,6 +977,316 @@ async function cycleNoteFlag(id){
 }
 
 loadBuilders();
+
+// ===== BULK PUSH MODULE =====
+// ---- NOTE PUSH: send a single note to same-subdivision active lots ----
+let _bpNote=null; // {bt_num, text, flag}
+function _bpPushNoteFlow(bt_num, text, flag){
+  if(!curLot){alert('Open a lot first.');return;}
+  const cand=_bpCandidateLots();
+  if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
+  _bpNote={bt_num:bt_num, text:text, flag:flag||'none'};
+  _bpTargets=cand; _bpSelected={};
+  _bpRenderNotePicker();
+}
+function _bpRenderNotePicker(){
+  _bpClose();
+  const subName=SUB_NAMES[curLot.community]||curLot.community;
+  const rows=_bpTargets.map(l=>{
+    const checked=_bpSelected[l.id]?'checked':'';
+    return '<label class="bp-lot"><input type="checkbox" data-id="'+l.id+'" '+checked+'><span class="bp-lotnum">'+l.lot_number+'</span><span class="bp-lotstage">stage '+(l.reported_stage||'—')+'</span></label>';
+  }).join('');
+  const preview=_bpNote.text.length>120?_bpNote.text.slice(0,120)+'…':_bpNote.text;
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Push note to other lots</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-pv"><div class="bp-pv-line"><b>Task #'+_bpNote.bt_num+'</b> · '+(_bpNote.flag==='none'?'no flag':_bpNote.flag)+'</div><div class="bp-pv-line" style="white-space:pre-wrap">"'+preview.replace(/</g,'&lt;')+'"</div></div>'
+    +'<div class="bp-section-label">Post to these lots in '+subName+':</div>'
+    +'<div class="bp-select-row"><button type="button" class="bp-selall" onclick="_bpSelectAll(true)">Select all</button><button type="button" class="bp-selall" onclick="_bpSelectAll(false)">Clear</button></div>'
+    +'<div class="bp-lots">'+rows+'</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">Cancel</button><button class="bp-apply" onclick="_bpApplyNote()">Post to selected</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.querySelectorAll('#bp-overlay .bp-lot input').forEach(cb=>{cb.onchange=()=>{_bpSelected[cb.dataset.id]=cb.checked;};});
+}
+async function _bpApplyNote(){
+  const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
+  if(!chosen.length){alert('Select at least one lot.');return;}
+  _bpProgressScreen(chosen.length);
+  const doneLots=[],failedLots=[]; let i=0;
+  for(const lot of chosen){
+    i++; _bpProgress(i,chosen.length,lot.lot_number,0,1);
+    try{
+      const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
+      const rows=(data&&data.tasks)||[];
+      const tgt=rows.find(r=>r.bt_num===_bpNote.bt_num);
+      if(!tgt){failedLots.push(lot.lot_number+' (no task #'+_bpNote.bt_num+')');continue;}
+      await sbCall('addTaskNote',{lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpNote.bt_num,note:_bpNote.text+'  (pushed from '+curLot.lot_number+')',flag:_bpNote.flag,author:currentBuilder});
+      doneLots.push(lot.lot_number);
+    }catch(e){failedLots.push(lot.lot_number);}
+  }
+  _bpClose();
+  let msg='Note posted to '+doneLots.length+' of '+chosen.length+' lots.';
+  if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
+  if(failedLots.length) msg+='\n\n✗ Not posted: '+failedLots.join(', ');
+  alert(msg);
+}
+
+// ============================================================
+// BULK PUSH — push a task's status (+ optional note) from the current lot
+// to other ACTIVE lots in the SAME subdivision. Built for the real
+// "Ashland Field" scheduling app: reuses sbCall / updateScheduleLotTask /
+// addTaskNote. No backend changes. Writes go wherever the app already writes
+// (dev_ tables on the dev site, live tables on live).
+//
+// Modes:
+//   Single task push  -> openBulkPushTask(btNum)
+//   Whole-lot push    -> openBulkPushLot()
+// Both show a target picker, then a preview, then apply. No undo (v1).
+// ============================================================
+
+let _bpMode = 'task';      // 'task' | 'lot'
+let _bpBtNum = null;       // for single-task mode
+let _bpTargets = [];       // [{id, lot_number, community}]
+let _bpSelected = {};      // {lotId: true}
+let _bpIncludeNote = false;
+let _bpNoteText = '';
+let _bpNoteFlag = 'none';
+
+// candidate lots: same subdivision as curLot, active (not closed), not curLot
+function _bpCandidateLots(){
+  if(!curLot) return [];
+  const sub = curLot.community;
+  return (myLots||[]).filter(l =>
+    l.id !== curLot.id &&
+    l.community === sub &&
+    l.status !== 'closed'
+  ).sort((a,b)=>(a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true}));
+}
+
+// ---- entry points ----
+function openBulkPushTask(btNum){
+  if(!curLot){alert('Open a lot first.');return;}
+  const cand=_bpCandidateLots();
+  if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
+  _bpMode='task'; _bpBtNum=btNum; _bpTargets=cand; _bpSelected={};
+  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none';
+  _bpRenderPicker();
+}
+function openBulkPushLot(){
+  if(!curLot){alert('Open a lot first.');return;}
+  const cand=_bpCandidateLots();
+  if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
+  _bpMode='lot'; _bpBtNum=null; _bpTargets=cand; _bpSelected={};
+  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none';
+  _bpRenderPicker();
+}
+
+function _bpClose(){const o=document.getElementById('bp-overlay');if(o)o.remove();}
+
+// ---- step 1: target picker ----
+function _bpRenderPicker(){
+  _bpClose();
+  const subName=SUB_NAMES[curLot.community]||curLot.community;
+  let title, sub;
+  if(_bpMode==='task'){
+    const t=bn[_bpBtNum];
+    const a=act[_bpBtNum]||{};
+    const statusTxt=a.finished?'Finished':(a.started?'Started':'Not started');
+    title='Push Task #'+_bpBtNum+' — '+(t?t.name:'');
+    sub='Status: '+statusTxt+(a.start?'  ·  start '+fmt(new Date(a.start+'T00:00:00')):'')+(a.finish?'  ·  finish '+fmt(new Date(a.finish+'T00:00:00')):'');
+  } else {
+    const done=TASKS.filter(t=>act[t.num]&&act[t.num].finished).length;
+    const started=TASKS.filter(t=>act[t.num]&&act[t.num].started&&!act[t.num].finished).length;
+    title='Push Entire Lot Status — '+curLot.lot_number;
+    sub=done+' finished, '+started+' started across '+TASKS.length+' tasks';
+  }
+  let rows=_bpTargets.map(l=>{
+    const checked=_bpSelected[l.id]?'checked':'';
+    return '<label class="bp-lot"><input type="checkbox" data-id="'+l.id+'" '+checked+'><span class="bp-lotnum">'+l.lot_number+'</span><span class="bp-lotstage">stage '+(l.reported_stage||'—')+'</span></label>';
+  }).join('');
+
+  const noteBlock = _bpMode==='task' ? (
+    '<div class="bp-note-wrap">'
+    +'<label class="bp-note-toggle"><input type="checkbox" id="bp-note-on" '+(_bpIncludeNote?'checked':'')+'> Also push a note to these lots</label>'
+    +'<div id="bp-note-fields" style="display:'+(_bpIncludeNote?'block':'none')+'">'
+    +'<textarea id="bp-note-text" placeholder="Note text (applied to task #'+_bpBtNum+' on each selected lot)">'+(_bpNoteText||'')+'</textarea>'
+    +'<div class="bp-flags">'
+    +'<button type="button" class="bp-flag'+(_bpNoteFlag==='none'?' on':'')+'" data-flag="none">No flag</button>'
+    +'<button type="button" class="bp-flag'+(_bpNoteFlag==='yellow'?' on':'')+'" data-flag="yellow">🟡 Yellow</button>'
+    +'<button type="button" class="bp-flag'+(_bpNoteFlag==='red'?' on':'')+'" data-flag="red">🔴 Red</button>'
+    +'</div></div></div>'
+  ) : '';
+
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">'+title+'</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-subtitle">'+sub+'</div>'
+    +'<div class="bp-section-label">Push to these lots in '+subName+':</div>'
+    +'<div class="bp-select-row"><button type="button" class="bp-selall" onclick="_bpSelectAll(true)">Select all</button><button type="button" class="bp-selall" onclick="_bpSelectAll(false)">Clear</button></div>'
+    +'<div class="bp-lots">'+rows+'</div>'
+    +noteBlock
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">Cancel</button><button class="bp-next" onclick="_bpToPreview()">Preview →</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+
+  // wire checkboxes
+  document.querySelectorAll('#bp-overlay .bp-lot input').forEach(cb=>{
+    cb.onchange=()=>{ _bpSelected[cb.dataset.id]=cb.checked; };
+  });
+  const noteOn=document.getElementById('bp-note-on');
+  if(noteOn){
+    noteOn.onchange=()=>{ _bpIncludeNote=noteOn.checked; document.getElementById('bp-note-fields').style.display=_bpIncludeNote?'block':'none'; };
+  }
+  const nt=document.getElementById('bp-note-text');
+  if(nt){ nt.oninput=()=>{_bpNoteText=nt.value;}; }
+  document.querySelectorAll('#bp-overlay .bp-flag').forEach(b=>{
+    b.onclick=()=>{ _bpNoteFlag=b.dataset.flag; document.querySelectorAll('#bp-overlay .bp-flag').forEach(x=>x.classList.remove('on')); b.classList.add('on'); };
+  });
+}
+
+function _bpSelectAll(v){
+  _bpTargets.forEach(l=>_bpSelected[l.id]=v);
+  document.querySelectorAll('#bp-overlay .bp-lot input').forEach(cb=>cb.checked=v);
+}
+
+// ---- step 2: preview ----
+function _bpToPreview(){
+  const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
+  if(!chosen.length){alert('Select at least one lot.');return;}
+  if(_bpIncludeNote && _bpMode==='task' && !(_bpNoteText||'').trim()){alert('You turned on note push but the note is empty.');return;}
+
+  let what;
+  if(_bpMode==='task'){
+    const t=bn[_bpBtNum]; const a=act[_bpBtNum]||{};
+    const statusTxt=a.finished?'FINISHED':(a.started?'STARTED':'NOT STARTED');
+    what='<div class="bp-pv-line"><b>Task #'+_bpBtNum+'</b> — '+(t?t.name:'')+'</div>'
+      +'<div class="bp-pv-line">Set to <b>'+statusTxt+'</b>'
+      +(a.start?' · start '+fmt(new Date(a.start+'T00:00:00')):'')
+      +(a.finish?' · finish '+fmt(new Date(a.finish+'T00:00:00')):'')+'</div>'
+      +(_bpIncludeNote?'<div class="bp-pv-line">+ note ('+(_bpNoteFlag==='none'?'no flag':_bpNoteFlag)+'): "'+_bpNoteText.replace(/</g,'&lt;')+'"</div>':'');
+  } else {
+    const done=TASKS.filter(t=>act[t.num]&&act[t.num].finished).length;
+    const started=TASKS.filter(t=>act[t.num]&&act[t.num].started&&!act[t.num].finished).length;
+    what='<div class="bp-pv-line">Copy <b>all task statuses</b> from '+curLot.lot_number+'</div>'
+      +'<div class="bp-pv-line">'+done+' finished · '+started+' started · with their actual dates</div>'
+      +'<div class="bp-pv-warn">⚠ This overwrites task status on the target lots. Tasks further along on a target may be pulled back to match this lot.</div>';
+  }
+  const lotList=chosen.map(l=>l.lot_number).join(', ');
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Confirm push</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-pv">'+what+'</div>'
+    +'<div class="bp-section-label">To '+chosen.length+' lot'+(chosen.length===1?'':'s')+':</div>'
+    +'<div class="bp-pv-lots">'+lotList+'</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button><button class="bp-apply" onclick="_bpApply()">Apply to '+chosen.length+' lot'+(chosen.length===1?'':'s')+'</button></div>'
+    +'</div></div>';
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+// ---- step 3: apply ----
+function _bpProgressScreen(total){
+  _bpClose();
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Applying push…</div></div>'
+    +'<div class="bp-subtitle" id="bp-prog-label">Starting…</div>'
+    +'<div class="bp-progbar"><div class="bp-progfill" id="bp-progfill" style="width:0%"></div></div>'
+    +'<div class="bp-prog-detail" id="bp-prog-detail"></div>'
+    +'<div class="bp-prog-warn">Please keep this screen open until it finishes.</div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function _bpProgress(lotIdx, lotTotal, lotLabel, taskDone, taskTotal){
+  const pct=Math.round((lotIdx/lotTotal)*100);
+  const lbl=document.getElementById('bp-prog-label');
+  const fill=document.getElementById('bp-progfill');
+  const det=document.getElementById('bp-prog-detail');
+  if(lbl) lbl.textContent='Lot '+lotIdx+' of '+lotTotal+'  ('+lotLabel+')';
+  if(fill) fill.style.width=pct+'%';
+  if(det) det.textContent=(taskTotal>1)?('task '+taskDone+' / '+taskTotal):'';
+}
+
+async function _bpApply(){
+  const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
+  _bpProgressScreen(chosen.length);
+
+  let ok=0, fail=0; const errors=[];
+  const doneLots=[], failedLots=[];
+  let lotIdx=0;
+
+  for(const lot of chosen){
+    lotIdx++;
+    let lotHadError=false;
+    _bpProgress(lotIdx, chosen.length, lot.lot_number, 0, 1);
+    try{
+      // fetch this target lot's own task rows (its own task_ids per bt_num)
+      const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
+      const rows=(data&&data.tasks)||[];
+      const gates=(data&&data.gates)||[];
+      const byNum={}; rows.forEach(r=>byNum[r.bt_num]=r);
+
+      // local act-map for this TARGET lot, starting from its current state,
+      // then overwritten by whatever we push. Used to compute the target's stage.
+      const tgtAct={};
+      rows.forEach(r=>{ tgtAct[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish}; });
+
+      // collect the writes for this lot, then send them in ONE batch call
+      const batch=[]; let noteToPush=null;
+      const collect=(btNum)=>{
+        const src=act[btNum]; if(!src) return;
+        const tgt=byNum[btNum];
+        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); lotHadError=true; return; }
+        const status=src.finished?'finished':(src.started?'started':'not_started');
+        batch.push({task_id:tgt.id,status:status,actual_start:src.start||null,actual_finish:src.finish||null});
+        tgtAct[btNum]={started:!!src.started||!!src.finished,finished:!!src.finished,start:src.start||null,finish:src.finish||null};
+      };
+
+      if(_bpMode==='task'){
+        collect(_bpBtNum);
+        if(_bpIncludeNote && (_bpNoteText||'').trim()){
+          const tgt=byNum[_bpBtNum];
+          if(tgt){ noteToPush={lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpBtNum,note:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')',flag:_bpNoteFlag,author:currentBuilder}; }
+        }
+      } else {
+        const pushable=TASKS.filter(t=>act[t.num]);
+        pushable.forEach(t=>collect(t.num));
+      }
+
+      // ---- compute this target lot's stage from its NEW task set (client-side) ----
+      let sm=[];
+      if(lot.template_id){ const r=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); sm=(r&&r.stages)||[]; }
+      let trueStage=null;
+      sm.filter(s=>!s.is_manual&&s.triggers&&s.triggers.length&&s.triggers.every(bt=>tgtAct[bt]&&tgtAct[bt].finished))
+        .forEach(s=>{ if(!trueStage||s.order>trueStage.order) trueStage=s; });
+      const gatesOpen=gates.some(g=>!g.confirmed);
+      let reportedCode, trueCode=trueStage?trueStage.code:null;
+      if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){ reportedCode='5.9'; }
+      else { reportedCode=trueStage?trueStage.code:null; }
+
+      // ONE round-trip: all task writes + the lot stage write
+      _bpProgress(lotIdx, chosen.length, lot.lot_number, batch.length, batch.length);
+      const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
+      if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
+      if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
+      if(lotHadError) failedLots.push(lot.lot_number); else doneLots.push(lot.lot_number);
+    }catch(e){
+      fail++; lotHadError=true; failedLots.push(lot.lot_number);
+      errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
+    }
+  }
+
+  _bpClose();
+  let msg=doneLots.length+' of '+chosen.length+' lots updated.';
+  if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
+  if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
+  alert(msg);
+
+  // refresh current view so the user sees a clean state
+  if(typeof loadMyLots==='function'){ await loadMyLots(); }
+}
+
 </script>
 </body>
 </html>
