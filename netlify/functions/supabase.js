@@ -321,6 +321,101 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
+      case 'getStaleCriticalTasks': {
+        // Flags critical tasks that became "next in line" (all predecessors finished)
+        // but weren't completed within duration + GRACE working days.
+        // Eligible date = max(actual_finish of predecessors). Ticker starts then.
+        // Computed live from existing data — no stamping, works retroactively.
+        const GRACE = (payload && payload.grace_days != null) ? payload.grace_days : 3;
+        const addWD = (start, off) => { // off working days after start (off=0 => same day)
+          const d = new Date(start); d.setHours(0,0,0,0); let c = 0;
+          while (c < off) { d.setDate(d.getDate()+1); const w=d.getDay(); if(w!==0&&w!==6) c++; }
+          return d;
+        };
+        const today = new Date(); today.setHours(0,0,0,0);
+
+        const lots = await supabaseRequest('GET', 'sched_lots?select=id,lot_number,community,builder_name,status&status=eq.active');
+        const lotRows = lots.data || [];
+        const ids = lotRows.map(l=>l.id);
+        const lotById = {}; lotRows.forEach(l=>lotById[l.id]=l);
+        const stale = [];
+        if (ids.length) {
+          const tt = await supabaseRequest('GET',
+            `sched_lot_tasks?lot_id=in.(${ids.join(',')})&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical`);
+          const rows = tt.data || [];
+          const byLot = {};
+          rows.forEach(r=>{ (byLot[r.lot_id]=byLot[r.lot_id]||{})[r.bt_num]=r; });
+          rows.forEach(r=>{
+            if (!r.is_critical) return;
+            if (r.status === 'finished') return;
+            const lotTasks = byLot[r.lot_id];
+            const preds = r.predecessors || [];
+            // eligible only if ALL predecessors are finished
+            let eligible = null, allDone = true;
+            if (preds.length === 0) { eligible = null; } // no preds: can't anchor a start; skip
+            for (const p of preds) {
+              const pt = lotTasks[p];
+              if (!pt || pt.status !== 'finished' || !pt.actual_finish) { allDone = false; break; }
+              const f = new Date(pt.actual_finish); if (!eligible || f > eligible) eligible = f;
+            }
+            if (!allDone || !eligible) return; // not yet next-in-line, or no anchor date
+            const dur = r.duration || 1;
+            const expectedDone = addWD(eligible, dur + GRACE);
+            if (today > expectedDone) {
+              const L = lotById[r.lot_id] || {};
+              // working days overdue
+              let od=0, cur=new Date(expectedDone);
+              while (cur < today) { cur.setDate(cur.getDate()+1); const w=cur.getDay(); if(w!==0&&w!==6) od++; }
+              stale.push({
+                lot_id: r.lot_id, lot_number: L.lot_number, community: L.community, builder_name: L.builder_name,
+                bt_num: r.bt_num, task_name: r.name, status: r.status||'not_started',
+                eligible_date: eligible.toISOString().slice(0,10),
+                expected_done: expectedDone.toISOString().slice(0,10),
+                days_overdue: od
+              });
+            }
+          });
+        }
+        stale.sort((a,b)=> b.days_overdue - a.days_overdue);
+        return { statusCode: 200, body: JSON.stringify(stale) };
+      }
+
+      case 'getAllLotPhases': {
+        // For every active lot: compute active phase (phase of earliest unfinished task)
+        // and a per-phase task snapshot. One call, computed server-side.
+        // Returns { [lot_id]: { activePhase, activePhaseName, phases: { [phase_order]: {name, tasks:[{num,name,status}]} } } }
+        const lots = await supabaseRequest('GET', 'sched_lots?select=id,status&status=eq.active');
+        const lotRows = lots.data || [];
+        const ids = lotRows.map(l => l.id);
+        const out = {};
+        if (ids.length) {
+          const inList = ids.join(',');
+          const tt = await supabaseRequest('GET',
+            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order&order=task_order`);
+          const rows = tt.data || [];
+          const byLot = {};
+          rows.forEach(r => { (byLot[r.lot_id] = byLot[r.lot_id] || []).push(r); });
+          Object.keys(byLot).forEach(lotId => {
+            const ts = byLot[lotId];
+            // active phase = phase of first task (task_order) whose status !== 'finished'
+            let activePhase = null, activePhaseName = null;
+            for (const r of ts) {
+              if (r.status !== 'finished') { activePhase = r.phase_order; activePhaseName = r.phase_name; break; }
+            }
+            if (activePhase === null && ts.length) { // all finished — use last phase
+              const last = ts[ts.length - 1]; activePhase = last.phase_order; activePhaseName = last.phase_name;
+            }
+            const phases = {};
+            ts.forEach(r => {
+              const p = r.phase_order;
+              (phases[p] = phases[p] || { name: r.phase_name, tasks: [] }).tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started' });
+            });
+            out[lotId] = { activePhase, activePhaseName, phases };
+          });
+        }
+        return { statusCode: 200, body: JSON.stringify(out) };
+      }
+
       case 'getScheduleLotTasks': {
         const { lot_id } = payload;
         if (!lot_id) {
@@ -329,6 +424,37 @@ exports.handler = async function(event) {
         const t = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lot_id}&select=*&order=task_order`);
         const g = await supabaseRequest('GET', `sched_lot_gate_state?lot_id=eq.${lot_id}&select=*`);
         return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates: g.data || [] }) };
+      }
+
+      case 'bulkUpdateLotTasks': {
+        // One round-trip from the browser; N task writes done server-side.
+        // payload.updates = [{task_id, status?, actual_start?, actual_finish?, vendor_confirmed?, est_start_date?}, ...]
+        // payload.lot_id (optional) + payload.reported_stage/true_stage (optional) => one lot stage write at the end.
+        const { updates, lot_id, reported_stage, true_stage } = payload;
+        if (!Array.isArray(updates)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'updates array is required' }) };
+        }
+        const stamp = new Date().toISOString();
+        let done = 0; const failed = [];
+        for (const u of updates) {
+          if (!u || !u.task_id) { failed.push({ task_id: u && u.task_id, error: 'missing task_id' }); continue; }
+          const upd = { updated_at: stamp };
+          if (u.status !== undefined) upd.status = u.status;
+          if (u.actual_start !== undefined) upd.actual_start = u.actual_start;
+          if (u.actual_finish !== undefined) upd.actual_finish = u.actual_finish;
+          if (u.vendor_confirmed !== undefined) upd.vendor_confirmed = u.vendor_confirmed;
+          if (u.est_start_date !== undefined) upd.est_start_date = u.est_start_date;
+          const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${u.task_id}`, upd);
+          if (r.status && r.status >= 400) failed.push({ task_id: u.task_id, error: r.error }); else done++;
+        }
+        // one lot-level write: stage (if provided) + touch timestamp
+        if (lot_id) {
+          const lotUpd = { last_task_update: stamp };
+          if (reported_stage !== undefined) lotUpd.reported_stage = reported_stage;
+          if (true_stage !== undefined) lotUpd.true_stage = true_stage;
+          await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, lotUpd);
+        }
+        return { statusCode: 200, body: JSON.stringify({ done, failed }) };
       }
 
       case 'updateScheduleLotTask': {
