@@ -18,6 +18,16 @@ async function supabaseRequest(method, path, body) {
   if (method === 'POST' || method === 'PATCH') {
     headers['Prefer'] = 'return=representation';
   }
+  // PostgREST caps results at 1000 rows by default, and that server cap overrides
+  // any &limit= in the URL. A Range header DOES lift the cap. If a GET asks for a
+  // large limit, translate it into a Range so big result sets aren't truncated.
+  if (method === 'GET') {
+    const lm = /[?&]limit=(\d+)/.exec(path);
+    if (lm && parseInt(lm[1]) > 1000) {
+      headers['Range-Unit'] = 'items';
+      headers['Range'] = '0-' + (parseInt(lm[1]) - 1);
+    }
+  }
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
