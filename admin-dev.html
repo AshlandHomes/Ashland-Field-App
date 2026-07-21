@@ -285,6 +285,17 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-lot-stage">
+  <div class="modal">
+    <h2>📊 Stage Legend</h2>
+    <div class="modal-sub" id="stage-modal-lot-label"></div>
+    <div id="stage-modal-body"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-lot-stage')">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-lot-phase">
   <div class="modal">
     <h2>📍 Phase of Construction</h2>
@@ -891,8 +902,44 @@ function subBadge(community) {
 function stageCell(lot) {
   if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
   const held = lot.reported_stage==='5.9' && lot.true_stage && lot.true_stage!=='5.9';
-  return '<span class="badge" style="background:#e0f2fe;color:#0369a1">' + lot.reported_stage + '</span>'
+  return '<span class="badge" style="background:#e0f2fe;color:#0369a1;cursor:pointer" onclick="openStageModal(\''+lot.id+'\')" title="View stage legend">' + lot.reported_stage + '</span>'
     + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + lot.true_stage + '</div>' : '');
+}
+
+async function openStageModal(lotId){
+  const lot = scheduleLots.find(l=>l.id===lotId);
+  if(!lot){ return; }
+  document.getElementById('stage-modal-lot-label').textContent = (lot.community||'')+' '+(lot.lot_number||'');
+  const box = document.getElementById('stage-modal-body');
+  box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading…</p>';
+  document.getElementById('modal-lot-stage').classList.add('open');
+  let stages=[], gates=[];
+  if(lot.template_id){ const sm=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); stages=(sm&&sm.stages)||[]; }
+  const td=await sbCall('getScheduleLotTasks',{lot_id:lotId}); gates=(td&&td.gates)||[];
+  const rep = lot.reported_stage, tru = lot.true_stage;
+  const gatesOpen = gates.some(g=>!g.confirmed);
+  let gateHtml = '';
+  if(gates.length){
+    gateHtml = '<div style="background:'+(gatesOpen?'#fffbeb':'#f0fdf4')+';border:1px solid '+(gatesOpen?'#fde68a':'#bbf7d0')+';border-radius:8px;padding:10px;margin-bottom:12px">'
+      +'<div style="font-weight:700;margin-bottom:6px;color:'+(gatesOpen?'#b45309':'#15803d')+'">'+(gatesOpen?'⚡ Utility gates OPEN — reported stage capped at 5.9':'✓ All utility gates confirmed')+'</div>'
+      + gates.map(g=>'<span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 9px;border-radius:6px;font-size:12px;background:'+(g.confirmed?'#dcfce7':'#fee2e2')+';color:'+(g.confirmed?'#15803d':'#b91c1c')+'">'+(g.confirmed?'✓ ':'○ ')+g.gate_name+'</span>').join('')
+      +'</div>';
+  }
+  const sorted = stages.slice().sort((a,b)=>a.order-b.order);
+  const ladder = sorted.map(s=>{
+    const isRep = s.code===rep;
+    const isTrue = s.code===tru;
+    const bg = isRep ? '#0369a1' : (isTrue ? '#e0f2fe' : '#f8fafc');
+    const fg = isRep ? '#fff' : '#334155';
+    const tags = (isRep?' <span style="font-size:10px;background:#fff;color:#0369a1;padding:1px 5px;border-radius:3px">REPORTED</span>':'')
+               + (isTrue&&!isRep?' <span style="font-size:10px;background:#0369a1;color:#fff;padding:1px 5px;border-radius:3px">TRUE</span>':'');
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 11px;border-radius:6px;margin-bottom:3px;background:'+bg+';color:'+fg+';font-weight:'+(isRep?700:400)+'">'
+      +'<div><strong>'+s.code+'</strong> · '+s.label+tags+'</div>'
+      +(s.is_manual?'<span style="font-size:11px;opacity:.7">manual</span>':'')+'</div>';
+  }).join('');
+  box.innerHTML = gateHtml
+    + (tru&&tru!==rep ? '<div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚡ This lot is actually at stage '+tru+' but reports 5.9 because utility gates are open.</div>' : '')
+    + (ladder || '<p style="color:var(--muted);text-align:center;padding:20px">No stage map for this lot\'s template</p>');
 }
 
 function closeBadgeHtml(lot) {

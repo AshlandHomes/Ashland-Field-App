@@ -673,7 +673,7 @@ function renderTasks(){
     const doneCt=inPhase.filter(t=>act[t.num]&&act[t.num].finished).length;
     const caret=collapsed?'▸':'▾';
     const activeTag=(ph===activePhase)?'<span class="active-badge">active</span>':'';
-    h+='<div class="ph" data-ph="'+ph+'"><span>'+caret+' '+(phaseName[ph]||('Phase '+ph))+' '+activeTag+'</span><span class="pc">'+doneCt+'/'+inPhase.length+'</span></div>';
+    h+='<div class="ph" data-ph="'+ph+'"><span>'+caret+' Phase '+ph+' · '+(phaseName[ph]||('Phase '+ph))+' '+activeTag+'</span><span class="pc">'+doneCt+'/'+inPhase.length+'</span></div>';
     if(collapsed)return;
     inPhase.forEach(t=>{
       const a=act[t.num]||{};
