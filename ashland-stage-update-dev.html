@@ -652,8 +652,17 @@ function renderTasks(){
   TASKS.forEach(t=>{if(!seen[t.phase]){seen[t.phase]=true;phaseOrder.push(t.phase);}});
   phaseOrder.sort((a,b)=>a-b);
   const phaseName={};TASKS.forEach(t=>phaseName[t.phase]=t.phase_name);
-  let activePhase=null,earliest=Infinity;
-  TASKS.forEach(t=>{if(!(act[t.num]&&act[t.num].finished)&&t._projected_es<earliest){earliest=t._projected_es;activePhase=t.phase;}});
+  let activePhase=null;
+  // ACTIVE PHASE = furthest phase containing a started/finished CRITICAL task.
+  // Non-critical tasks (float) never drive the active phase — neither earliest nor latest.
+  TASKS.forEach(t=>{
+    const a=act[t.num];
+    if(t.is_crit && a && (a.started||a.finished)){
+      if(activePhase===null || t.phase>activePhase) activePhase=t.phase;
+    }
+  });
+  // fallback: no critical task started yet -> earliest phase present
+  if(activePhase===null && phaseOrder.length) activePhase=phaseOrder[0];
   if(!userToggledPhases){phaseOrder.forEach(ph=>{collapsedPhases[ph]=(ph!==activePhase);});}
   phaseOrder.forEach(ph=>{
     const inPhase=TASKS.filter(t=>t.phase===ph);

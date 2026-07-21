@@ -955,7 +955,9 @@ function populateFilters() {
 }
 
 // ── LOTS TABLE ──
-function renderLotsTable() {
+// SINGLE SOURCE OF TRUTH for lot filtering — table AND export both call this,
+// so the export always mirrors exactly what is on screen (all filters applied).
+function getFilteredLots() {
   const filterCom   = document.getElementById('filter-community').value;
   const filterBld   = document.getElementById('filter-builder').value;
   const filterClose = document.getElementById('filter-close').value;
@@ -986,6 +988,11 @@ function renderLotsTable() {
     if ((a.community||'')!==(b.community||'')) return (a.community||'').localeCompare(b.community||'');
     return (a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true});
   });
+  return list;
+}
+
+function renderLotsTable() {
+  const list = getFilteredLots();
 
   if (!list.length) {
     document.getElementById('lots-table-body').innerHTML = '<div class="empty-state"><div class="icon">🏗</div><p>No lots match your filters.</p></div>';
@@ -1062,25 +1069,51 @@ function openStaleModal(lotId){
 function phaseCell(lot){
   const p = lotPhases[lot.id];
   if(!p || p.activePhase==null) return '<span style=\"color:var(--muted)\">—</span>';
+  const behind = (p.behind&&p.behind.length) ? ' <span style=\"color:#b91c1c;font-weight:700\">⚠'+p.behind.length+'</span>' : '';
   return '<button class=\"badge\" style=\"background:#eef2ff;color:#4338ca;border:none;cursor:pointer;font-weight:700\" '
-    + 'onclick=\"openPhaseModal(\''+lot.id+'\')\" title=\"'+(p.activePhaseName||'')+'\">'+p.activePhase+'</button>';
+    + 'onclick=\"openPhaseModal(\''+lot.id+'\')\" title=\"'+(p.activePhaseName||'')+'\">'+p.activePhase+'</button>'+behind;
+}
+function _phDot(s){ return s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>'); }
+function _phLbl(s){ return s==='finished'?'Finished':(s==='started'?'Started':'Not started'); }
+function _phTaskRow(t){
+  const crit = t.is_critical ? '<span style=\"color:#4338ca\">◆</span> ' : '';
+  return '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px\">'
+    +'<div>'+_phDot(t.status)+' '+crit+'<strong>#'+t.num+'</strong> '+(t.name||'')+'</div>'
+    +'<div class=\"flag-meta\" style=\"white-space:nowrap\">'+_phLbl(t.status)+'</div></div>';
+}
+function togglePhaseSection(pid){
+  const el=document.getElementById('phsec-'+pid); const ar=document.getElementById('phar-'+pid);
+  if(!el)return; const open=el.style.display!=='none'; el.style.display=open?'none':'block'; if(ar)ar.textContent=open?'▸':'▾';
 }
 function openPhaseModal(lotId){
   const lot = scheduleLots.find(l=>l.id===lotId);
   const p = lotPhases[lotId];
   document.getElementById('phase-modal-lot-label').textContent =
     (lot?(lot.community||'')+' '+(lot.lot_number||''):'') + (p&&p.activePhaseName?' · Phase '+p.activePhase+': '+p.activePhaseName:'');
-  const ph = p && p.phases && p.phases[p.activePhase];
-  if(!ph){ document.getElementById('phase-modal-list').innerHTML='<p style=\"color:var(--muted);text-align:center;padding:20px\">No task data</p>'; }
-  else {
-    const dot = s => s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>');
-    const lbl = s => s==='finished'?'Finished':(s==='started'?'Started':'Not started');
-    document.getElementById('phase-modal-list').innerHTML = ph.tasks.map(t =>
-      '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px\">'
-      +'<div>'+dot(t.status)+' <strong>#'+t.num+'</strong> '+(t.name||'')+'</div>'
-      +'<div class=\"flag-meta\" style=\"white-space:nowrap\">'+lbl(t.status)+'</div></div>'
-    ).join('');
+  const box = document.getElementById('phase-modal-list');
+  if(!p || !p.phases){ box.innerHTML='<p style=\"color:var(--muted);text-align:center;padding:20px\">No task data</p>'; document.getElementById('modal-lot-phase').classList.add('open'); return; }
+  let html='';
+  if(p.behind && p.behind.length){
+    html += '<div style=\"background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;margin-bottom:12px\">'
+      +'<div style=\"color:#b91c1c;font-weight:700;margin-bottom:6px\">⚠ '+p.behind.length+' critical task'+(p.behind.length===1?'':'s')+' incomplete in earlier phases</div>'
+      + p.behind.map(t=>_phTaskRow({num:t.num,name:'P'+t.phase_order+' · '+t.name,status:t.status,is_critical:true})).join('')
+      +'</div>';
   }
+  const orders = Object.keys(p.phases).map(Number).sort((a,b)=>a-b);
+  orders.forEach(po=>{
+    const ph=p.phases[po];
+    const isActive = po===p.activePhase;
+    const open = isActive;
+    const done = ph.tasks.filter(t=>t.status==='finished').length;
+    html += '<div style=\"border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden\">'
+      +'<div onclick=\"togglePhaseSection('+po+')\" style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;background:'+(isActive?'#eef2ff':'#f8fafc')+'\">'
+      +'<div style=\"font-weight:'+(isActive?700:600)+';color:'+(isActive?'#4338ca':'#334155')+'\"><span id=\"phar-'+po+'\">'+(open?'▾':'▸')+'</span> Phase '+po+' · '+ph.name+(isActive?' <span style=\"font-size:11px;background:#4338ca;color:#fff;padding:1px 6px;border-radius:4px\">ACTIVE</span>':'')+'</div>'
+      +'<div class=\"flag-meta\">'+done+'/'+ph.tasks.length+'</div></div>'
+      +'<div id=\"phsec-'+po+'\" style=\"display:'+(open?'block':'none')+';padding:6px 8px\">'
+      + ph.tasks.map(_phTaskRow).join('')
+      +'</div></div>';
+  });
+  box.innerHTML = html;
   document.getElementById('modal-lot-phase').classList.add('open');
 }
 
@@ -1669,22 +1702,27 @@ function showSection(name, tabEl) {
 // ── EXPORT ──
 function exportCSV() {
   const today = new Date().toISOString().split('T')[0];
-  const data = scheduleLots.filter(l=>l.status==='active').sort((a,b)=>{
-    if ((a.community||'')!==(b.community||'')) return (a.community||'').localeCompare(b.community||'');
-    return (a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true});
-  });
+  // Mirror the on-screen table exactly — same filters, same sort.
+  const data = getFilteredLots();
+  if (!data.length) { alert('No lots match your current filters — nothing to export.'); return; }
+  // ISO helper: spreadsheets read YYYY-MM-DD as a real date (no more "2-OCT-26").
+  const iso = d => d ? (typeof d==='string' ? d.slice(0,10)
+    : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))) : '';
   const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Planned Completion','Close Status','Scheduled Close'];
   const rows = data.map(l => {
     const planned = calcPlannedCompletion(l.construction_start_date);
-    const planStr = planned ? planned.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+    const planStr = iso(planned);
     const closeStatus = l.scheduled_close_date && l.scheduled_close_date<today ? 'Past Due'
       : l.scheduled_close_date ? 'Scheduled'
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
       : 'Not Yet';
-    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',l.construction_start_date||'',planStr,closeStatus,l.scheduled_close_date||''];
+    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),planStr,closeStatus,iso(l.scheduled_close_date)];
   });
   const csv = [hdrs,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:'Ashland_Lots_'+today+'.csv'});
+  // filename reflects the active company filter when one is set
+  let tag = 'All';
+  try { const cid=getActiveCompanyId&&getActiveCompanyId(); if(cid){ const co=(companies||[]).find(c=>c.id===cid); if(co&&co.name) tag=co.name.replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,''); } } catch(e){}
+  const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:tag+'_Lots_'+today+'.csv'});
   a.click();
 }
 
