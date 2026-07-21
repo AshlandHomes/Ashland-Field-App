@@ -344,7 +344,7 @@ exports.handler = async function(event) {
         const stale = [];
         if (ids.length) {
           const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${ids.join(',')})&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical`);
+            `sched_lot_tasks?lot_id=in.(${ids.join(',')})&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical&limit=100000`);
           const rows = tt.data || [];
           const byLot = {};
           rows.forEach(r=>{ (byLot[r.lot_id]=byLot[r.lot_id]||{})[r.bt_num]=r; });
@@ -399,7 +399,7 @@ exports.handler = async function(event) {
         if (ids.length) {
           const inList = ids.join(',');
           const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical&order=task_order`);
+            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical&order=task_order&limit=100000`);
           const rows = tt.data || [];
           const byLot = {};
           rows.forEach(r => { (byLot[r.lot_id] = byLot[r.lot_id] || []).push(r); });
