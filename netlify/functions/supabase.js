@@ -353,11 +353,14 @@ exports.handler = async function(event) {
         const lotById = {}; lotRows.forEach(l=>lotById[l.id]=l);
         const stale = [];
         if (ids.length) {
-          const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${ids.join(',')})&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical&limit=100000`);
-          const rows = tt.data || [];
+          // Per-lot fetch to avoid PostgREST's 1000-row cap on combined queries.
+          const rows = [];
           const byLot = {};
-          rows.forEach(r=>{ (byLot[r.lot_id]=byLot[r.lot_id]||{})[r.bt_num]=r; });
+          await Promise.all(ids.map(async (lotId) => {
+            const r = await supabaseRequest('GET',
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical`);
+            (r.data || []).forEach(row => { rows.push(row); (byLot[row.lot_id]=byLot[row.lot_id]||{})[row.bt_num]=row; });
+          }));
           rows.forEach(r=>{
             if (!r.is_critical) return;
             if (r.status === 'finished') return;
@@ -407,12 +410,14 @@ exports.handler = async function(event) {
         const ids = lotRows.map(l => l.id);
         const out = {};
         if (ids.length) {
-          const inList = ids.join(',');
-          const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical&order=task_order&limit=100000`);
-          const rows = tt.data || [];
+          // Fetch per-lot to avoid PostgREST's hard 1000-row cap on combined queries.
+          // Each lot has ~100 tasks, so no single query is ever near the cap.
           const byLot = {};
-          rows.forEach(r => { (byLot[r.lot_id] = byLot[r.lot_id] || []).push(r); });
+          await Promise.all(ids.map(async (lotId) => {
+            const r = await supabaseRequest('GET',
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical&order=task_order`);
+            byLot[lotId] = r.data || [];
+          }));
           Object.keys(byLot).forEach(lotId => {
             const ts = byLot[lotId];
             // ACTIVE PHASE = furthest phase_order among CRITICAL tasks that are started or finished
