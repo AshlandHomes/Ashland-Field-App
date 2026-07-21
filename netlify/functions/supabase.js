@@ -4,8 +4,8 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-
 const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
+
 async function supabaseRequest(method, path, body) {
   const _m = path.match(/^([a-zA-Z0-9_]+)(.*)$/);
   const _path = _m ? (TABLE_PREFIX + _m[1] + _m[2]) : path;
@@ -384,9 +384,14 @@ exports.handler = async function(event) {
       }
 
       case 'getAllLotPhases': {
-        // For every active lot: compute active phase (phase of earliest unfinished task)
-        // and a per-phase task snapshot. One call, computed server-side.
-        // Returns { [lot_id]: { activePhase, activePhaseName, phases: { [phase_order]: {name, tasks:[{num,name,status}]} } } }
+        // For every active lot: compute active phase and per-phase task snapshots.
+        // ACTIVE PHASE = the furthest phase that contains a started/finished CRITICAL task.
+        // Non-critical tasks NEVER dictate the active phase (float items don't hold it back
+        // or push it forward). Also returns "behind": incomplete CRITICAL tasks in phases
+        // earlier than the active phase (bypassed critical work).
+        // Returns { [lot_id]: { activePhase, activePhaseName,
+        //   phases: { [phase_order]: {name, tasks:[{num,name,status,is_critical}]} },
+        //   behind: [{num,name,status,phase_order,phase_name}] } }
         const lots = await supabaseRequest('GET', 'sched_lots?select=id,status&status=eq.active');
         const lotRows = lots.data || [];
         const ids = lotRows.map(l => l.id);
@@ -394,30 +399,42 @@ exports.handler = async function(event) {
         if (ids.length) {
           const inList = ids.join(',');
           const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order&order=task_order`);
+            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical&order=task_order`);
           const rows = tt.data || [];
           const byLot = {};
           rows.forEach(r => { (byLot[r.lot_id] = byLot[r.lot_id] || []).push(r); });
           Object.keys(byLot).forEach(lotId => {
             const ts = byLot[lotId];
-            // active phase = phase of first task (task_order) whose status !== 'finished'
+            // ACTIVE PHASE = furthest phase_order among CRITICAL tasks that are started or finished
             let activePhase = null, activePhaseName = null;
-            for (const r of ts) {
-              if (r.status !== 'finished') { activePhase = r.phase_order; activePhaseName = r.phase_name; break; }
+            ts.forEach(r => {
+              if (r.is_critical && (r.status === 'started' || r.status === 'finished')) {
+                if (activePhase === null || r.phase_order > activePhase) {
+                  activePhase = r.phase_order; activePhaseName = r.phase_name;
+                }
+              }
+            });
+            // fallback: nothing critical started yet -> earliest phase that has any task
+            if (activePhase === null && ts.length) {
+              activePhase = ts[0].phase_order; activePhaseName = ts[0].phase_name;
             }
-            if (activePhase === null && ts.length) { // all finished — use last phase
-              const last = ts[ts.length - 1]; activePhase = last.phase_order; activePhaseName = last.phase_name;
-            }
+            // per-phase snapshot (all tasks, with critical flag)
             const phases = {};
             ts.forEach(r => {
               const p = r.phase_order;
-              (phases[p] = phases[p] || { name: r.phase_name, tasks: [] }).tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started' });
+              (phases[p] = phases[p] || { name: r.phase_name, tasks: [] })
+                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical });
             });
-            out[lotId] = { activePhase, activePhaseName, phases };
+            // BEHIND = incomplete CRITICAL tasks in phases earlier than active
+            const behind = ts.filter(r =>
+              r.is_critical && r.status !== 'finished' && r.phase_order < activePhase
+            ).map(r => ({ num: r.bt_num, name: r.name, status: r.status || 'not_started', phase_order: r.phase_order, phase_name: r.phase_name }));
+            out[lotId] = { activePhase, activePhaseName, phases, behind };
           });
         }
         return { statusCode: 200, body: JSON.stringify(out) };
       }
+
 
       case 'getScheduleLotTasks': {
         const { lot_id } = payload;
