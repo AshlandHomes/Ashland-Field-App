@@ -398,6 +398,100 @@ exports.handler = async function(event) {
         }) };
       }
 
+      case 'recalcTemplateCriticalPath': {
+        // TRUE CPM. Forward pass -> earliest start/finish. Backward pass -> latest
+        // start/finish. Float = LS - ES. Critical when float <= 0, i.e. any slip
+        // pushes the completion date. This is CALCULATED, not hand-flagged —
+        // force_critical only ADDS tasks you always want treated as critical.
+        const { template_id } = payload;
+        if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
+
+        const tkRes = await supabaseRequest('GET',
+          `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num,duration,lag,relative_start,predecessors,force_critical&order=task_order`);
+        const tasks = tkRes.data || [];
+        if (!tasks.length) {
+          return { statusCode: 200, body: JSON.stringify({ success: true, tasks: 0, critical: 0 }) };
+        }
+
+        const byNum = {};
+        tasks.forEach(t => { byNum[t.bt_num] = t; });
+        const dur = t => (t.duration != null ? t.duration : 1);
+
+        // ---- forward pass (memoised, cycle-safe) ----
+        const ES = {}, EF = {};
+        function calcEF(num, stack) {
+          if (EF[num] !== undefined) return EF[num];
+          const t = byNum[num];
+          if (!t) return 0;
+          if (stack.indexOf(num) >= 0) { ES[num] = 1; EF[num] = dur(t); return EF[num]; }
+          const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
+          let start = null;
+          preds.forEach(p => {
+            if (byNum[p]) {
+              const pe = calcEF(p, stack.concat([num]));
+              const cand = pe + 1 + (t.lag || 0);
+              if (start === null || cand > start) start = cand;
+            }
+          });
+          if (start === null) start = (t.relative_start != null ? t.relative_start : 1);
+          ES[num] = start;
+          EF[num] = start + dur(t) - 1;
+          return EF[num];
+        }
+        tasks.forEach(t => calcEF(t.bt_num, []));
+
+        const projectEnd = Math.max.apply(null, tasks.map(t => EF[t.bt_num] || 0));
+
+        // ---- successors map ----
+        const succ = {};
+        tasks.forEach(t => {
+          (Array.isArray(t.predecessors) ? t.predecessors : []).forEach(p => {
+            if (byNum[p]) (succ[p] = succ[p] || []).push(t.bt_num);
+          });
+        });
+
+        // ---- backward pass ----
+        const LF = {}, LS = {};
+        function calcLS(num, stack) {
+          if (LS[num] !== undefined) return LS[num];
+          const t = byNum[num];
+          if (!t) return projectEnd;
+          if (stack.indexOf(num) >= 0) { LF[num] = projectEnd; LS[num] = projectEnd - dur(t) + 1; return LS[num]; }
+          const ss = succ[num] || [];
+          let finish = null;
+          ss.forEach(s => {
+            const st = byNum[s];
+            if (!st) return;
+            const sls = calcLS(s, stack.concat([num]));
+            const cand = sls - 1 - (st.lag || 0);
+            if (finish === null || cand < finish) finish = cand;
+          });
+          if (finish === null) finish = projectEnd;
+          LF[num] = finish;
+          LS[num] = finish - dur(t) + 1;
+          return LS[num];
+        }
+        tasks.forEach(t => calcLS(t.bt_num, []));
+
+        // ---- float + write ----
+        let criticalCount = 0;
+        const updates = tasks.map(t => {
+          const float = (LS[t.bt_num] || 0) - (ES[t.bt_num] || 0);
+          const isCrit = (float <= 0) || !!t.force_critical;
+          if (isCrit) criticalCount++;
+          return { id: t.id, is_critical: isCrit, float: float };
+        });
+
+        for (const u of updates) {
+          await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${u.id}`, { is_critical: u.is_critical });
+        }
+
+        return { statusCode: 200, body: JSON.stringify({
+          success: true, tasks: tasks.length, critical: criticalCount,
+          project_days: projectEnd
+        }) };
+      }
+
       case 'getTemplateBuilder': {
         // Full editable payload for one template: phases + tasks (with real ids).
         const { template_id } = payload;
@@ -465,6 +559,8 @@ exports.handler = async function(event) {
         if (task_type !== undefined)       f.task_type = task_type;
         if (task_order !== undefined)      f.task_order = task_order;
         if (notification !== undefined)    f.notification = notification;
+        if (payload.trade !== undefined)          f.trade = payload.trade;
+        if (payload.force_critical !== undefined) f.force_critical = payload.force_critical;
         let r;
         if (id) {
           r = await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${id}`, f);
