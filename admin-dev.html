@@ -915,14 +915,41 @@ async function openStageModal(lotId){
   document.getElementById('modal-lot-stage').classList.add('open');
   let stages=[], gates=[];
   if(lot.template_id){ const sm=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); stages=(sm&&sm.stages)||[]; }
-  const td=await sbCall('getScheduleLotTasks',{lot_id:lotId}); gates=(td&&td.gates)||[];
+  const td=await sbCall('getScheduleLotTasks',{lot_id:lotId}); gates=(td&&td.gates)||[]; const ltasks=(td&&td.tasks)||[];
   const rep = lot.reported_stage, tru = lot.true_stage;
   const gatesOpen = gates.some(g=>!g.confirmed);
+  // HOLD AGING: how long has this lot been ready to pass 5.9 but held by open gates?
+  // Clock starts when the lot EARNED its way past 5.9 (the finish date of the latest
+  // finished task that pushed true stage above 5.9) — not when gates were created,
+  // since gates start unconfirmed and that date is meaningless.
+  let holdDays = null, holdSince = null;
+  if(gatesOpen && tru && parseFloat(tru) > 5.9){
+    let latest = null;
+    ltasks.forEach(t=>{
+      if(t.status==='finished' && t.actual_finish){
+        const d = new Date(t.actual_finish);
+        if(!latest || d > latest) latest = d;
+      }
+    });
+    if(latest){
+      holdSince = latest;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const cur = new Date(latest); cur.setHours(0,0,0,0);
+      let wd = 0;
+      while(cur < today){ cur.setDate(cur.getDate()+1); const w = cur.getDay(); if(w!==0 && w!==6) wd++; }
+      holdDays = wd;
+    }
+  }
+
   let gateHtml = '';
   if(gates.length){
+    const holdLine = (holdDays!==null && holdDays>0)
+      ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #fde68a;font-size:13px;color:#b45309"><strong>\u23f0 Held '+holdDays+' working day'+(holdDays===1?'':'s')+'</strong> \u2014 ready to advance since '+holdSince.toISOString().slice(0,10)+'</div>'
+      : '';
     gateHtml = '<div style="background:'+(gatesOpen?'#fffbeb':'#f0fdf4')+';border:1px solid '+(gatesOpen?'#fde68a':'#bbf7d0')+';border-radius:8px;padding:10px;margin-bottom:12px">'
       +'<div style="font-weight:700;margin-bottom:6px;color:'+(gatesOpen?'#b45309':'#15803d')+'">'+(gatesOpen?'⚡ Utility gates OPEN — reported stage capped at 5.9':'✓ All utility gates confirmed')+'</div>'
-      + gates.map(g=>'<span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 9px;border-radius:6px;font-size:12px;background:'+(g.confirmed?'#dcfce7':'#fee2e2')+';color:'+(g.confirmed?'#15803d':'#b91c1c')+'">'+(g.confirmed?'✓ ':'○ ')+g.gate_name+'</span>').join('')
+      + gates.map(g=>'<span style="display:inline-block;margin:2px 6px 2px 0;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:'+(g.confirmed?'#dcfce7':'#fee2e2')+';color:'+(g.confirmed?'#15803d':'#b91c1c')+'">'+(g.confirmed?'\u2713 ':'\u25cb ')+g.gate_name+' \u2014 '+(g.confirmed?'Confirmed':'Unconfirmed')+'</span>').join('')
+      + holdLine
       +'</div>';
   }
   const sorted = stages.slice().sort((a,b)=>a.order-b.order);
