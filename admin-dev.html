@@ -270,8 +270,7 @@ tr:hover td{background:#f9fafb}
           <div class="table-header">
             <h2>Companies</h2>
             <div class="table-actions">
-              <input id="new-company-name" type="text" class="search-input" placeholder="New company name…" style="width:220px" onkeydown="if(event.key==='Enter')addCompanyUI()">
-              <button class="btn btn-primary" onclick="addCompanyUI()">+ Add</button>
+              <button class="btn btn-primary" onclick="openAddCompanyModal()">+ Add Company</button>
             </div>
           </div>
           <div style="padding:12px 20px" id="companies-list"><div class="loading">Loading…</div></div>
@@ -298,8 +297,7 @@ tr:hover td{background:#f9fafb}
           <div class="table-header">
             <h2>Delay Reasons</h2>
             <div class="table-actions">
-              <input id="new-reason-label" placeholder="New reason…" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px">
-              <button class="btn btn-primary" onclick="addDelayReason()">Add</button>
+              <button class="btn btn-primary" onclick="openAddReasonModal()">+ Add Reason</button>
             </div>
           </div>
           <div id="reason-list" style="padding:6px 12px 12px"></div>
@@ -526,6 +524,28 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <!-- ADD BUILDER -->
+<div class="modal-overlay" id="modal-add-company">
+  <div class="modal">
+    <h2>Add Company</h2>
+    <div class="field"><label>Company Name</label><input id="company-name" type="text" placeholder="e.g. Ashland Homes"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-company')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddCompany()">Add Company →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add-reason">
+  <div class="modal">
+    <h2>Add Delay Reason</h2>
+    <div class="field"><label>Reason</label><input id="reason-label" type="text" placeholder="e.g. Permit delay"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-reason')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddReason()">Add Reason →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-builder">
   <div class="modal">
     <h2>Add Builder</h2>
@@ -814,13 +834,19 @@ function renderCompaniesList() {
   }).join('');
 }
 
-async function addCompanyUI() {
-  const input = document.getElementById('new-company-name');
-  const name = input.value.trim();
+function openAddCompanyModal() {
+  document.getElementById('company-name').value = '';
+  document.getElementById('modal-add-company').classList.add('open');
+  setTimeout(()=>document.getElementById('company-name').focus(), 50);
+}
+
+async function submitAddCompany() {
+  const input = document.getElementById('company-name');
+  const name = (input.value||'').trim();
   if (!name) { alert('Enter a company name'); return; }
   if (companies.find(c=>c.name.toLowerCase()===name.toLowerCase())) { alert('Company already exists'); return; }
   const r = await sbCall('addCompany', {name});
-  if (r) { input.value=''; await loadCompanies(); }
+  if (r) { closeModal('modal-add-company'); await loadCompanies(); }
 }
 
 async function deleteCompanyUI(id, name, subCount) {
@@ -1887,13 +1913,20 @@ function renderReasonList(){
   ).join('') || '<p style="color:var(--muted);padding:12px">No reasons</p>';
 }
 
-async function addDelayReason(){
-  const el=document.getElementById('new-reason-label');
+function openAddReasonModal(){
+  document.getElementById('reason-label').value = '';
+  document.getElementById('modal-add-reason').classList.add('open');
+  setTimeout(()=>document.getElementById('reason-label').focus(), 50);
+}
+
+async function submitAddReason(){
+  const el=document.getElementById('reason-label');
   const label=(el.value||'').trim();
   if(!label){ alert('Enter a reason'); return; }
+  if(delayReasons.find(r=>String(r.label).toLowerCase()===label.toLowerCase())){ alert('That reason already exists'); return; }
   await sbCall('upsertDelayReason',{label, sort_order:50});
-  el.value='';
-  await loadDelaysView();
+  closeModal('modal-add-reason');
+  await loadReasonsOnly();
 }
 
 async function toggleReason(id, archive){
