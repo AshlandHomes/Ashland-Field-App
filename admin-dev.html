@@ -130,6 +130,13 @@ tr:hover td{background:#f9fafb}
 .empty-state .icon{font-size:40px;margin-bottom:10px}
 .loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
 #company-filter option{color:#333;background:#fff}
+
+/* ===== SETTINGS SUB-NAV ===== */
+.set-subnav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.set-tab{background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 15px;font-family:inherit;font-size:13px;font-weight:600;color:#64748b;cursor:pointer}
+.set-tab.active{background:#4338ca;border-color:#4338ca;color:#fff}
+.set-pane{display:none}
+.set-pane.active{display:block}
 </style>
 </head>
 <body>
@@ -172,9 +179,8 @@ tr:hover td{background:#f9fafb}
 
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="showSection('lots',this)">🏗 Lots</div>
-    <div class="nav-tab" onclick="showSection('builders',this)">👷 Builders</div>
-    <div class="nav-tab" onclick="showSection('subdivisions',this)">🏘 Subdivisions</div>
     <div class="nav-tab" onclick="showSection('delays',this);loadDelaysView()">⏱ Delays</div>
+    <div class="nav-tab" onclick="showSection('settings',this);loadSettingsView()">⚙ Settings</div>
   </div>
 
   <div class="content">
@@ -216,17 +222,6 @@ tr:hover td{background:#f9fafb}
       </div>
     </div>
 
-    <!-- BUILDERS -->
-    <div class="section" id="section-builders">
-      <div class="table-wrap">
-        <div class="table-header">
-          <h2>Builders</h2>
-          <button class="btn btn-primary" onclick="openAddBuilderModal()">+ Add Builder</button>
-        </div>
-        <div id="builders-table-body"><div class="loading">Loading builders…</div></div>
-      </div>
-    </div>
-
     <!-- SUBDIVISIONS -->
     <div class="section" id="section-delays">
       <div class="table-wrap" style="margin-bottom:20px">
@@ -248,45 +243,67 @@ tr:hover td{background:#f9fafb}
         <div class="table-header"><h2>Recent delays</h2></div>
         <div id="delay-list" style="padding:6px 12px 12px"></div>
       </div>
-
-      <div class="table-wrap">
-        <div class="table-header">
-          <h2>Manage reason list</h2>
-          <div class="table-actions">
-            <input id="new-reason-label" placeholder="New reason…" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px">
-            <button class="btn btn-primary" onclick="addDelayReason()">Add</button>
-          </div>
-        </div>
-        <div id="reason-list" style="padding:6px 12px 12px"></div>
-      </div>
     </div>
 
-    <div class="section" id="section-subdivisions">
-      <!-- Companies card -->
-      <div class="table-wrap" style="margin-bottom:20px">
-        <div class="table-header">
-          <h2>Companies</h2>
-          <div class="table-actions">
-            <input id="new-company-name" type="text" class="search-input" placeholder="New company name…" style="width:220px" onkeydown="if(event.key==='Enter')addCompanyUI()">
-            <button class="btn btn-primary" onclick="addCompanyUI()">+ Add</button>
-          </div>
-        </div>
-        <div style="padding:12px 20px" id="companies-list"><div class="loading">Loading…</div></div>
+    <!-- SETTINGS — all configuration lives here -->
+    <div class="section" id="section-settings">
+      <div class="set-subnav">
+        <button class="set-tab active" data-pane="builders"  onclick="showSettingsPane('builders',this)">👷 Builders</button>
+        <button class="set-tab"        data-pane="subs"      onclick="showSettingsPane('subs',this)">🏘 Subdivisions &amp; Companies</button>
+        <button class="set-tab"        data-pane="reasons"   onclick="showSettingsPane('reasons',this)">⏱ Delay Reasons</button>
       </div>
-      <!-- Subdivisions table -->
-      <div class="table-wrap">
-        <div class="table-header">
-          <h2>Subdivisions</h2>
-          <div class="table-actions">
-            <select class="filter-select" id="filter-sub-status" onchange="renderSubdivisionsTable()">
-              <option value="active">Active</option>
-              <option value="all">All</option>
-              <option value="archived">Archived</option>
-            </select>
-            <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
+
+      <!-- Builders -->
+      <div class="set-pane active" id="setpane-builders">
+        <div class="table-wrap">
+          <div class="table-header">
+            <h2>Builders</h2>
+            <button class="btn btn-primary" onclick="openAddBuilderModal()">+ Add Builder</button>
           </div>
+          <div id="builders-table-body"><div class="loading">Loading builders…</div></div>
         </div>
-        <div id="subdivisions-table-body"><div class="loading">Loading…</div></div>
+      </div>
+
+      <!-- Subdivisions & Companies -->
+      <div class="set-pane" id="setpane-subs">
+        <div class="table-wrap" style="margin-bottom:20px">
+          <div class="table-header">
+            <h2>Companies</h2>
+            <div class="table-actions">
+              <input id="new-company-name" type="text" class="search-input" placeholder="New company name…" style="width:220px" onkeydown="if(event.key==='Enter')addCompanyUI()">
+              <button class="btn btn-primary" onclick="addCompanyUI()">+ Add</button>
+            </div>
+          </div>
+          <div style="padding:12px 20px" id="companies-list"><div class="loading">Loading…</div></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header">
+            <h2>Subdivisions</h2>
+            <div class="table-actions">
+              <select class="filter-select" id="filter-sub-status" onchange="renderSubdivisionsTable()">
+                <option value="active">Active</option>
+                <option value="all">All</option>
+                <option value="archived">Archived</option>
+              </select>
+              <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
+            </div>
+          </div>
+          <div id="subdivisions-table-body"><div class="loading">Loading…</div></div>
+        </div>
+      </div>
+
+      <!-- Delay reasons -->
+      <div class="set-pane" id="setpane-reasons">
+        <div class="table-wrap">
+          <div class="table-header">
+            <h2>Delay Reasons</h2>
+            <div class="table-actions">
+              <input id="new-reason-label" placeholder="New reason…" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px">
+              <button class="btn btn-primary" onclick="addDelayReason()">Add</button>
+            </div>
+          </div>
+          <div id="reason-list" style="padding:6px 12px 12px"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1882,6 +1899,27 @@ async function addDelayReason(){
 async function toggleReason(id, archive){
   await sbCall('upsertDelayReason',{id, is_archived:archive});
   await loadDelaysView();
+}
+
+function showSettingsPane(name, el){
+  document.querySelectorAll('.set-pane').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.set-tab').forEach(t=>t.classList.remove('active'));
+  const pane=document.getElementById('setpane-'+name);
+  if(pane) pane.classList.add('active');
+  if(el) el.classList.add('active');
+  if(name==='reasons') loadReasonsOnly();
+}
+
+async function loadSettingsView(){
+  // builders + subdivisions render from data already loaded by loadAll()
+  if (typeof renderBuildersTable==='function') renderBuildersTable();
+  if (typeof renderSubdivisionsTable==='function') renderSubdivisionsTable();
+  if (typeof renderCompanies==='function') renderCompanies();
+}
+
+async function loadReasonsOnly(){
+  delayReasons = await sbCall('getDelayReasons', { include_archived: true }) || [];
+  renderReasonList();
 }
 
 function showSection(name, tabEl) {
