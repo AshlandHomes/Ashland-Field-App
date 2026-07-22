@@ -130,13 +130,17 @@ tr:hover td{background:#f9fafb}
 .empty-state .icon{font-size:40px;margin-bottom:10px}
 .loading{text-align:center;padding:40px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
 #company-filter option{color:#333;background:#fff}
+
+/* ===== SETTINGS SUB-NAV ===== */
+.set-subnav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.set-tab{background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 15px;font-family:inherit;font-size:13px;font-weight:600;color:#64748b;cursor:pointer}
+.set-tab.active{background:#0082A0;border-color:#0082A0;color:#fff}
+.set-pane{display:none}
+.set-pane.active{display:block}
 </style>
 </head>
 <body>
 
-
-</div>
-<div style="height:30px"></div>
 
 <!-- ── LOGIN ── -->
 <div class="login-wrap" id="login-wrap">
@@ -171,8 +175,8 @@ tr:hover td{background:#f9fafb}
 
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="showSection('lots',this)">🏗 Lots</div>
-    <div class="nav-tab" onclick="showSection('builders',this)">👷 Builders</div>
-    <div class="nav-tab" onclick="showSection('subdivisions',this)">🏘 Subdivisions</div>
+    <div class="nav-tab" onclick="showSection('delays',this);loadDelaysView()">⏱ Delays</div>
+    <div class="nav-tab" onclick="showSection('settings',this);loadSettingsView()">⚙ Settings</div>
   </div>
 
   <div class="content">
@@ -214,44 +218,129 @@ tr:hover td{background:#f9fafb}
       </div>
     </div>
 
-    <!-- BUILDERS -->
-    <div class="section" id="section-builders">
-      <div class="table-wrap">
+    <!-- SUBDIVISIONS -->
+    <div class="section" id="section-delays">
+      <div class="table-wrap" style="margin-bottom:20px">
         <div class="table-header">
-          <h2>Builders</h2>
-          <button class="btn btn-primary" onclick="openAddBuilderModal()">+ Add Builder</button>
+          <h2>⏱ Delay Reasons — frequency</h2>
+          <div class="table-actions">
+            <select id="delay-filter-sub" onchange="renderDelaysView()"><option value="">All subdivisions</option></select>
+            <select id="delay-filter-bld" onchange="renderDelaysView()"><option value="">All builders</option></select>
+            <select id="delay-count-mode" onchange="renderDelaysView()">
+              <option value="lot">Count by lot</option>
+              <option value="event">Count by event</option>
+            </select>
+          </div>
         </div>
-        <div id="builders-table-body"><div class="loading">Loading builders…</div></div>
+        <div id="delay-summary" style="padding:12px"></div>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div class="table-header"><h2>Recent delays</h2></div>
+        <div id="delay-list" style="padding:6px 12px 12px"></div>
       </div>
     </div>
 
-    <!-- SUBDIVISIONS -->
-    <div class="section" id="section-subdivisions">
-      <!-- Companies card -->
-      <div class="table-wrap" style="margin-bottom:20px">
-        <div class="table-header">
-          <h2>Companies</h2>
-          <div class="table-actions">
-            <input id="new-company-name" type="text" class="search-input" placeholder="New company name…" style="width:220px" onkeydown="if(event.key==='Enter')addCompanyUI()">
-            <button class="btn btn-primary" onclick="addCompanyUI()">+ Add</button>
-          </div>
-        </div>
-        <div style="padding:12px 20px" id="companies-list"><div class="loading">Loading…</div></div>
+    <!-- SETTINGS — all configuration lives here -->
+    <div class="section" id="section-settings">
+      <div class="set-subnav">
+        <button class="set-tab active" data-pane="builders"  onclick="showSettingsPane('builders',this)">👷 Builders</button>
+        <button class="set-tab"        data-pane="subs"      onclick="showSettingsPane('subs',this)">🏘 Subdivisions &amp; Companies</button>
+        <button class="set-tab"        data-pane="reasons"   onclick="showSettingsPane('reasons',this)">⏱ Delay Reasons</button>
+        <button class="set-tab"        data-pane="schedules" onclick="showSettingsPane('schedules',this)">📋 Schedule Templates</button>
       </div>
-      <!-- Subdivisions table -->
-      <div class="table-wrap">
-        <div class="table-header">
-          <h2>Subdivisions</h2>
-          <div class="table-actions">
-            <select class="filter-select" id="filter-sub-status" onchange="renderSubdivisionsTable()">
-              <option value="active">Active</option>
-              <option value="all">All</option>
-              <option value="archived">Archived</option>
-            </select>
-            <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
+
+      <!-- Builders -->
+      <div class="set-pane active" id="setpane-builders">
+        <div class="table-wrap">
+          <div class="table-header">
+            <h2>Builders</h2>
+            <button class="btn btn-primary" onclick="openAddBuilderModal()">+ Add Builder</button>
+          </div>
+          <div id="builders-table-body"><div class="loading">Loading builders…</div></div>
+        </div>
+      </div>
+
+      <!-- Subdivisions & Companies -->
+      <div class="set-pane" id="setpane-subs">
+        <div class="table-wrap" style="margin-bottom:20px">
+          <div class="table-header">
+            <h2>Companies</h2>
+            <div class="table-actions">
+              <button class="btn btn-primary" onclick="openAddCompanyModal()">+ Add Company</button>
+            </div>
+          </div>
+          <div style="padding:12px 20px" id="companies-list"><div class="loading">Loading…</div></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header">
+            <h2>Subdivisions</h2>
+            <div class="table-actions">
+              <select class="filter-select" id="filter-sub-status" onchange="renderSubdivisionsTable()">
+                <option value="active">Active</option>
+                <option value="all">All</option>
+                <option value="archived">Archived</option>
+              </select>
+              <button class="btn btn-primary" onclick="openAddSubModal()">+ Add Subdivision</button>
+            </div>
+          </div>
+          <div id="subdivisions-table-body"><div class="loading">Loading…</div></div>
+        </div>
+      </div>
+
+      <!-- Schedule templates -->
+      <div class="set-pane" id="setpane-schedules">
+        <div class="table-wrap" style="margin-bottom:20px">
+          <div class="table-header">
+            <h2>Schedule Templates</h2>
+            <div class="table-actions">
+              <button class="btn btn-primary" onclick="openAddTemplateModal()">+ Add Template</button>
+            </div>
+          </div>
+          <div id="templates-list" style="padding:6px 12px 12px"><div class="loading">Loading…</div></div>
+        </div>
+
+        <!-- TEMPLATE EDITOR -->
+        <div id="tpl-editor" style="display:none">
+          <div class="table-wrap" style="margin-bottom:20px">
+            <div class="table-header">
+              <h2 id="tpl-editor-title">Edit Template</h2>
+              <div class="table-actions">
+                <button class="btn btn-secondary" onclick="openAddPhaseModal()">+ Add Phase</button>
+                <button class="btn btn-primary" onclick="openAddTaskModal()">+ Add Task</button>
+                <button class="btn btn-secondary" onclick="recalcCriticalPath()">↻ Recalculate critical path</button>
+                <button class="btn btn-secondary" onclick="closeTemplateEditor()">← Back</button>
+              </div>
+            </div>
+            <div id="tpl-editor-body" style="padding:8px 12px 14px"><div class="loading">Loading…</div></div>
           </div>
         </div>
-        <div id="subdivisions-table-body"><div class="loading">Loading…</div></div>
+
+        <div class="table-wrap">
+          <div class="table-header"><h2>How schedules work</h2></div>
+          <div style="padding:14px 20px;font-size:13px;color:#475569;line-height:1.65">
+            <p style="margin:0 0 10px"><strong>A template is the master schedule</strong> a lot is stamped from. When you add a lot, it takes a frozen copy of the template — editing the template later never changes lots already building.</p>
+            <p style="margin:0 0 10px"><strong>Phases</strong> group tasks into weeks of construction. <strong>Tasks</strong> carry duration, lag, predecessors and a critical-path flag. Critical tasks drive the completion date and the active phase; non-critical tasks have float and don't.</p>
+            <p style="margin:0 0 10px"><strong>Stage map</strong> ties stage codes (0.3–9.5) to the tasks that trigger them — finish the trigger tasks, the stage advances automatically.</p>
+            <p style="margin:0 0 10px;padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px">
+              <strong>⚡ Gates are optional.</strong> A gate is an extra hold you can layer on top of the schedule — the utility gates (gas, power, water) are the example in use today. When a gate is unconfirmed, the lot's <em>reported</em> stage is capped (at 5.9) even though its <em>true</em> stage has advanced. This surfaces houses that are physically built past a point but can't be reported there yet. <strong>A template works fine with no gates at all</strong> — only add them when you need that extra hold.
+            </p>
+            <p style="margin:0"><strong>Cloning</strong> copies everything — phases, tasks, gates, stage map — into an independent new template. Fastest way to make a Basement or Townhome variant of an existing schedule, then edit the differences.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Delay reasons -->
+      <div class="set-pane" id="setpane-reasons">
+        <div class="table-wrap">
+          <div class="table-header">
+            <h2>Delay Reasons</h2>
+            <div class="table-actions">
+              <button class="btn btn-primary" onclick="openAddReasonModal()">+ Add Reason</button>
+            </div>
+          </div>
+          <div id="reason-list" style="padding:6px 12px 12px"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -280,6 +369,17 @@ tr:hover td{background:#f9fafb}
     <div id="flags-modal-list"></div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-lot-flags')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-lot-stage">
+  <div class="modal">
+    <h2>📊 Stage Legend</h2>
+    <div class="modal-sub" id="stage-modal-lot-label"></div>
+    <div id="stage-modal-body"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-lot-stage')">Close</button>
     </div>
   </div>
 </div>
@@ -463,6 +563,133 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <!-- ADD BUILDER -->
+<div class="modal-overlay" id="modal-phase">
+  <div class="modal">
+    <h2 id="phase-modal-title">Add Phase</h2>
+    <input type="hidden" id="phase-id">
+    <div class="field"><label>Phase Name</label><input id="phase-name" type="text" placeholder="e.g. Framing #1"></div>
+    <div class="field"><label>Phase Order</label><input id="phase-order" type="number" placeholder="e.g. 5"></div>
+    <p style="font-size:12px;color:var(--muted);margin:-4px 0 4px">Order controls the sequence of phases (1, 2, 3…). Tasks are assigned to a phase.</p>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-phase')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitPhase()">Save →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-pred-picker" style="z-index:1200">
+  <div class="modal" style="max-width:560px">
+    <h2>Choose Predecessors</h2>
+    <div class="modal-sub" id="pred-picker-sub" style="margin-bottom:10px"></div>
+    <input id="pred-search" type="text" placeholder="Search tasks…" oninput="renderPredPicker()"
+      style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px">
+    <div id="pred-picker-list" style="max-height:46vh;overflow-y:auto;border:1px solid var(--line);border-radius:8px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-pred-picker')">Cancel</button>
+      <button class="btn btn-primary" onclick="applyPredPicker()">Done →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-task">
+  <div class="modal" style="max-width:560px">
+    <h2 id="task-modal-title">Add Task</h2>
+    <input type="hidden" id="task-id">
+    <div class="field"><label>Task Number</label><input id="task-btnum" type="number" placeholder="e.g. 55"></div>
+    <div class="field"><label>Task Name</label><input id="task-name" type="text" placeholder="e.g. Foam Penetrations"></div>
+    <div class="field"><label>Phase</label><select id="task-phase"></select></div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Duration (days)</label><input id="task-duration" type="number" placeholder="1"></div>
+      <div class="field" style="flex:1"><label>Lag (days)</label><input id="task-lag" type="number" placeholder="0"></div>
+    </div>
+    <div class="field">
+      <label>Predecessors</label>
+      <input type="hidden" id="task-preds">
+      <div id="task-preds-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openPredPicker()">＋ Choose predecessors</button>
+      <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Tasks that must finish before this one can start.</p>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Relative Start <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rs" type="number"></div>
+      <div class="field" style="flex:1"><label>Relative Finish <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rf" type="number"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Task Order</label><input id="task-order" type="number" placeholder="sequence"></div>
+      <div class="field" style="flex:1"><label>Type</label>
+        <select id="task-type"><option value="work">work</option><option value="action">action</option></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Trade <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+      <input id="task-trade" type="text" placeholder="e.g. Plumber, Framer, Electrician">
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Who performs this task. Used to analyse delays by trade.</p>
+    </div>
+    <div class="field" style="background:#dfe7ec;border:1px solid var(--line);border-radius:8px;padding:11px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label style="margin:0">Critical Path</label>
+        <span id="task-crit-status" style="font-size:12px;font-weight:700"></span>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Calculated automatically from durations and predecessors — a task is critical when it has zero float, meaning any delay pushes the completion date.</p>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+        <input id="task-force-critical" type="checkbox" style="width:16px;height:16px"> Always treat as critical (override)
+      </label>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-task')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTask()">Save →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add-template">
+  <div class="modal">
+    <h2>Add Schedule Template</h2>
+    <div class="field"><label>Template Name</label><input id="tpl-name" type="text" placeholder="e.g. Basement Schedule"></div>
+    <div class="field"><label>Description <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="tpl-desc" type="text" placeholder="What this schedule is for"></div>
+    <div class="field"><label>Total Working Days <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="tpl-days" type="number" placeholder="e.g. 99"></div>
+    <p style="font-size:12px;color:var(--muted);margin:-4px 0 4px">Creates an empty template. Add phases and tasks after — or clone an existing template instead to start from a full schedule.</p>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-template')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddTemplate()">Create →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-clone-template">
+  <div class="modal">
+    <h2>Clone Template</h2>
+    <div class="modal-sub" id="clone-src-label" style="margin-bottom:12px"></div>
+    <div class="field"><label>New Template Name</label><input id="clone-name" type="text" placeholder="e.g. Basement Schedule"></div>
+    <p style="font-size:12px;color:var(--muted);margin:-4px 0 4px">Copies all phases, tasks, gates and stage map into a new, independent template.</p>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-clone-template')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCloneTemplate()">Clone →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add-company">
+  <div class="modal">
+    <h2>Add Company</h2>
+    <div class="field"><label>Company Name</label><input id="company-name" type="text" placeholder="e.g. Ashland Homes"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-company')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddCompany()">Add Company →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add-reason">
+  <div class="modal">
+    <h2>Add Delay Reason</h2>
+    <div class="field"><label>Reason</label><input id="reason-label" type="text" placeholder="e.g. Permit delay"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-reason')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddReason()">Add Reason →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-builder">
   <div class="modal">
     <h2>Add Builder</h2>
@@ -751,13 +978,19 @@ function renderCompaniesList() {
   }).join('');
 }
 
-async function addCompanyUI() {
-  const input = document.getElementById('new-company-name');
-  const name = input.value.trim();
+function openAddCompanyModal() {
+  document.getElementById('company-name').value = '';
+  document.getElementById('modal-add-company').classList.add('open');
+  setTimeout(()=>document.getElementById('company-name').focus(), 50);
+}
+
+async function submitAddCompany() {
+  const input = document.getElementById('company-name');
+  const name = (input.value||'').trim();
   if (!name) { alert('Enter a company name'); return; }
   if (companies.find(c=>c.name.toLowerCase()===name.toLowerCase())) { alert('Company already exists'); return; }
   const r = await sbCall('addCompany', {name});
-  if (r) { input.value=''; await loadCompanies(); }
+  if (r) { closeModal('modal-add-company'); await loadCompanies(); }
 }
 
 async function deleteCompanyUI(id, name, subCount) {
@@ -890,8 +1123,71 @@ function subBadge(community) {
 function stageCell(lot) {
   if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
   const held = lot.reported_stage==='5.9' && lot.true_stage && lot.true_stage!=='5.9';
-  return '<span class="badge" style="background:#e0f2fe;color:#0369a1">' + lot.reported_stage + '</span>'
+  return '<span class="badge" style="background:#e0f2fe;color:#0369a1;cursor:pointer" onclick="openStageModal(\''+lot.id+'\')" title="View stage legend">' + lot.reported_stage + '</span>'
     + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + lot.true_stage + '</div>' : '');
+}
+
+async function openStageModal(lotId){
+  const lot = scheduleLots.find(l=>l.id===lotId);
+  if(!lot){ return; }
+  document.getElementById('stage-modal-lot-label').textContent = (lot.community||'')+' '+(lot.lot_number||'');
+  const box = document.getElementById('stage-modal-body');
+  box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading…</p>';
+  document.getElementById('modal-lot-stage').classList.add('open');
+  let stages=[], gates=[];
+  if(lot.template_id){ const sm=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); stages=(sm&&sm.stages)||[]; }
+  const td=await sbCall('getScheduleLotTasks',{lot_id:lotId}); gates=(td&&td.gates)||[]; const ltasks=(td&&td.tasks)||[];
+  const rep = lot.reported_stage, tru = lot.true_stage;
+  const gatesOpen = gates.some(g=>!g.confirmed);
+  // HOLD AGING: how long has this lot been ready to pass 5.9 but held by open gates?
+  // Clock starts when the lot EARNED its way past 5.9 (the finish date of the latest
+  // finished task that pushed true stage above 5.9) — not when gates were created,
+  // since gates start unconfirmed and that date is meaningless.
+  let holdDays = null, holdSince = null;
+  if(gatesOpen && tru && parseFloat(tru) > 5.9){
+    let latest = null;
+    ltasks.forEach(t=>{
+      if(t.status==='finished' && t.actual_finish){
+        const d = new Date(t.actual_finish);
+        if(!latest || d > latest) latest = d;
+      }
+    });
+    if(latest){
+      holdSince = latest;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const cur = new Date(latest); cur.setHours(0,0,0,0);
+      let wd = 0;
+      while(cur < today){ cur.setDate(cur.getDate()+1); const w = cur.getDay(); if(w!==0 && w!==6) wd++; }
+      holdDays = wd;
+    }
+  }
+
+  let gateHtml = '';
+  if(gates.length){
+    const holdLine = (holdDays!==null && holdDays>0)
+      ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #fde68a;font-size:13px;color:#b45309"><strong>\u23f0 Held '+holdDays+' working day'+(holdDays===1?'':'s')+'</strong> \u2014 ready to advance since '+holdSince.toISOString().slice(0,10)+'</div>'
+      : '';
+    gateHtml = '<div style="background:'+(gatesOpen?'#fffbeb':'#f0fdf4')+';border:1px solid '+(gatesOpen?'#fde68a':'#bbf7d0')+';border-radius:8px;padding:10px;margin-bottom:12px">'
+      +'<div style="font-weight:700;margin-bottom:6px;color:'+(gatesOpen?'#b45309':'#15803d')+'">'+(gatesOpen?'⚡ Utility gates OPEN — reported stage capped at 5.9':'✓ All utility gates confirmed')+'</div>'
+      + gates.map(g=>'<span style="display:inline-block;margin:2px 6px 2px 0;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:'+(g.confirmed?'#dcfce7':'#fee2e2')+';color:'+(g.confirmed?'#15803d':'#b91c1c')+'">'+(g.confirmed?'\u2713 ':'\u25cb ')+g.gate_name+' \u2014 '+(g.confirmed?'Confirmed':'Unconfirmed')+'</span>').join('')
+      + holdLine
+      +'</div>';
+  }
+  const sorted = stages.slice().sort((a,b)=>a.order-b.order);
+  const ladder = sorted.map(s=>{
+    const isRep = s.code===rep;
+    const isTrue = s.code===tru;
+    const bg = isRep ? '#0369a1' : (isTrue ? '#e0f2fe' : '#dfe7ec');
+    const fg = isRep ? '#fff' : '#334155';
+    const tags = (isRep?' <span style="font-size:10px;background:#fff;color:#0369a1;padding:1px 5px;border-radius:3px">REPORTED</span>':'')
+               + (isTrue&&!isRep?' <span style="font-size:10px;background:#0369a1;color:#fff;padding:1px 5px;border-radius:3px">TRUE</span>':'');
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 11px;border-radius:6px;margin-bottom:3px;background:'+bg+';color:'+fg+';font-weight:'+(isRep?700:400)+'">'
+      +'<div><strong>'+s.code+'</strong> · '+s.label+tags+'</div>'
+      +(s.is_manual?'<span style="font-size:11px;opacity:.7">manual</span>':'')+'</div>';
+  }).join('');
+  box.innerHTML = gateHtml
+    + (tru&&tru!==rep ? '<div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚡ This lot is actually at stage '+tru+' but reports 5.9 because utility gates are open.</div>' : '')
+    + (ladder || '<p style="color:var(--muted);text-align:center;padding:20px">No stage map for this lot\'s template</p>');
 }
 
 function closeBadgeHtml(lot) {
@@ -954,7 +1250,9 @@ function populateFilters() {
 }
 
 // ── LOTS TABLE ──
-function renderLotsTable() {
+// SINGLE SOURCE OF TRUTH for lot filtering — table AND export both call this,
+// so the export always mirrors exactly what is on screen (all filters applied).
+function getFilteredLots() {
   const filterCom   = document.getElementById('filter-community').value;
   const filterBld   = document.getElementById('filter-builder').value;
   const filterClose = document.getElementById('filter-close').value;
@@ -985,6 +1283,11 @@ function renderLotsTable() {
     if ((a.community||'')!==(b.community||'')) return (a.community||'').localeCompare(b.community||'');
     return (a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true});
   });
+  return list;
+}
+
+function renderLotsTable() {
+  const list = getFilteredLots();
 
   if (!list.length) {
     document.getElementById('lots-table-body').innerHTML = '<div class="empty-state"><div class="icon">🏗</div><p>No lots match your filters.</p></div>';
@@ -1061,25 +1364,78 @@ function openStaleModal(lotId){
 function phaseCell(lot){
   const p = lotPhases[lot.id];
   if(!p || p.activePhase==null) return '<span style=\"color:var(--muted)\">—</span>';
-  return '<button class=\"badge\" style=\"background:#eef2ff;color:#4338ca;border:none;cursor:pointer;font-weight:700\" '
-    + 'onclick=\"openPhaseModal(\''+lot.id+'\')\" title=\"'+(p.activePhaseName||'')+'\">'+p.activePhase+'</button>';
+  const behind = (p.behind&&p.behind.length) ? ' <span style=\"color:#b91c1c;font-weight:700\">⚠'+p.behind.length+'</span>' : '';
+  return '<button class=\"badge\" style=\"background:#e6f6fb;color:#0082A0;border:none;cursor:pointer;font-weight:700\" '
+    + 'onclick=\"openPhaseModal(\''+lot.id+'\')\" title=\"'+(p.activePhaseName||'')+'\">'+p.activePhase+'</button>'+behind;
+}
+let phModalFilter = 'all';
+let _phModalLotId = null;
+
+function setPhaseModalFilter(v){
+  phModalFilter = v;
+  if(_phModalLotId) openPhaseModal(_phModalLotId);
+}
+function _phKeep(t){
+  const ty = (t.task_type||'work');
+  if(phModalFilter==='work')   return ty!=='action';
+  if(phModalFilter==='action') return ty==='action';
+  return true;
+}
+
+function _phDot(s){ return s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>'); }
+function _phLbl(s){ return s==='finished'?'Finished':(s==='started'?'Started':'Not started'); }
+function _phTaskRow(t){
+  const crit = t.is_critical ? '<span style=\"color:#0082A0\">◆</span> ' : '';
+  const isAction = (t.task_type||'work')==='action';
+  const mark = isAction ? '📋 ' : '';
+  const trade = t.trade ? ' <span style=\"font-size:11px;color:#64748b\">· '+t.trade+'</span>' : '';
+  return '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px'+(isAction?';background:#fbfaff':'')+'\">'
+    +'<div>'+_phDot(t.status)+' '+crit+mark+'<strong>#'+t.num+'</strong> '+(t.name||'')+trade+'</div>'
+    +'<div class=\"flag-meta\" style=\"white-space:nowrap\">'+_phLbl(t.status)+'</div></div>';
+}
+function togglePhaseSection(pid){
+  const el=document.getElementById('phsec-'+pid); const ar=document.getElementById('phar-'+pid);
+  if(!el)return; const open=el.style.display!=='none'; el.style.display=open?'none':'block'; if(ar)ar.textContent=open?'▸':'▾';
 }
 function openPhaseModal(lotId){
+  _phModalLotId = lotId;
   const lot = scheduleLots.find(l=>l.id===lotId);
   const p = lotPhases[lotId];
   document.getElementById('phase-modal-lot-label').textContent =
     (lot?(lot.community||'')+' '+(lot.lot_number||''):'') + (p&&p.activePhaseName?' · Phase '+p.activePhase+': '+p.activePhaseName:'');
-  const ph = p && p.phases && p.phases[p.activePhase];
-  if(!ph){ document.getElementById('phase-modal-list').innerHTML='<p style=\"color:var(--muted);text-align:center;padding:20px\">No task data</p>'; }
-  else {
-    const dot = s => s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>');
-    const lbl = s => s==='finished'?'Finished':(s==='started'?'Started':'Not started');
-    document.getElementById('phase-modal-list').innerHTML = ph.tasks.map(t =>
-      '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px\">'
-      +'<div>'+dot(t.status)+' <strong>#'+t.num+'</strong> '+(t.name||'')+'</div>'
-      +'<div class=\"flag-meta\" style=\"white-space:nowrap\">'+lbl(t.status)+'</div></div>'
-    ).join('');
+  const box = document.getElementById('phase-modal-list');
+  if(!p || !p.phases){ box.innerHTML='<p style=\"color:var(--muted);text-align:center;padding:20px\">No task data</p>'; document.getElementById('modal-lot-phase').classList.add('open'); return; }
+  let nW=0,nA=0;
+  Object.values(p.phases).forEach(ph=>ph.tasks.forEach(t=>{ ((t.task_type||'work')==='action') ? nA++ : nW++; }));
+  const _fb=(v,label,n)=>'<button class=\"btn btn-sm\" style=\"flex:1;'
+    +(phModalFilter===v?'background:#0082A0;color:#fff':'background:#fff;border:1px solid var(--line);color:#64748b')
+    +'\" onclick=\"setPhaseModalFilter(\''+v+'\')\">'+label+' ('+n+')</button>';
+  let html='<div style=\"display:flex;gap:6px;margin-bottom:12px\">'
+    + _fb('all','All',nW+nA) + _fb('work','🔨 On site',nW) + _fb('action','📋 To-dos',nA)
+    + '</div>';
+  if(p.behind && p.behind.length){
+    html += '<div style=\"background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;margin-bottom:12px\">'
+      +'<div style=\"color:#b91c1c;font-weight:700;margin-bottom:6px\">⚠ '+p.behind.length+' critical task'+(p.behind.length===1?'':'s')+' incomplete in earlier phases</div>'
+      + p.behind.map(t=>_phTaskRow({num:t.num,name:'P'+t.phase_order+' · '+t.name,status:t.status,is_critical:true,task_type:t.task_type,trade:t.trade})).join('')
+      +'</div>';
   }
+  const orders = Object.keys(p.phases).map(Number).sort((a,b)=>a-b);
+  orders.forEach(po=>{
+    const ph=p.phases[po];
+    const isActive = po===p.activePhase;
+    const open = isActive;
+    const shown = ph.tasks.filter(_phKeep);
+    if(!shown.length) return '';
+    const done = shown.filter(t=>t.status==='finished').length;
+    html += '<div style=\"border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden\">'
+      +'<div onclick=\"togglePhaseSection('+po+')\" style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;background:'+(isActive?'#e6f6fb':'#dfe7ec')+'\">'
+      +'<div style=\"font-weight:'+(isActive?700:600)+';color:'+(isActive?'#0082A0':'#334155')+'\"><span id=\"phar-'+po+'\">'+(open?'▾':'▸')+'</span> Phase '+po+' · '+ph.name+(isActive?' <span style=\"font-size:11px;background:#0082A0;color:#fff;padding:1px 6px;border-radius:4px\">ACTIVE</span>':'')+'</div>'
+      +'<div class=\"flag-meta\">'+done+'/'+shown.length+'</div></div>'
+      +'<div id=\"phsec-'+po+'\" style=\"display:'+(open?'block':'none')+';padding:6px 8px\">'
+      + shown.map(_phTaskRow).join('')
+      +'</div></div>';
+  });
+  box.innerHTML = html;
   document.getElementById('modal-lot-phase').classList.add('open');
 }
 
@@ -1658,6 +2014,494 @@ async function submitAddSubdivision() {
 }
 
 // ── NAVIGATION ──
+// ── DELAYS VIEW ──
+let delayRows = [], delayReasons = [];
+
+async function loadDelaysView(){
+  const [rows, reasons] = await Promise.all([
+    sbCall('getTaskDelays', {}),
+    sbCall('getDelayReasons', { include_archived: true })
+  ]);
+  delayRows = rows || [];
+  delayReasons = reasons || [];
+  // populate filters
+  const subs = [...new Set(delayRows.map(d=>d.community).filter(Boolean))].sort();
+  const blds = [...new Set(delayRows.map(d=>d.builder_name).filter(Boolean))].sort();
+  const ss=document.getElementById('delay-filter-sub'), bs=document.getElementById('delay-filter-bld');
+  ss.innerHTML='<option value="">All subdivisions</option>'+subs.map(s=>'<option>'+s+'</option>').join('');
+  bs.innerHTML='<option value="">All builders</option>'+blds.map(b=>'<option>'+b+'</option>').join('');
+  renderReasonList();
+  renderDelaysView();
+}
+
+function _delayFiltered(){
+  const s=document.getElementById('delay-filter-sub').value;
+  const b=document.getElementById('delay-filter-bld').value;
+  return delayRows.filter(d=>(!s||d.community===s)&&(!b||d.builder_name===b));
+}
+
+function renderDelaysView(){
+  const mode=document.getElementById('delay-count-mode').value;
+  let rows=_delayFiltered();
+  // count by EVENT = collapse pushed copies back to their source occurrence
+  if(mode==='event'){
+    const seen=new Set(); const out=[];
+    rows.forEach(d=>{
+      const key=(d.source_lot_id||d.lot_id)+'|'+d.bt_num+'|'+(d.actual_finish||'');
+      if(!seen.has(key)){ seen.add(key); out.push(d); }
+    });
+    rows=out;
+  }
+  const tally={};
+  rows.forEach(d=>{ tally[d.reason_label]=(tally[d.reason_label]||0)+1; });
+  const total=rows.length;
+  const sorted=Object.entries(tally).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('delay-summary').innerHTML = total
+    ? '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">'+total+' delay'+(total===1?'':'s')+' \u00b7 counting by '+(mode==='event'?'event':'lot')+'</div>'
+      + sorted.map(([label,n])=>{
+          const pct=Math.round(n/total*100);
+          return '<div style="margin-bottom:7px">'
+            +'<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px"><span><strong>'+label+'</strong></span><span>'+n+' ('+pct+'%)</span></div>'
+            +'<div style="height:8px;background:#eef2f7;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#0082A0"></div></div>'
+            +'</div>';
+        }).join('')
+    : '<p style="color:var(--muted);text-align:center;padding:20px">No delays recorded yet.</p>';
+
+  const list=_delayFiltered().slice(0,60);
+  document.getElementById('delay-list').innerHTML = list.length
+    ? list.map(d=>'<div class="flag-item"><div><strong>'+(d.community||'')+' '+(d.lot_number||'')+'</strong> \u00b7 #'+(d.bt_num||'')+' '+(d.task_name||'')
+        +' \u2014 <span style="color:#b91c1c;font-weight:600">'+d.reason_label+'</span>'+(d.source_lot_id?' <span style="font-size:11px;color:var(--muted)">(pushed)</span>':'')+'</div>'
+        +'<div class="flag-meta">'+(d.days_late||0)+'d late \u00b7 '+(d.builder_name||'')+' \u00b7 '+(d.created_at||'').slice(0,10)+(d.note?' \u00b7 '+d.note:'')+'</div></div>').join('')
+    : '<p style="color:var(--muted);text-align:center;padding:16px">None</p>';
+}
+
+function renderReasonList(){
+  document.getElementById('reason-list').innerHTML = delayReasons.map(r=>
+    '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center">'
+    +'<div'+(r.is_archived?' style="opacity:.45;text-decoration:line-through"':'')+'>'+r.label+'</div>'
+    +'<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="toggleReason(\''+r.id+'\','+(r.is_archived?'false':'true')+')">'
+    +(r.is_archived?'Restore':'Archive')+'</button></div>'
+  ).join('') || '<p style="color:var(--muted);padding:12px">No reasons</p>';
+}
+
+function openAddReasonModal(){
+  document.getElementById('reason-label').value = '';
+  document.getElementById('modal-add-reason').classList.add('open');
+  setTimeout(()=>document.getElementById('reason-label').focus(), 50);
+}
+
+async function submitAddReason(){
+  const el=document.getElementById('reason-label');
+  const label=(el.value||'').trim();
+  if(!label){ alert('Enter a reason'); return; }
+  if(delayReasons.find(r=>String(r.label).toLowerCase()===label.toLowerCase())){ alert('That reason already exists'); return; }
+  await sbCall('upsertDelayReason',{label, sort_order:50});
+  closeModal('modal-add-reason');
+  await loadReasonsOnly();
+}
+
+async function toggleReason(id, archive){
+  await sbCall('upsertDelayReason',{id, is_archived:archive});
+  await loadDelaysView();
+}
+
+function _setCritStatus(isCrit){
+  const el = document.getElementById('task-crit-status');
+  if(!el) return;
+  if(isCrit === null){ el.textContent = 'calculated on save'; el.style.color = '#94a3b8'; return; }
+  el.textContent = isCrit ? '◆ CRITICAL (zero float)' : '○ Has float';
+  el.style.color = isCrit ? '#0082A0' : '#64748b';
+}
+
+async function recalcCriticalPath(){
+  const r = await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
+  if(r && r.success){
+    await openTemplateEditor(tplEdit.id);
+    alert('Critical path recalculated: ' + r.critical + ' of ' + r.tasks + ' tasks are critical. Schedule runs ' + r.project_days + ' working days.');
+  } else {
+    alert('Could not recalculate.');
+  }
+}
+
+// ── PREDECESSOR PICKER ──
+let _predSel = [];   // array of bt_num
+
+function _setPreds(arr){
+  _predSel = (arr||[]).slice().sort((a,b)=>a-b);
+  document.getElementById('task-preds').value = _predSel.join(',');
+  renderPredChips();
+}
+function renderPredChips(){
+  const box = document.getElementById('task-preds-chips');
+  if(!box) return;
+  if(!_predSel.length){
+    box.innerHTML = '<span style="font-size:13px;color:var(--muted)">None</span>';
+    return;
+  }
+  box.innerHTML = _predSel.map(function(n){
+    const t = tplEdit.tasks.find(x=>x.bt_num===n);
+    return '<span style="display:inline-flex;align-items:center;gap:6px;background:#e6f6fb;color:#0082A0;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600">'
+      +'#'+n+(t?' '+t.name:'')
+      +'<button type="button" onclick="removePred('+n+')" style="border:none;background:none;color:#0082A0;cursor:pointer;font-size:14px;line-height:1;padding:0">×</button></span>';
+  }).join('');
+}
+function removePred(n){ _setPreds(_predSel.filter(x=>x!==n)); }
+
+function openPredPicker(){
+  const selfId = document.getElementById('task-id').value || null;
+  const self = selfId ? tplEdit.tasks.find(t=>t.id===selfId) : null;
+  document.getElementById('pred-picker-sub').textContent =
+    'Select the tasks that must finish first' + (self ? ' for #'+self.bt_num+' '+self.name : '') + '.';
+  document.getElementById('pred-search').value = '';
+  renderPredPicker();
+  document.getElementById('modal-pred-picker').classList.add('open');
+}
+
+function renderPredPicker(){
+  const q = (document.getElementById('pred-search').value||'').toLowerCase();
+  const selfId = document.getElementById('task-id').value || null;
+  const phaseName = {};
+  tplEdit.phases.forEach(p=>{ phaseName[p.id] = 'Phase '+p.phase_order+' · '+p.name; });
+  const list = tplEdit.tasks
+    .filter(t=>t.id!==selfId)
+    .filter(t=>!q || String(t.bt_num).indexOf(q)>=0 || String(t.name||'').toLowerCase().indexOf(q)>=0)
+    .sort((a,b)=>(a.task_order||0)-(b.task_order||0));
+  if(!list.length){
+    document.getElementById('pred-picker-list').innerHTML =
+      '<p style="color:var(--muted);text-align:center;padding:18px;font-size:13px">No tasks available.</p>';
+    return;
+  }
+  document.getElementById('pred-picker-list').innerHTML = list.map(function(t){
+    const on = _predSel.indexOf(t.bt_num)>=0;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #f1f5f9;cursor:pointer;background:'+(on?'#e6f6fb':'#fff')+'">'
+      +'<input type="checkbox" data-bt="'+t.bt_num+'" '+(on?'checked':'')+' onchange="togglePred(this)" style="width:16px;height:16px">'
+      +'<span style="flex:1"><strong>#'+t.bt_num+'</strong> '+(t.name||'')
+      +'<div class="flag-meta">'+(phaseName[t.phase_id]||'no phase')+' · dur '+(t.duration!=null?t.duration:'—')+'</div></span></label>';
+  }).join('');
+}
+function togglePred(cb){
+  const n = parseInt(cb.dataset.bt);
+  if(cb.checked){ if(_predSel.indexOf(n)<0) _predSel.push(n); }
+  else { _predSel = _predSel.filter(x=>x!==n); }
+}
+function applyPredPicker(){
+  _setPreds(_predSel);
+  closeModal('modal-pred-picker');
+}
+
+// ── TEMPLATE EDITOR ──
+let tplEdit = { id:null, template:null, phases:[], tasks:[] };
+
+async function openTemplateEditor(id){
+  tplEdit.id = id;
+  document.querySelectorAll('#setpane-schedules > .table-wrap').forEach(w=>w.style.display='none');
+  document.getElementById('tpl-editor').style.display = 'block';
+  document.getElementById('tpl-editor-body').innerHTML = '<div class="loading">Loading…</div>';
+  const d = await sbCall('getTemplateBuilder', { template_id: id }) || {};
+  tplEdit.template = d.template || null;
+  tplEdit.phases = d.phases || [];
+  tplEdit.tasks = d.tasks || [];
+  document.getElementById('tpl-editor-title').textContent =
+    'Edit: ' + (tplEdit.template ? tplEdit.template.name : '') +
+    '  (' + tplEdit.phases.length + ' phases · ' + tplEdit.tasks.length + ' tasks)';
+  renderTemplateEditor();
+}
+
+function closeTemplateEditor(){
+  document.getElementById('tpl-editor').style.display = 'none';
+  document.querySelectorAll('#setpane-schedules > .table-wrap').forEach(w=>w.style.display='');
+  loadTemplatesView();
+}
+
+function renderTemplateEditor(){
+  const box = document.getElementById('tpl-editor-body');
+  if(!tplEdit.phases.length && !tplEdit.tasks.length){
+    box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Empty template. Add a phase, then add tasks to it.</p>';
+    return;
+  }
+  const byPhase = {};
+  tplEdit.tasks.forEach(t=>{ const k=t.phase_id||'none'; (byPhase[k]=byPhase[k]||[]).push(t); });
+
+  let html = tplEdit.phases.slice().sort((a,b)=>(a.phase_order||0)-(b.phase_order||0)).map(p=>{
+    const ts = (byPhase[p.id]||[]).sort((a,b)=>(a.task_order||0)-(b.task_order||0));
+    const crit = ts.filter(t=>t.is_critical).length;
+    return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#dfe7ec">'
+      +  '<div style="font-weight:700;color:#334155">Phase '+p.phase_order+' · '+p.name+'</div>'
+      +  '<div style="display:flex;gap:6px;align-items:center">'
+      +    '<span class="flag-meta">'+ts.length+' tasks · '+crit+' critical</span>'
+      +    '<button class="btn btn-secondary btn-sm" onclick="openEditPhaseModal(\'' + p.id + '\')">Edit</button>'
+      +    '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deletePhaseUI(\'' + p.id + '\')">Delete</button>'
+      +  '</div></div>'
+      +'<div style="padding:4px 8px 8px">'
+      + (ts.length ? ts.map(_tplTaskRow).join('') : '<p style="color:var(--muted);padding:8px 4px;font-size:13px">No tasks in this phase.</p>')
+      +'</div></div>';
+  }).join('');
+
+  const orphans = (byPhase['none']||[]);
+  if(orphans.length){
+    html += '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;margin-bottom:8px;overflow:hidden">'
+      +'<div style="padding:9px 11px;font-weight:700;color:#b45309">⚠ Tasks with no phase ('+orphans.length+')</div>'
+      +'<div style="padding:4px 8px 8px">'+orphans.map(_tplTaskRow).join('')+'</div></div>';
+  }
+  box.innerHTML = html;
+}
+
+function _tplTaskRow(t){
+  const preds = Array.isArray(t.predecessors) && t.predecessors.length ? t.predecessors.join(', ') : '—';
+  return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+    +'<div>'+(t.is_critical?'<span style="color:#0082A0">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
+    +  '<strong>#'+(t.bt_num!=null?t.bt_num:'?')+'</strong> '+(t.name||'')
+    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+(t.force_critical?' · <span style="color:#0082A0">forced critical</span>':'')+'</div></div>'
+    +'<div style="display:flex;gap:6px;white-space:nowrap">'
+    +  '<button class="btn btn-secondary btn-sm" onclick="openEditTaskModal(\'' + t.id + '\')">Edit</button>'
+    +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTaskUI(\'' + t.id + '\')">Delete</button>'
+    +'</div></div>';
+}
+
+function openAddPhaseModal(){
+  document.getElementById('phase-modal-title').textContent='Add Phase';
+  document.getElementById('phase-id').value='';
+  document.getElementById('phase-name').value='';
+  document.getElementById('phase-order').value = (tplEdit.phases.length
+    ? Math.max.apply(null, tplEdit.phases.map(p=>p.phase_order||0))+1 : 1);
+  document.getElementById('modal-phase').classList.add('open');
+  setTimeout(function(){document.getElementById('phase-name').focus();},50);
+}
+function openEditPhaseModal(id){
+  const p = tplEdit.phases.find(x=>x.id===id); if(!p) return;
+  document.getElementById('phase-modal-title').textContent='Edit Phase';
+  document.getElementById('phase-id').value=p.id;
+  document.getElementById('phase-name').value=p.name||'';
+  document.getElementById('phase-order').value=p.phase_order!=null?p.phase_order:'';
+  document.getElementById('modal-phase').classList.add('open');
+}
+async function submitPhase(){
+  const id=document.getElementById('phase-id').value||null;
+  const name=(document.getElementById('phase-name').value||'').trim();
+  const orderRaw=(document.getElementById('phase-order').value||'').trim();
+  if(!name){ alert('Enter a phase name'); return; }
+  const body = id ? { id, name } : { template_id: tplEdit.id, name };
+  if(orderRaw!=='') body.phase_order = parseInt(orderRaw);
+  await sbCall('upsertTemplatePhase', body);
+  closeModal('modal-phase');
+  await openTemplateEditor(tplEdit.id);
+}
+async function deletePhaseUI(id){
+  const p = tplEdit.phases.find(x=>x.id===id);
+  if(!confirm('Delete phase "'+(p?p.name:'')+'"?')) return;
+  const r = await sbCall('deleteTemplatePhase', { id });
+  if(r && r.error){ alert(r.error); return; }
+  await openTemplateEditor(tplEdit.id);
+}
+
+function _fillPhaseSelect(sel){
+  sel.innerHTML = '<option value="">— no phase —</option>' + tplEdit.phases
+    .slice().sort((a,b)=>(a.phase_order||0)-(b.phase_order||0))
+    .map(p=>'<option value="'+p.id+'">Phase '+p.phase_order+' · '+p.name+'</option>').join('');
+}
+function openAddTaskModal(){
+  if(!tplEdit.phases.length){ alert('Add a phase first — tasks live inside phases.'); return; }
+  document.getElementById('task-modal-title').textContent='Add Task';
+  document.getElementById('task-id').value='';
+  const nextBt = tplEdit.tasks.length ? Math.max.apply(null,tplEdit.tasks.map(t=>t.bt_num||0))+1 : 1;
+  const nextOrd = tplEdit.tasks.length ? Math.max.apply(null,tplEdit.tasks.map(t=>t.task_order||0))+1 : 1;
+  document.getElementById('task-btnum').value=nextBt;
+  document.getElementById('task-name').value='';
+  _fillPhaseSelect(document.getElementById('task-phase'));
+  document.getElementById('task-duration').value=1;
+  document.getElementById('task-lag').value=0;
+  _setPreds([]);
+  document.getElementById('task-rs').value='';
+  document.getElementById('task-rf').value='';
+  document.getElementById('task-order').value=nextOrd;
+  document.getElementById('task-type').value='work';
+  document.getElementById('task-trade').value='';
+  document.getElementById('task-force-critical').checked=false;
+  _setCritStatus(null);
+  document.getElementById('modal-task').classList.add('open');
+  setTimeout(function(){document.getElementById('task-name').focus();},50);
+}
+function openEditTaskModal(id){
+  const t = tplEdit.tasks.find(x=>x.id===id); if(!t) return;
+  document.getElementById('task-modal-title').textContent='Edit Task';
+  document.getElementById('task-id').value=t.id;
+  document.getElementById('task-btnum').value=t.bt_num!=null?t.bt_num:'';
+  document.getElementById('task-name').value=t.name||'';
+  _fillPhaseSelect(document.getElementById('task-phase'));
+  document.getElementById('task-phase').value=t.phase_id||'';
+  document.getElementById('task-duration').value=t.duration!=null?t.duration:1;
+  document.getElementById('task-lag').value=t.lag!=null?t.lag:0;
+  _setPreds(Array.isArray(t.predecessors)?t.predecessors:[]);
+  document.getElementById('task-rs').value=t.relative_start!=null?t.relative_start:'';
+  document.getElementById('task-rf').value=t.relative_finish!=null?t.relative_finish:'';
+  document.getElementById('task-order').value=t.task_order!=null?t.task_order:'';
+  document.getElementById('task-type').value=t.task_type||'work';
+  document.getElementById('task-trade').value=t.trade||'';
+  document.getElementById('task-force-critical').checked=!!t.force_critical;
+  _setCritStatus(!!t.is_critical);
+  document.getElementById('modal-task').classList.add('open');
+}
+async function submitTask(){
+  const id=document.getElementById('task-id').value||null;
+  const name=(document.getElementById('task-name').value||'').trim();
+  if(!name){ alert('Enter a task name'); return; }
+  const num=function(v){ const s=(document.getElementById(v).value||'').trim(); return s===''?null:parseInt(s); };
+  const preds = _predSel.slice();
+  const body = {
+    bt_num: num('task-btnum'), name,
+    phase_id: document.getElementById('task-phase').value || null,
+    duration: num('task-duration'), lag: num('task-lag'),
+    relative_start: num('task-rs'), relative_finish: num('task-rf'),
+    predecessors: preds,
+    trade: (document.getElementById('task-trade').value||'').trim() || null,
+    force_critical: document.getElementById('task-force-critical').checked,
+    task_type: document.getElementById('task-type').value,
+    task_order: num('task-order')
+  };
+  if(id) body.id = id; else body.template_id = tplEdit.id;
+  await sbCall('upsertTemplateTask', body);
+  await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
+  closeModal('modal-task');
+  await openTemplateEditor(tplEdit.id);
+}
+async function deleteTaskUI(id){
+  const t = tplEdit.tasks.find(x=>x.id===id);
+  if(!confirm('Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?')) return;
+  await sbCall('deleteTemplateTask', { id });
+  await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
+  await openTemplateEditor(tplEdit.id);
+}
+
+// ── SCHEDULE TEMPLATES ──
+let templates = [], templateStats = {}, _cloneSrcId = null;
+
+async function loadTemplatesView(){
+  templates = await sbCall('getTemplates', {}) || [];
+  templateStats = {};
+  await Promise.all(templates.map(async t => {
+    templateStats[t.id] = await sbCall('getTemplateDetail', { template_id: t.id }) || {};
+  }));
+  renderTemplatesList();
+}
+
+function renderTemplatesList(){
+  const box = document.getElementById('templates-list');
+  if(!templates.length){
+    box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No templates yet. Create one, or clone an existing schedule.</p>';
+    return;
+  }
+  box.innerHTML = templates.map(t => {
+    const s = templateStats[t.id] || {};
+    const inUse = s.lots_using || 0;
+    const archived = t.status === 'archived';
+    return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:12px">'
+      + '<div' + (archived ? ' style="opacity:.5"' : '') + '>'
+      +   '<div style="font-weight:700;font-size:14px">' + t.name + (archived ? ' <span style="font-size:11px;color:var(--muted)">(archived)</span>' : '') + '</div>'
+      +   '<div class="flag-meta">' + (s.phases||0) + ' phases · ' + (s.tasks||0) + ' tasks · ' + (s.gates||0) + ' gates · ' + (s.stages||0) + ' stages'
+      +     (inUse ? ' · <strong>' + inUse + ' lot' + (inUse===1?'':'s') + ' using</strong>' : ' · not in use')
+      +     (t.description ? ' · ' + t.description : '') + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px;white-space:nowrap">'
+      +   '<button class="btn btn-primary btn-sm" onclick="openTemplateEditor(\''+t.id+'\')">Edit</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="openCloneTemplateModal(\''+t.id+'\')">Clone</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="renameTemplate(\''+t.id+'\')">Rename</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="toggleTemplateArchive(\''+t.id+'\','+(archived?'false':'true')+')">' + (archived ? 'Restore' : 'Archive') + '</button>'
+      +   (inUse ? '' : '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTemplateUI(\''+t.id+'\',\''+String(t.name).replace(/'/g,"\\'")+'\')">Delete</button>')
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function openAddTemplateModal(){
+  ['tpl-name','tpl-desc','tpl-days'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  document.getElementById('modal-add-template').classList.add('open');
+  setTimeout(()=>document.getElementById('tpl-name').focus(), 50);
+}
+
+async function submitAddTemplate(){
+  const name=(document.getElementById('tpl-name').value||'').trim();
+  if(!name){ alert('Enter a template name'); return; }
+  if(templates.find(t=>String(t.name).toLowerCase()===name.toLowerCase())){ alert('A template with that name already exists'); return; }
+  const desc=(document.getElementById('tpl-desc').value||'').trim();
+  const daysRaw=(document.getElementById('tpl-days').value||'').trim();
+  const r = await sbCall('createTemplate', { name, description: desc||null, total_days: daysRaw? parseInt(daysRaw): null });
+  if(r){ closeModal('modal-add-template'); await loadTemplatesView(); }
+  else alert('Could not create template.');
+}
+
+function openCloneTemplateModal(id){
+  const t = templates.find(x=>x.id===id);
+  _cloneSrcId = id;
+  const s = templateStats[id] || {};
+  document.getElementById('clone-src-label').textContent =
+    'Copying "' + (t?t.name:'') + '" — ' + (s.phases||0) + ' phases, ' + (s.tasks||0) + ' tasks, ' + (s.gates||0) + ' gates, ' + (s.stages||0) + ' stages.';
+  document.getElementById('clone-name').value = t ? (t.name + ' (copy)') : '';
+  document.getElementById('modal-clone-template').classList.add('open');
+  setTimeout(()=>document.getElementById('clone-name').select(), 50);
+}
+
+async function submitCloneTemplate(){
+  const name=(document.getElementById('clone-name').value||'').trim();
+  if(!name){ alert('Enter a name for the copy'); return; }
+  if(templates.find(t=>String(t.name).toLowerCase()===name.toLowerCase())){ alert('A template with that name already exists'); return; }
+  const btn=document.querySelector('#modal-clone-template .btn-primary');
+  if(btn){ btn.disabled=true; btn.textContent='Cloning…'; }
+  const r = await sbCall('cloneTemplate', { source_id: _cloneSrcId, name });
+  if(btn){ btn.disabled=false; btn.textContent='Clone →'; }
+  if(r && r.success){
+    closeModal('modal-clone-template');
+    await loadTemplatesView();
+    alert('Cloned: ' + r.tasks + ' tasks, ' + r.phases + ' phases, ' + r.gates + ' gates, ' + r.stages + ' stages.');
+  } else {
+    alert('Clone failed' + (r && r.error ? ': ' + r.error : '.'));
+  }
+}
+
+async function renameTemplate(id){
+  const t = templates.find(x=>x.id===id);
+  const name = prompt('Rename template:', t ? t.name : '');
+  if(name===null) return;
+  const trimmed = name.trim();
+  if(!trimmed){ alert('Name cannot be empty'); return; }
+  await sbCall('updateTemplate', { id, name: trimmed });
+  await loadTemplatesView();
+}
+
+async function toggleTemplateArchive(id, archive){
+  await sbCall('updateTemplate', { id, status: archive ? 'archived' : 'active' });
+  await loadTemplatesView();
+}
+
+async function deleteTemplateUI(id, name){
+  if(!confirm('Delete "'+name+'" permanently? This removes its phases, tasks, gates and stage map. Lots already stamped are unaffected.')) return;
+  const r = await sbCall('deleteTemplate', { id });
+  if(r && r.error){ alert(r.error); return; }
+  await loadTemplatesView();
+}
+
+function showSettingsPane(name, el){
+  document.querySelectorAll('.set-pane').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.set-tab').forEach(t=>t.classList.remove('active'));
+  const pane=document.getElementById('setpane-'+name);
+  if(pane) pane.classList.add('active');
+  if(el) el.classList.add('active');
+  if(name==='reasons') loadReasonsOnly();
+  if(name==='schedules') loadTemplatesView();
+}
+
+async function loadSettingsView(){
+  // builders + subdivisions render from data already loaded by loadAll()
+  if (typeof renderBuildersTable==='function') renderBuildersTable();
+  if (typeof renderSubdivisionsTable==='function') renderSubdivisionsTable();
+  if (typeof renderCompanies==='function') renderCompanies();
+}
+
+async function loadReasonsOnly(){
+  delayReasons = await sbCall('getDelayReasons', { include_archived: true }) || [];
+  renderReasonList();
+}
+
 function showSection(name, tabEl) {
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
@@ -1668,22 +2512,27 @@ function showSection(name, tabEl) {
 // ── EXPORT ──
 function exportCSV() {
   const today = new Date().toISOString().split('T')[0];
-  const data = scheduleLots.filter(l=>l.status==='active').sort((a,b)=>{
-    if ((a.community||'')!==(b.community||'')) return (a.community||'').localeCompare(b.community||'');
-    return (a.lot_number||'').localeCompare(b.lot_number||'',undefined,{numeric:true});
-  });
+  // Mirror the on-screen table exactly — same filters, same sort.
+  const data = getFilteredLots();
+  if (!data.length) { alert('No lots match your current filters — nothing to export.'); return; }
+  // ISO helper: spreadsheets read YYYY-MM-DD as a real date (no more "2-OCT-26").
+  const iso = d => d ? (typeof d==='string' ? d.slice(0,10)
+    : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))) : '';
   const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Planned Completion','Close Status','Scheduled Close'];
   const rows = data.map(l => {
     const planned = calcPlannedCompletion(l.construction_start_date);
-    const planStr = planned ? planned.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+    const planStr = iso(planned);
     const closeStatus = l.scheduled_close_date && l.scheduled_close_date<today ? 'Past Due'
       : l.scheduled_close_date ? 'Scheduled'
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
       : 'Not Yet';
-    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',l.construction_start_date||'',planStr,closeStatus,l.scheduled_close_date||''];
+    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),planStr,closeStatus,iso(l.scheduled_close_date)];
   });
   const csv = [hdrs,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:'Ashland_Lots_'+today+'.csv'});
+  // filename reflects the active company filter when one is set
+  let tag = 'All';
+  try { const cid=getActiveCompanyId&&getActiveCompanyId(); if(cid){ const co=(companies||[]).find(c=>c.id===cid); if(co&&co.name) tag=co.name.replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,''); } } catch(e){}
+  const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:tag+'_Lots_'+today+'.csv'});
   a.click();
 }
 
