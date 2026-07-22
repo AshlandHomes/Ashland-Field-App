@@ -433,7 +433,12 @@ exports.handler = async function(event) {
               if (start === null || cand > start) start = cand;
             }
           });
-          if (start === null) start = (t.relative_start != null ? t.relative_start : 1);
+          // relative_start is a FLOOR, not a fallback: a task never starts earlier
+          // than its planned day even if its predecessors finish sooner.
+          if (t.relative_start != null && (start === null || t.relative_start > start)) {
+            start = t.relative_start;
+          }
+          if (start === null) start = 1;
           ES[num] = start;
           EF[num] = start + dur(t) - 1;
           return EF[num];
