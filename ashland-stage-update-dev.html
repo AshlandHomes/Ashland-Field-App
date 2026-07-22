@@ -182,6 +182,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .dr-note{width:100%;min-height:56px;border:1px solid #dfe4e7;border-radius:8px;padding:9px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
 .dr-foot{display:flex;justify-content:flex-end;margin-top:12px}
 .dr-cancel{background:#ecf0f1;border:none;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:600;color:#7f8c8d;cursor:pointer}
+.dr-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
+.dr-save{background:#27ae60;border:none;border-radius:9px;padding:11px 22px;font-size:14px;font-weight:700;color:#fff;cursor:pointer}
+.dr-save:disabled{opacity:.4;cursor:not-allowed}
+.dr-opt.sel{background:#eaf4fb;border-color:#3498db;box-shadow:inset 0 0 0 1px #3498db}
 </style>
 </head>
 <body>
@@ -819,25 +823,40 @@ async function openDelayReasonModal(btNum, taskName, plannedYmd, actualYmd, days
       +'<div class="dr-opts">'+opts+'</div>'
       +'<textarea id="dr-note" class="dr-note" placeholder="Optional note (required if you choose Other)\u2026"></textarea>'
       +'<div id="dr-warn" style="display:none;color:#c0392b;font-size:12px;margin-top:6px">A note is required when choosing \u201cOther\u201d.</div>'
-      +'<div class="dr-foot"><button class="dr-cancel">Cancel</button></div>'
+      +'<div class="dr-foot"><button class="dr-cancel">Cancel</button><button class="dr-save" id="dr-save" disabled>Save</button></div>'
       +'</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
     const ov=document.getElementById('dr-overlay');
+    const noteEl=document.getElementById('dr-note');
+    const warnEl=document.getElementById('dr-warn');
+    const saveEl=document.getElementById('dr-save');
+    let picked=null;
+
+    function refresh(){
+      const note=((noteEl||{}).value||'').trim();
+      const needsNote = picked && /^other$/i.test(picked.label) && !note;
+      warnEl.style.display = needsNote ? 'block' : 'none';
+      if(noteEl) noteEl.style.borderColor = needsNote ? '#c0392b' : '#dfe4e7';
+      saveEl.disabled = !picked || needsNote;
+    }
+
     ov.querySelectorAll('.dr-opt').forEach(b=>{
       b.onclick=()=>{
-        const noteEl=document.getElementById('dr-note');
-        const note=((noteEl||{}).value||'').trim();
-        // "Other" is only useful with an explanation — require it.
-        if(/^other$/i.test(b.dataset.label) && !note){
-          const warn=document.getElementById('dr-warn');
-          if(warn) warn.style.display='block';
-          if(noteEl){ noteEl.style.borderColor='#c0392b'; noteEl.focus(); }
-          return;
-        }
-        ov.remove(); const r=_drResolve; _drResolve=null;
-        r({id:b.dataset.id, label:b.dataset.label, note:note});
+        ov.querySelectorAll('.dr-opt').forEach(x=>x.classList.remove('sel'));
+        b.classList.add('sel');
+        picked={id:b.dataset.id, label:b.dataset.label};
+        refresh();
+        if(/^other$/i.test(b.dataset.label) && noteEl) noteEl.focus();
       };
     });
+    if(noteEl) noteEl.oninput=refresh;
+
+    saveEl.onclick=()=>{
+      if(saveEl.disabled) return;
+      const note=((noteEl||{}).value||'').trim();
+      ov.remove(); const r=_drResolve; _drResolve=null;
+      r({id:picked.id, label:picked.label, note:note});
+    };
     ov.querySelector('.dr-cancel').onclick=()=>{ ov.remove(); const r=_drResolve; _drResolve=null; r(null); };
   });
 }
