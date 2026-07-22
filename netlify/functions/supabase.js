@@ -398,6 +398,94 @@ exports.handler = async function(event) {
         }) };
       }
 
+      case 'getTemplateBuilder': {
+        // Full editable payload for one template: phases + tasks (with real ids).
+        const { template_id } = payload;
+        if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
+        const [ph, tk, tpl] = await Promise.all([
+          supabaseRequest('GET', `sched_template_phases?template_id=eq.${template_id}&select=*&order=phase_order`),
+          supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=*&order=task_order`),
+          supabaseRequest('GET', `sched_templates?id=eq.${template_id}&select=*`)
+        ]);
+        return { statusCode: 200, body: JSON.stringify({
+          template: (tpl.data || [])[0] || null,
+          phases: ph.data || [],
+          tasks: tk.data || []
+        }) };
+      }
+
+      case 'upsertTemplatePhase': {
+        const { id, template_id, name, phase_order } = payload;
+        if (!id && (!template_id || !name)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and name required' }) };
+        }
+        let r;
+        if (id) {
+          const upd = {};
+          if (name !== undefined) upd.name = name;
+          if (phase_order !== undefined) upd.phase_order = phase_order;
+          r = await supabaseRequest('PATCH', `sched_template_phases?id=eq.${id}`, upd);
+        } else {
+          r = await supabaseRequest('POST', 'sched_template_phases', {
+            template_id, name, phase_order: phase_order != null ? phase_order : 0
+          });
+        }
+        const row = Array.isArray(r.data) ? r.data[0] : r.data;
+        return { statusCode: 200, body: JSON.stringify(row || null) };
+      }
+
+      case 'deleteTemplatePhase': {
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+        const t = await supabaseRequest('GET', `sched_template_tasks?phase_id=eq.${id}&select=id&limit=1`);
+        if ((t.data || []).length) {
+          return { statusCode: 200, body: JSON.stringify({ error: 'This phase still has tasks. Move or delete them first.' }) };
+        }
+        await supabaseRequest('DELETE', `sched_template_phases?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
+      case 'upsertTemplateTask': {
+        const { id, template_id, bt_num, name, phase_id, duration, lag,
+                relative_start, relative_finish, predecessors, is_critical,
+                task_type, task_order, notification } = payload;
+        if (!id && (!template_id || !name)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and name required' }) };
+        }
+        const f = {};
+        if (bt_num !== undefined)          f.bt_num = bt_num;
+        if (name !== undefined)            f.name = name;
+        if (phase_id !== undefined)        f.phase_id = phase_id;
+        if (duration !== undefined)        f.duration = duration;
+        if (lag !== undefined)             f.lag = lag;
+        if (relative_start !== undefined)  f.relative_start = relative_start;
+        if (relative_finish !== undefined) f.relative_finish = relative_finish;
+        if (predecessors !== undefined)    f.predecessors = predecessors;
+        if (is_critical !== undefined)     f.is_critical = is_critical;
+        if (task_type !== undefined)       f.task_type = task_type;
+        if (task_order !== undefined)      f.task_order = task_order;
+        if (notification !== undefined)    f.notification = notification;
+        let r;
+        if (id) {
+          r = await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${id}`, f);
+        } else {
+          f.template_id = template_id;
+          if (f.task_type === undefined) f.task_type = 'work';
+          r = await supabaseRequest('POST', 'sched_template_tasks', f);
+        }
+        const row = Array.isArray(r.data) ? r.data[0] : r.data;
+        return { statusCode: 200, body: JSON.stringify(row || null) };
+      }
+
+      case 'deleteTemplateTask': {
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+        // clear any stage-map trigger referencing this task
+        await supabaseRequest('DELETE', `sched_stage_map_tasks?task_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_tasks?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
       case 'getTemplates': {
         const r = await supabaseRequest('GET', 'sched_templates?select=id,name,description,status,total_days&order=name');
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
