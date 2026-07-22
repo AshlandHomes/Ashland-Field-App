@@ -134,7 +134,7 @@ tr:hover td{background:#f9fafb}
 /* ===== SETTINGS SUB-NAV ===== */
 .set-subnav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
 .set-tab{background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 15px;font-family:inherit;font-size:13px;font-weight:600;color:#64748b;cursor:pointer}
-.set-tab.active{background:#4338ca;border-color:#4338ca;color:#fff}
+.set-tab.active{background:#0082A0;border-color:#0082A0;color:#fff}
 .set-pane{display:none}
 .set-pane.active{display:block}
 </style>
@@ -628,7 +628,7 @@ tr:hover td{background:#f9fafb}
       <input id="task-trade" type="text" placeholder="e.g. Plumber, Framer, Electrician">
       <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Who performs this task. Used to analyse delays by trade.</p>
     </div>
-    <div class="field" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:11px">
+    <div class="field" style="background:#dfe7ec;border:1px solid var(--line);border-radius:8px;padding:11px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <label style="margin:0">Critical Path</label>
         <span id="task-crit-status" style="font-size:12px;font-weight:700"></span>
@@ -1181,7 +1181,7 @@ async function openStageModal(lotId){
   const ladder = sorted.map(s=>{
     const isRep = s.code===rep;
     const isTrue = s.code===tru;
-    const bg = isRep ? '#0369a1' : (isTrue ? '#e0f2fe' : '#f8fafc');
+    const bg = isRep ? '#0369a1' : (isTrue ? '#e0f2fe' : '#dfe7ec');
     const fg = isRep ? '#fff' : '#334155';
     const tags = (isRep?' <span style="font-size:10px;background:#fff;color:#0369a1;padding:1px 5px;border-radius:3px">REPORTED</span>':'')
                + (isTrue&&!isRep?' <span style="font-size:10px;background:#0369a1;color:#fff;padding:1px 5px;border-radius:3px">TRUE</span>':'');
@@ -1369,7 +1369,7 @@ function phaseCell(lot){
   const p = lotPhases[lot.id];
   if(!p || p.activePhase==null) return '<span style=\"color:var(--muted)\">—</span>';
   const behind = (p.behind&&p.behind.length) ? ' <span style=\"color:#b91c1c;font-weight:700\">⚠'+p.behind.length+'</span>' : '';
-  return '<button class=\"badge\" style=\"background:#eef2ff;color:#4338ca;border:none;cursor:pointer;font-weight:700\" '
+  return '<button class=\"badge\" style=\"background:#e6f6fb;color:#0082A0;border:none;cursor:pointer;font-weight:700\" '
     + 'onclick=\"openPhaseModal(\''+lot.id+'\')\" title=\"'+(p.activePhaseName||'')+'\">'+p.activePhase+'</button>'+behind;
 }
 let phModalFilter = 'all';
@@ -1389,7 +1389,7 @@ function _phKeep(t){
 function _phDot(s){ return s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>'); }
 function _phLbl(s){ return s==='finished'?'Finished':(s==='started'?'Started':'Not started'); }
 function _phTaskRow(t){
-  const crit = t.is_critical ? '<span style=\"color:#4338ca\">◆</span> ' : '';
+  const crit = t.is_critical ? '<span style=\"color:#0082A0\">◆</span> ' : '';
   const isAction = (t.task_type||'work')==='action';
   const mark = isAction ? '📋 ' : '';
   const trade = t.trade ? ' <span style=\"font-size:11px;color:#64748b\">· '+t.trade+'</span>' : '';
@@ -1412,7 +1412,7 @@ function openPhaseModal(lotId){
   let nW=0,nA=0;
   Object.values(p.phases).forEach(ph=>ph.tasks.forEach(t=>{ ((t.task_type||'work')==='action') ? nA++ : nW++; }));
   const _fb=(v,label,n)=>'<button class=\"btn btn-sm\" style=\"flex:1;'
-    +(phModalFilter===v?'background:#4338ca;color:#fff':'background:#fff;border:1px solid var(--line);color:#64748b')
+    +(phModalFilter===v?'background:#0082A0;color:#fff':'background:#fff;border:1px solid var(--line);color:#64748b')
     +'\" onclick=\"setPhaseModalFilter(\''+v+'\')\">'+label+' ('+n+')</button>';
   let html='<div style=\"display:flex;gap:6px;margin-bottom:12px\">'
     + _fb('all','All',nW+nA) + _fb('work','🔨 On site',nW) + _fb('action','📋 To-dos',nA)
@@ -1432,8 +1432,8 @@ function openPhaseModal(lotId){
     if(!shown.length) return '';
     const done = shown.filter(t=>t.status==='finished').length;
     html += '<div style=\"border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden\">'
-      +'<div onclick=\"togglePhaseSection('+po+')\" style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;background:'+(isActive?'#eef2ff':'#f8fafc')+'\">'
-      +'<div style=\"font-weight:'+(isActive?700:600)+';color:'+(isActive?'#4338ca':'#334155')+'\"><span id=\"phar-'+po+'\">'+(open?'▾':'▸')+'</span> Phase '+po+' · '+ph.name+(isActive?' <span style=\"font-size:11px;background:#4338ca;color:#fff;padding:1px 6px;border-radius:4px\">ACTIVE</span>':'')+'</div>'
+      +'<div onclick=\"togglePhaseSection('+po+')\" style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;background:'+(isActive?'#e6f6fb':'#dfe7ec')+'\">'
+      +'<div style=\"font-weight:'+(isActive?700:600)+';color:'+(isActive?'#0082A0':'#334155')+'\"><span id=\"phar-'+po+'\">'+(open?'▾':'▸')+'</span> Phase '+po+' · '+ph.name+(isActive?' <span style=\"font-size:11px;background:#0082A0;color:#fff;padding:1px 6px;border-radius:4px\">ACTIVE</span>':'')+'</div>'
       +'<div class=\"flag-meta\">'+done+'/'+shown.length+'</div></div>'
       +'<div id=\"phsec-'+po+'\" style=\"display:'+(open?'block':'none')+';padding:6px 8px\">'
       + shown.map(_phTaskRow).join('')
@@ -2066,7 +2066,7 @@ function renderDelaysView(){
           const pct=Math.round(n/total*100);
           return '<div style="margin-bottom:7px">'
             +'<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px"><span><strong>'+label+'</strong></span><span>'+n+' ('+pct+'%)</span></div>'
-            +'<div style="height:8px;background:#eef2f7;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#4338ca"></div></div>'
+            +'<div style="height:8px;background:#eef2f7;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#0082A0"></div></div>'
             +'</div>';
         }).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No delays recorded yet.</p>';
@@ -2114,7 +2114,7 @@ function _setCritStatus(isCrit){
   if(!el) return;
   if(isCrit === null){ el.textContent = 'calculated on save'; el.style.color = '#94a3b8'; return; }
   el.textContent = isCrit ? '◆ CRITICAL (zero float)' : '○ Has float';
-  el.style.color = isCrit ? '#4338ca' : '#64748b';
+  el.style.color = isCrit ? '#0082A0' : '#64748b';
 }
 
 async function recalcCriticalPath(){
@@ -2144,9 +2144,9 @@ function renderPredChips(){
   }
   box.innerHTML = _predSel.map(function(n){
     const t = tplEdit.tasks.find(x=>x.bt_num===n);
-    return '<span style="display:inline-flex;align-items:center;gap:6px;background:#eef2ff;color:#4338ca;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600">'
+    return '<span style="display:inline-flex;align-items:center;gap:6px;background:#e6f6fb;color:#0082A0;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600">'
       +'#'+n+(t?' '+t.name:'')
-      +'<button type="button" onclick="removePred('+n+')" style="border:none;background:none;color:#4338ca;cursor:pointer;font-size:14px;line-height:1;padding:0">×</button></span>';
+      +'<button type="button" onclick="removePred('+n+')" style="border:none;background:none;color:#0082A0;cursor:pointer;font-size:14px;line-height:1;padding:0">×</button></span>';
   }).join('');
 }
 function removePred(n){ _setPreds(_predSel.filter(x=>x!==n)); }
@@ -2177,7 +2177,7 @@ function renderPredPicker(){
   }
   document.getElementById('pred-picker-list').innerHTML = list.map(function(t){
     const on = _predSel.indexOf(t.bt_num)>=0;
-    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #f1f5f9;cursor:pointer;background:'+(on?'#eef2ff':'#fff')+'">'
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #f1f5f9;cursor:pointer;background:'+(on?'#e6f6fb':'#fff')+'">'
       +'<input type="checkbox" data-bt="'+t.bt_num+'" '+(on?'checked':'')+' onchange="togglePred(this)" style="width:16px;height:16px">'
       +'<span style="flex:1"><strong>#'+t.bt_num+'</strong> '+(t.name||'')
       +'<div class="flag-meta">'+(phaseName[t.phase_id]||'no phase')+' · dur '+(t.duration!=null?t.duration:'—')+'</div></span></label>';
@@ -2230,7 +2230,7 @@ function renderTemplateEditor(){
     const ts = (byPhase[p.id]||[]).sort((a,b)=>(a.task_order||0)-(b.task_order||0));
     const crit = ts.filter(t=>t.is_critical).length;
     return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#f8fafc">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#dfe7ec">'
       +  '<div style="font-weight:700;color:#334155">Phase '+p.phase_order+' · '+p.name+'</div>'
       +  '<div style="display:flex;gap:6px;align-items:center">'
       +    '<span class="flag-meta">'+ts.length+' tasks · '+crit+' critical</span>'
@@ -2254,9 +2254,9 @@ function renderTemplateEditor(){
 function _tplTaskRow(t){
   const preds = Array.isArray(t.predecessors) && t.predecessors.length ? t.predecessors.join(', ') : '—';
   return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
-    +'<div>'+(t.is_critical?'<span style="color:#4338ca">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
+    +'<div>'+(t.is_critical?'<span style="color:#0082A0">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
     +  '<strong>#'+(t.bt_num!=null?t.bt_num:'?')+'</strong> '+(t.name||'')
-    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+(t.force_critical?' · <span style="color:#4338ca">forced critical</span>':'')+'</div></div>'
+    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+(t.force_critical?' · <span style="color:#0082A0">forced critical</span>':'')+'</div></div>'
     +'<div style="display:flex;gap:6px;white-space:nowrap">'
     +  '<button class="btn btn-secondary btn-sm" onclick="openEditTaskModal(\'' + t.id + '\')">Edit</button>'
     +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTaskUI(\'' + t.id + '\')">Delete</button>'
