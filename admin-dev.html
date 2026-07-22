@@ -174,6 +174,7 @@ tr:hover td{background:#f9fafb}
     <div class="nav-tab active" onclick="showSection('lots',this)">🏗 Lots</div>
     <div class="nav-tab" onclick="showSection('builders',this)">👷 Builders</div>
     <div class="nav-tab" onclick="showSection('subdivisions',this)">🏘 Subdivisions</div>
+    <div class="nav-tab" onclick="showSection('delays',this);loadDelaysView()">⏱ Delays</div>
   </div>
 
   <div class="content">
@@ -227,6 +228,39 @@ tr:hover td{background:#f9fafb}
     </div>
 
     <!-- SUBDIVISIONS -->
+    <div class="section" id="section-delays">
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div class="table-header">
+          <h2>⏱ Delay Reasons — frequency</h2>
+          <div class="table-actions">
+            <select id="delay-filter-sub" onchange="renderDelaysView()"><option value="">All subdivisions</option></select>
+            <select id="delay-filter-bld" onchange="renderDelaysView()"><option value="">All builders</option></select>
+            <select id="delay-count-mode" onchange="renderDelaysView()">
+              <option value="lot">Count by lot</option>
+              <option value="event">Count by event</option>
+            </select>
+          </div>
+        </div>
+        <div id="delay-summary" style="padding:12px"></div>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div class="table-header"><h2>Recent delays</h2></div>
+        <div id="delay-list" style="padding:6px 12px 12px"></div>
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-header">
+          <h2>Manage reason list</h2>
+          <div class="table-actions">
+            <input id="new-reason-label" placeholder="New reason…" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px">
+            <button class="btn btn-primary" onclick="addDelayReason()">Add</button>
+          </div>
+        </div>
+        <div id="reason-list" style="padding:6px 12px 12px"></div>
+      </div>
+    </div>
+
     <div class="section" id="section-subdivisions">
       <!-- Companies card -->
       <div class="table-wrap" style="margin-bottom:20px">
@@ -1766,6 +1800,90 @@ async function submitAddSubdivision() {
 }
 
 // ── NAVIGATION ──
+// ── DELAYS VIEW ──
+let delayRows = [], delayReasons = [];
+
+async function loadDelaysView(){
+  const [rows, reasons] = await Promise.all([
+    sbCall('getTaskDelays', {}),
+    sbCall('getDelayReasons', { include_archived: true })
+  ]);
+  delayRows = rows || [];
+  delayReasons = reasons || [];
+  // populate filters
+  const subs = [...new Set(delayRows.map(d=>d.community).filter(Boolean))].sort();
+  const blds = [...new Set(delayRows.map(d=>d.builder_name).filter(Boolean))].sort();
+  const ss=document.getElementById('delay-filter-sub'), bs=document.getElementById('delay-filter-bld');
+  ss.innerHTML='<option value="">All subdivisions</option>'+subs.map(s=>'<option>'+s+'</option>').join('');
+  bs.innerHTML='<option value="">All builders</option>'+blds.map(b=>'<option>'+b+'</option>').join('');
+  renderReasonList();
+  renderDelaysView();
+}
+
+function _delayFiltered(){
+  const s=document.getElementById('delay-filter-sub').value;
+  const b=document.getElementById('delay-filter-bld').value;
+  return delayRows.filter(d=>(!s||d.community===s)&&(!b||d.builder_name===b));
+}
+
+function renderDelaysView(){
+  const mode=document.getElementById('delay-count-mode').value;
+  let rows=_delayFiltered();
+  // count by EVENT = collapse pushed copies back to their source occurrence
+  if(mode==='event'){
+    const seen=new Set(); const out=[];
+    rows.forEach(d=>{
+      const key=(d.source_lot_id||d.lot_id)+'|'+d.bt_num+'|'+(d.actual_finish||'');
+      if(!seen.has(key)){ seen.add(key); out.push(d); }
+    });
+    rows=out;
+  }
+  const tally={};
+  rows.forEach(d=>{ tally[d.reason_label]=(tally[d.reason_label]||0)+1; });
+  const total=rows.length;
+  const sorted=Object.entries(tally).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('delay-summary').innerHTML = total
+    ? '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">'+total+' delay'+(total===1?'':'s')+' \u00b7 counting by '+(mode==='event'?'event':'lot')+'</div>'
+      + sorted.map(([label,n])=>{
+          const pct=Math.round(n/total*100);
+          return '<div style="margin-bottom:7px">'
+            +'<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px"><span><strong>'+label+'</strong></span><span>'+n+' ('+pct+'%)</span></div>'
+            +'<div style="height:8px;background:#eef2f7;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#4338ca"></div></div>'
+            +'</div>';
+        }).join('')
+    : '<p style="color:var(--muted);text-align:center;padding:20px">No delays recorded yet.</p>';
+
+  const list=_delayFiltered().slice(0,60);
+  document.getElementById('delay-list').innerHTML = list.length
+    ? list.map(d=>'<div class="flag-item"><div><strong>'+(d.community||'')+' '+(d.lot_number||'')+'</strong> \u00b7 #'+(d.bt_num||'')+' '+(d.task_name||'')
+        +' \u2014 <span style="color:#b91c1c;font-weight:600">'+d.reason_label+'</span>'+(d.source_lot_id?' <span style="font-size:11px;color:var(--muted)">(pushed)</span>':'')+'</div>'
+        +'<div class="flag-meta">'+(d.days_late||0)+'d late \u00b7 '+(d.builder_name||'')+' \u00b7 '+(d.created_at||'').slice(0,10)+(d.note?' \u00b7 '+d.note:'')+'</div></div>').join('')
+    : '<p style="color:var(--muted);text-align:center;padding:16px">None</p>';
+}
+
+function renderReasonList(){
+  document.getElementById('reason-list').innerHTML = delayReasons.map(r=>
+    '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center">'
+    +'<div'+(r.is_archived?' style="opacity:.45;text-decoration:line-through"':'')+'>'+r.label+'</div>'
+    +'<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="toggleReason(\''+r.id+'\','+(r.is_archived?'false':'true')+')">'
+    +(r.is_archived?'Restore':'Archive')+'</button></div>'
+  ).join('') || '<p style="color:var(--muted);padding:12px">No reasons</p>';
+}
+
+async function addDelayReason(){
+  const el=document.getElementById('new-reason-label');
+  const label=(el.value||'').trim();
+  if(!label){ alert('Enter a reason'); return; }
+  await sbCall('upsertDelayReason',{label, sort_order:50});
+  el.value='';
+  await loadDelaysView();
+}
+
+async function toggleReason(id, archive){
+  await sbCall('upsertDelayReason',{id, is_archived:archive});
+  await loadDelaysView();
+}
+
 function showSection(name, tabEl) {
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
