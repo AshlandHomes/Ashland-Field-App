@@ -251,6 +251,7 @@ tr:hover td{background:#f9fafb}
         <button class="set-tab active" data-pane="builders"  onclick="showSettingsPane('builders',this)">👷 Builders</button>
         <button class="set-tab"        data-pane="subs"      onclick="showSettingsPane('subs',this)">🏘 Subdivisions &amp; Companies</button>
         <button class="set-tab"        data-pane="reasons"   onclick="showSettingsPane('reasons',this)">⏱ Delay Reasons</button>
+        <button class="set-tab"        data-pane="schedules" onclick="showSettingsPane('schedules',this)">📋 Schedule Templates</button>
       </div>
 
       <!-- Builders -->
@@ -288,6 +289,32 @@ tr:hover td{background:#f9fafb}
             </div>
           </div>
           <div id="subdivisions-table-body"><div class="loading">Loading…</div></div>
+        </div>
+      </div>
+
+      <!-- Schedule templates -->
+      <div class="set-pane" id="setpane-schedules">
+        <div class="table-wrap" style="margin-bottom:20px">
+          <div class="table-header">
+            <h2>Schedule Templates</h2>
+            <div class="table-actions">
+              <button class="btn btn-primary" onclick="openAddTemplateModal()">+ Add Template</button>
+            </div>
+          </div>
+          <div id="templates-list" style="padding:6px 12px 12px"><div class="loading">Loading…</div></div>
+        </div>
+
+        <div class="table-wrap">
+          <div class="table-header"><h2>How schedules work</h2></div>
+          <div style="padding:14px 20px;font-size:13px;color:#475569;line-height:1.65">
+            <p style="margin:0 0 10px"><strong>A template is the master schedule</strong> a lot is stamped from. When you add a lot, it takes a frozen copy of the template — editing the template later never changes lots already building.</p>
+            <p style="margin:0 0 10px"><strong>Phases</strong> group tasks into weeks of construction. <strong>Tasks</strong> carry duration, lag, predecessors and a critical-path flag. Critical tasks drive the completion date and the active phase; non-critical tasks have float and don't.</p>
+            <p style="margin:0 0 10px"><strong>Stage map</strong> ties stage codes (0.3–9.5) to the tasks that trigger them — finish the trigger tasks, the stage advances automatically.</p>
+            <p style="margin:0 0 10px;padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px">
+              <strong>⚡ Gates are optional.</strong> A gate is an extra hold you can layer on top of the schedule — the utility gates (gas, power, water) are the example in use today. When a gate is unconfirmed, the lot's <em>reported</em> stage is capped (at 5.9) even though its <em>true</em> stage has advanced. This surfaces houses that are physically built past a point but can't be reported there yet. <strong>A template works fine with no gates at all</strong> — only add them when you need that extra hold.
+            </p>
+            <p style="margin:0"><strong>Cloning</strong> copies everything — phases, tasks, gates, stage map — into an independent new template. Fastest way to make a Basement or Townhome variant of an existing schedule, then edit the differences.</p>
+          </div>
         </div>
       </div>
 
@@ -524,6 +551,33 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <!-- ADD BUILDER -->
+<div class="modal-overlay" id="modal-add-template">
+  <div class="modal">
+    <h2>Add Schedule Template</h2>
+    <div class="field"><label>Template Name</label><input id="tpl-name" type="text" placeholder="e.g. Basement Schedule"></div>
+    <div class="field"><label>Description <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="tpl-desc" type="text" placeholder="What this schedule is for"></div>
+    <div class="field"><label>Total Working Days <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="tpl-days" type="number" placeholder="e.g. 99"></div>
+    <p style="font-size:12px;color:var(--muted);margin:-4px 0 4px">Creates an empty template. Add phases and tasks after — or clone an existing template instead to start from a full schedule.</p>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-template')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddTemplate()">Create →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-clone-template">
+  <div class="modal">
+    <h2>Clone Template</h2>
+    <div class="modal-sub" id="clone-src-label" style="margin-bottom:12px"></div>
+    <div class="field"><label>New Template Name</label><input id="clone-name" type="text" placeholder="e.g. Basement Schedule"></div>
+    <p style="font-size:12px;color:var(--muted);margin:-4px 0 4px">Copies all phases, tasks, gates and stage map into a new, independent template.</p>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-clone-template')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCloneTemplate()">Clone →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-company">
   <div class="modal">
     <h2>Add Company</h2>
@@ -1934,6 +1988,112 @@ async function toggleReason(id, archive){
   await loadDelaysView();
 }
 
+// ── SCHEDULE TEMPLATES ──
+let templates = [], templateStats = {}, _cloneSrcId = null;
+
+async function loadTemplatesView(){
+  templates = await sbCall('getTemplates', {}) || [];
+  templateStats = {};
+  await Promise.all(templates.map(async t => {
+    templateStats[t.id] = await sbCall('getTemplateDetail', { template_id: t.id }) || {};
+  }));
+  renderTemplatesList();
+}
+
+function renderTemplatesList(){
+  const box = document.getElementById('templates-list');
+  if(!templates.length){
+    box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No templates yet. Create one, or clone an existing schedule.</p>';
+    return;
+  }
+  box.innerHTML = templates.map(t => {
+    const s = templateStats[t.id] || {};
+    const inUse = s.lots_using || 0;
+    const archived = t.status === 'archived';
+    return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:12px">'
+      + '<div' + (archived ? ' style="opacity:.5"' : '') + '>'
+      +   '<div style="font-weight:700;font-size:14px">' + t.name + (archived ? ' <span style="font-size:11px;color:var(--muted)">(archived)</span>' : '') + '</div>'
+      +   '<div class="flag-meta">' + (s.phases||0) + ' phases · ' + (s.tasks||0) + ' tasks · ' + (s.gates||0) + ' gates · ' + (s.stages||0) + ' stages'
+      +     (inUse ? ' · <strong>' + inUse + ' lot' + (inUse===1?'':'s') + ' using</strong>' : ' · not in use')
+      +     (t.description ? ' · ' + t.description : '') + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px;white-space:nowrap">'
+      +   '<button class="btn btn-secondary btn-sm" onclick="openCloneTemplateModal(\''+t.id+'\')">Clone</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="renameTemplate(\''+t.id+'\')">Rename</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="toggleTemplateArchive(\''+t.id+'\','+(archived?'false':'true')+')">' + (archived ? 'Restore' : 'Archive') + '</button>'
+      +   (inUse ? '' : '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTemplateUI(\''+t.id+'\',\''+String(t.name).replace(/'/g,"\\'")+'\')">Delete</button>')
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function openAddTemplateModal(){
+  ['tpl-name','tpl-desc','tpl-days'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  document.getElementById('modal-add-template').classList.add('open');
+  setTimeout(()=>document.getElementById('tpl-name').focus(), 50);
+}
+
+async function submitAddTemplate(){
+  const name=(document.getElementById('tpl-name').value||'').trim();
+  if(!name){ alert('Enter a template name'); return; }
+  if(templates.find(t=>String(t.name).toLowerCase()===name.toLowerCase())){ alert('A template with that name already exists'); return; }
+  const desc=(document.getElementById('tpl-desc').value||'').trim();
+  const daysRaw=(document.getElementById('tpl-days').value||'').trim();
+  const r = await sbCall('createTemplate', { name, description: desc||null, total_days: daysRaw? parseInt(daysRaw): null });
+  if(r){ closeModal('modal-add-template'); await loadTemplatesView(); }
+  else alert('Could not create template.');
+}
+
+function openCloneTemplateModal(id){
+  const t = templates.find(x=>x.id===id);
+  _cloneSrcId = id;
+  const s = templateStats[id] || {};
+  document.getElementById('clone-src-label').textContent =
+    'Copying "' + (t?t.name:'') + '" — ' + (s.phases||0) + ' phases, ' + (s.tasks||0) + ' tasks, ' + (s.gates||0) + ' gates, ' + (s.stages||0) + ' stages.';
+  document.getElementById('clone-name').value = t ? (t.name + ' (copy)') : '';
+  document.getElementById('modal-clone-template').classList.add('open');
+  setTimeout(()=>document.getElementById('clone-name').select(), 50);
+}
+
+async function submitCloneTemplate(){
+  const name=(document.getElementById('clone-name').value||'').trim();
+  if(!name){ alert('Enter a name for the copy'); return; }
+  if(templates.find(t=>String(t.name).toLowerCase()===name.toLowerCase())){ alert('A template with that name already exists'); return; }
+  const btn=document.querySelector('#modal-clone-template .btn-primary');
+  if(btn){ btn.disabled=true; btn.textContent='Cloning…'; }
+  const r = await sbCall('cloneTemplate', { source_id: _cloneSrcId, name });
+  if(btn){ btn.disabled=false; btn.textContent='Clone →'; }
+  if(r && r.success){
+    closeModal('modal-clone-template');
+    await loadTemplatesView();
+    alert('Cloned: ' + r.tasks + ' tasks, ' + r.phases + ' phases, ' + r.gates + ' gates, ' + r.stages + ' stages.');
+  } else {
+    alert('Clone failed' + (r && r.error ? ': ' + r.error : '.'));
+  }
+}
+
+async function renameTemplate(id){
+  const t = templates.find(x=>x.id===id);
+  const name = prompt('Rename template:', t ? t.name : '');
+  if(name===null) return;
+  const trimmed = name.trim();
+  if(!trimmed){ alert('Name cannot be empty'); return; }
+  await sbCall('updateTemplate', { id, name: trimmed });
+  await loadTemplatesView();
+}
+
+async function toggleTemplateArchive(id, archive){
+  await sbCall('updateTemplate', { id, status: archive ? 'archived' : 'active' });
+  await loadTemplatesView();
+}
+
+async function deleteTemplateUI(id, name){
+  if(!confirm('Delete "'+name+'" permanently? This removes its phases, tasks, gates and stage map. Lots already stamped are unaffected.')) return;
+  const r = await sbCall('deleteTemplate', { id });
+  if(r && r.error){ alert(r.error); return; }
+  await loadTemplatesView();
+}
+
 function showSettingsPane(name, el){
   document.querySelectorAll('.set-pane').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.set-tab').forEach(t=>t.classList.remove('active'));
@@ -1941,6 +2101,7 @@ function showSettingsPane(name, el){
   if(pane) pane.classList.add('active');
   if(el) el.classList.add('active');
   if(name==='reasons') loadReasonsOnly();
+  if(name==='schedules') loadTemplatesView();
 }
 
 async function loadSettingsView(){
