@@ -233,6 +233,171 @@ exports.handler = async function(event) {
       // SCHEDULE ENGINE — template + lot stamping
       // ══════════════════════════════════════════════════════
 
+      // ══════════════════════════════════════════════════════
+      // SCHEDULE TEMPLATE BUILDER
+      // ══════════════════════════════════════════════════════
+
+      case 'createTemplate': {
+        const { name, description, total_days } = payload;
+        if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name is required' }) };
+        const r = await supabaseRequest('POST', 'sched_templates', {
+          name,
+          description: description || null,
+          total_days: total_days != null ? total_days : null,
+          status: 'active'
+        });
+        const row = Array.isArray(r.data) ? r.data[0] : r.data;
+        return { statusCode: 200, body: JSON.stringify(row || null) };
+      }
+
+      case 'updateTemplate': {
+        const { id, ...updates } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        const r = await supabaseRequest('PATCH', `sched_templates?id=eq.${id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'deleteTemplate': {
+        // Refuse if any lot was stamped from this template — history must stay intact.
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        const used = await supabaseRequest('GET', `sched_lots?template_id=eq.${id}&select=id&limit=1`);
+        if ((used.data || []).length) {
+          return { statusCode: 200, body: JSON.stringify({ error: 'This template is in use by existing lots. Archive it instead.' }) };
+        }
+        // PostgREST has no subqueries — fetch the stage-map ids, then delete their joins.
+        const smDel = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${id}&select=id`);
+        const smDelIds = (smDel.data || []).map(s => s.id);
+        if (smDelIds.length) {
+          await supabaseRequest('DELETE', `sched_stage_map_tasks?stage_map_id=in.(${smDelIds.join(',')})`);
+        }
+        await supabaseRequest('DELETE', `sched_template_stage_map?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_gates?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_tasks?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_phases?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_templates?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
+      case 'cloneTemplate': {
+        // Deep copy: template + phases + tasks + gates + stage map + trigger joins.
+        // IDs are remapped so the copy is fully independent of the source.
+        const { source_id, name } = payload;
+        if (!source_id || !name) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'source_id and name are required' }) };
+        }
+        const srcRes = await supabaseRequest('GET', `sched_templates?id=eq.${source_id}&select=*`);
+        const src = (srcRes.data || [])[0];
+        if (!src) return { statusCode: 400, body: JSON.stringify({ error: 'Source template not found' }) };
+
+        const tRes = await supabaseRequest('POST', 'sched_templates', {
+          name,
+          description: src.description || null,
+          total_days: src.total_days != null ? src.total_days : null,
+          status: 'active'
+        });
+        const newT = Array.isArray(tRes.data) ? tRes.data[0] : tRes.data;
+        if (!newT || !newT.id) {
+          return { statusCode: 500, body: JSON.stringify({ error: 'Failed to create template copy' }) };
+        }
+        const newId = newT.id;
+
+        // phases
+        const phRes = await supabaseRequest('GET', `sched_template_phases?template_id=eq.${source_id}&select=*&order=phase_order`);
+        const phases = phRes.data || [];
+        const phaseMap = {};
+        if (phases.length) {
+          const rows = phases.map(p => ({ template_id: newId, name: p.name, phase_order: p.phase_order }));
+          const ins = await supabaseRequest('POST', 'sched_template_phases', rows);
+          const made = ins.data || [];
+          // match by phase_order (unique within a template)
+          phases.forEach(p => {
+            const hit = made.find(m => m.phase_order === p.phase_order);
+            if (hit) phaseMap[p.id] = hit.id;
+          });
+        }
+
+        // tasks
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${source_id}&select=*&order=task_order`);
+        const tasks = tkRes.data || [];
+        const taskMap = {};
+        if (tasks.length) {
+          const rows = tasks.map(t => ({
+            template_id: newId, bt_num: t.bt_num, name: t.name,
+            phase_id: phaseMap[t.phase_id] || null,
+            duration: t.duration, lag: t.lag, relative_start: t.relative_start,
+            predecessors: t.predecessors, notification: t.notification,
+            relative_finish: t.relative_finish, is_critical: t.is_critical,
+            task_type: t.task_type || 'work', task_order: t.task_order
+          }));
+          const ins = await supabaseRequest('POST', 'sched_template_tasks', rows);
+          const made = ins.data || [];
+          tasks.forEach(t => {
+            const hit = made.find(m => m.bt_num === t.bt_num);
+            if (hit) taskMap[t.id] = hit.id;
+          });
+        }
+
+        // gates
+        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${source_id}&select=*&order=gate_order`);
+        const gates = gRes.data || [];
+        if (gates.length) {
+          await supabaseRequest('POST', 'sched_template_gates', gates.map(g => ({
+            template_id: newId, name: g.name, icon: g.icon,
+            hold_stage_code: g.hold_stage_code, gate_order: g.gate_order
+          })));
+        }
+
+        // stage map
+        const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${source_id}&select=*&order=stage_order`);
+        const sm = smRes.data || [];
+        const smMap = {};
+        if (sm.length) {
+          const rows = sm.map(s => ({
+            template_id: newId, stage_code: s.stage_code, stage_label: s.stage_label,
+            is_manual: s.is_manual, stage_order: s.stage_order
+          }));
+          const ins = await supabaseRequest('POST', 'sched_template_stage_map', rows);
+          const made = ins.data || [];
+          sm.forEach(s => {
+            const hit = made.find(m => m.stage_code === s.stage_code);
+            if (hit) smMap[s.id] = hit.id;
+          });
+          // trigger joins
+          const smIds = sm.map(s => s.id);
+          if (smIds.length) {
+            const jRes = await supabaseRequest('GET', `sched_stage_map_tasks?stage_map_id=in.(${smIds.join(',')})&select=*`);
+            const joins = (jRes.data || [])
+              .filter(j => smMap[j.stage_map_id] && taskMap[j.task_id])
+              .map(j => ({ stage_map_id: smMap[j.stage_map_id], task_id: taskMap[j.task_id] }));
+            if (joins.length) await supabaseRequest('POST', 'sched_stage_map_tasks', joins);
+          }
+        }
+
+        return { statusCode: 200, body: JSON.stringify({
+          success: true, id: newId, name,
+          phases: phases.length, tasks: tasks.length, gates: gates.length, stages: sm.length
+        }) };
+      }
+
+      case 'getTemplateDetail': {
+        // counts for the template list
+        const { template_id } = payload;
+        if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
+        const [ph, tk, gt, sm, lots] = await Promise.all([
+          supabaseRequest('GET', `sched_template_phases?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_lots?template_id=eq.${template_id}&select=id`)
+        ]);
+        return { statusCode: 200, body: JSON.stringify({
+          phases: (ph.data||[]).length, tasks: (tk.data||[]).length,
+          gates: (gt.data||[]).length, stages: (sm.data||[]).length,
+          lots_using: (lots.data||[]).length
+        }) };
+      }
+
       case 'getTemplates': {
         const r = await supabaseRequest('GET', 'sched_templates?select=id,name,description,status,total_days&order=name');
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
