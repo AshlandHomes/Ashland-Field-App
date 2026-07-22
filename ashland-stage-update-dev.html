@@ -817,16 +817,25 @@ async function openDelayReasonModal(btNum, taskName, plannedYmd, actualYmd, days
       +'<div class="dr-title">Why was this late?</div>'
       +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Planned '+plannedYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
       +'<div class="dr-opts">'+opts+'</div>'
-      +'<textarea id="dr-note" class="dr-note" placeholder="Optional note\u2026"></textarea>'
+      +'<textarea id="dr-note" class="dr-note" placeholder="Optional note (required if you choose Other)\u2026"></textarea>'
+      +'<div id="dr-warn" style="display:none;color:#c0392b;font-size:12px;margin-top:6px">A note is required when choosing \u201cOther\u201d.</div>'
       +'<div class="dr-foot"><button class="dr-cancel">Cancel</button></div>'
       +'</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
     const ov=document.getElementById('dr-overlay');
     ov.querySelectorAll('.dr-opt').forEach(b=>{
       b.onclick=()=>{
-        const note=(document.getElementById('dr-note')||{}).value||'';
+        const noteEl=document.getElementById('dr-note');
+        const note=((noteEl||{}).value||'').trim();
+        // "Other" is only useful with an explanation — require it.
+        if(/^other$/i.test(b.dataset.label) && !note){
+          const warn=document.getElementById('dr-warn');
+          if(warn) warn.style.display='block';
+          if(noteEl){ noteEl.style.borderColor='#c0392b'; noteEl.focus(); }
+          return;
+        }
         ov.remove(); const r=_drResolve; _drResolve=null;
-        r({id:b.dataset.id, label:b.dataset.label, note:note.trim()});
+        r({id:b.dataset.id, label:b.dataset.label, note:note});
       };
     });
     ov.querySelector('.dr-cancel').onclick=()=>{ ov.remove(); const r=_drResolve; _drResolve=null; r(null); };
