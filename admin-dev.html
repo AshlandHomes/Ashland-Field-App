@@ -580,6 +580,20 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-pred-picker" style="z-index:1200">
+  <div class="modal" style="max-width:560px">
+    <h2>Choose Predecessors</h2>
+    <div class="modal-sub" id="pred-picker-sub" style="margin-bottom:10px"></div>
+    <input id="pred-search" type="text" placeholder="Search tasks…" oninput="renderPredPicker()"
+      style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px">
+    <div id="pred-picker-list" style="max-height:46vh;overflow-y:auto;border:1px solid var(--line);border-radius:8px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-pred-picker')">Cancel</button>
+      <button class="btn btn-primary" onclick="applyPredPicker()">Done →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-task">
   <div class="modal" style="max-width:560px">
     <h2 id="task-modal-title">Add Task</h2>
@@ -592,8 +606,11 @@ tr:hover td{background:#f9fafb}
       <div class="field" style="flex:1"><label>Lag (days)</label><input id="task-lag" type="number" placeholder="0"></div>
     </div>
     <div class="field">
-      <label>Predecessors <span style="color:var(--muted);font-weight:400">(task numbers, comma-separated)</span></label>
-      <input id="task-preds" type="text" placeholder="e.g. 52, 43">
+      <label>Predecessors</label>
+      <input type="hidden" id="task-preds">
+      <div id="task-preds-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openPredPicker()">＋ Choose predecessors</button>
+      <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Tasks that must finish before this one can start.</p>
     </div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>Relative Start <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rs" type="number"></div>
@@ -2055,6 +2072,72 @@ async function toggleReason(id, archive){
   await loadDelaysView();
 }
 
+// ── PREDECESSOR PICKER ──
+let _predSel = [];   // array of bt_num
+
+function _setPreds(arr){
+  _predSel = (arr||[]).slice().sort((a,b)=>a-b);
+  document.getElementById('task-preds').value = _predSel.join(',');
+  renderPredChips();
+}
+function renderPredChips(){
+  const box = document.getElementById('task-preds-chips');
+  if(!box) return;
+  if(!_predSel.length){
+    box.innerHTML = '<span style="font-size:13px;color:var(--muted)">None</span>';
+    return;
+  }
+  box.innerHTML = _predSel.map(function(n){
+    const t = tplEdit.tasks.find(x=>x.bt_num===n);
+    return '<span style="display:inline-flex;align-items:center;gap:6px;background:#eef2ff;color:#4338ca;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600">'
+      +'#'+n+(t?' '+t.name:'')
+      +'<button type="button" onclick="removePred('+n+')" style="border:none;background:none;color:#4338ca;cursor:pointer;font-size:14px;line-height:1;padding:0">×</button></span>';
+  }).join('');
+}
+function removePred(n){ _setPreds(_predSel.filter(x=>x!==n)); }
+
+function openPredPicker(){
+  const selfId = document.getElementById('task-id').value || null;
+  const self = selfId ? tplEdit.tasks.find(t=>t.id===selfId) : null;
+  document.getElementById('pred-picker-sub').textContent =
+    'Select the tasks that must finish first' + (self ? ' for #'+self.bt_num+' '+self.name : '') + '.';
+  document.getElementById('pred-search').value = '';
+  renderPredPicker();
+  document.getElementById('modal-pred-picker').classList.add('open');
+}
+
+function renderPredPicker(){
+  const q = (document.getElementById('pred-search').value||'').toLowerCase();
+  const selfId = document.getElementById('task-id').value || null;
+  const phaseName = {};
+  tplEdit.phases.forEach(p=>{ phaseName[p.id] = 'Phase '+p.phase_order+' · '+p.name; });
+  const list = tplEdit.tasks
+    .filter(t=>t.id!==selfId)
+    .filter(t=>!q || String(t.bt_num).indexOf(q)>=0 || String(t.name||'').toLowerCase().indexOf(q)>=0)
+    .sort((a,b)=>(a.task_order||0)-(b.task_order||0));
+  if(!list.length){
+    document.getElementById('pred-picker-list').innerHTML =
+      '<p style="color:var(--muted);text-align:center;padding:18px;font-size:13px">No tasks available.</p>';
+    return;
+  }
+  document.getElementById('pred-picker-list').innerHTML = list.map(function(t){
+    const on = _predSel.indexOf(t.bt_num)>=0;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #f1f5f9;cursor:pointer;background:'+(on?'#eef2ff':'#fff')+'">'
+      +'<input type="checkbox" data-bt="'+t.bt_num+'" '+(on?'checked':'')+' onchange="togglePred(this)" style="width:16px;height:16px">'
+      +'<span style="flex:1"><strong>#'+t.bt_num+'</strong> '+(t.name||'')
+      +'<div class="flag-meta">'+(phaseName[t.phase_id]||'no phase')+' · dur '+(t.duration!=null?t.duration:'—')+'</div></span></label>';
+  }).join('');
+}
+function togglePred(cb){
+  const n = parseInt(cb.dataset.bt);
+  if(cb.checked){ if(_predSel.indexOf(n)<0) _predSel.push(n); }
+  else { _predSel = _predSel.filter(x=>x!==n); }
+}
+function applyPredPicker(){
+  _setPreds(_predSel);
+  closeModal('modal-pred-picker');
+}
+
 // ── TEMPLATE EDITOR ──
 let tplEdit = { id:null, template:null, phases:[], tasks:[] };
 
@@ -2177,7 +2260,7 @@ function openAddTaskModal(){
   _fillPhaseSelect(document.getElementById('task-phase'));
   document.getElementById('task-duration').value=1;
   document.getElementById('task-lag').value=0;
-  document.getElementById('task-preds').value='';
+  _setPreds([]);
   document.getElementById('task-rs').value='';
   document.getElementById('task-rf').value='';
   document.getElementById('task-order').value=nextOrd;
@@ -2196,7 +2279,7 @@ function openEditTaskModal(id){
   document.getElementById('task-phase').value=t.phase_id||'';
   document.getElementById('task-duration').value=t.duration!=null?t.duration:1;
   document.getElementById('task-lag').value=t.lag!=null?t.lag:0;
-  document.getElementById('task-preds').value=Array.isArray(t.predecessors)?t.predecessors.join(', '):'';
+  _setPreds(Array.isArray(t.predecessors)?t.predecessors:[]);
   document.getElementById('task-rs').value=t.relative_start!=null?t.relative_start:'';
   document.getElementById('task-rf').value=t.relative_finish!=null?t.relative_finish:'';
   document.getElementById('task-order').value=t.task_order!=null?t.task_order:'';
@@ -2209,8 +2292,7 @@ async function submitTask(){
   const name=(document.getElementById('task-name').value||'').trim();
   if(!name){ alert('Enter a task name'); return; }
   const num=function(v){ const s=(document.getElementById(v).value||'').trim(); return s===''?null:parseInt(s); };
-  const predsRaw=(document.getElementById('task-preds').value||'').trim();
-  const preds = predsRaw ? predsRaw.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)) : [];
+  const preds = _predSel.slice();
   const body = {
     bt_num: num('task-btnum'), name,
     phase_id: document.getElementById('task-phase').value || null,
