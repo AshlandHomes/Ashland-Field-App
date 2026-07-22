@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Ashland Field (DEV)</title>
+<title>Ashland Field</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -169,10 +169,35 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-prog-detail{font-size:12px;color:#7f8c8d;min-height:16px;margin-top:4px}
 .bp-prog-warn{font-size:12px;color:#95a5a6;margin-top:12px;text-align:center}
 
+
+/* ===== DELAY REASON MODAL ===== */
+.dr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100001;display:flex;align-items:flex-end;justify-content:center}
+.dr-modal{background:#fff;width:100%;max-width:520px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px}
+@media(min-width:600px){.dr-overlay{align-items:center}.dr-modal{border-radius:16px}}
+.dr-title{font-weight:700;font-size:17px;color:#2c3e50;margin-bottom:4px}
+.dr-sub{font-size:12px;color:#7f8c8d;margin-bottom:14px;line-height:1.5}
+.dr-opts{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}
+.dr-opt{width:100%;text-align:left;padding:13px 14px;border:1px solid #dfe4e7;border-radius:9px;background:#fff;font-family:inherit;font-size:15px;font-weight:600;color:#2c3e50;cursor:pointer}
+.dr-opt:active{background:#eaf4fb;border-color:#3498db}
+.dr-note{width:100%;min-height:56px;border:1px solid #dfe4e7;border-radius:8px;padding:9px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
+.dr-foot{display:flex;justify-content:flex-end;margin-top:12px}
+.dr-cancel{background:#ecf0f1;border:none;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:600;color:#7f8c8d;cursor:pointer}
+.dr-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
+.dr-save{background:#27ae60;border:none;border-radius:9px;padding:11px 22px;font-size:14px;font-weight:700;color:#fff;cursor:pointer}
+.dr-save:disabled{opacity:.4;cursor:not-allowed}
+.dr-opt.sel{background:#eaf4fb;border-color:#3498db;box-shadow:inset 0 0 0 1px #3498db}
+
+/* ===== WORK / ACTION FILTER ===== */
+.tvf{display:flex;gap:6px;margin:2px 2px 10px}
+.tvf-btn{flex:1;background:#fff;border:1px solid #dfe4e7;border-radius:9px;padding:9px 6px;font-family:inherit;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px}
+.tvf-btn span{background:#eef2f7;color:#475569;border-radius:10px;padding:1px 7px;font-size:11px}
+.tvf-btn.on{background:#00A9D1;border-color:#00A9D1;color:#fff}
+.tvf-btn.on span{background:rgba(255,255,255,.25);color:#fff}
+.t.actiontask{background:#fbfaff}
+.t.actiontask .tname::before{content:'📋 ';font-size:11px;opacity:.75}
 </style>
 </head>
 <body>
-
 
 <!-- Date picker modal -->
 <div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
@@ -645,6 +670,14 @@ function renderSchedule(){
   renderTasks();
 }
 
+let taskViewFilter='all';   // 'all' | 'work' | 'action'
+
+function setTaskViewFilter(v){
+  taskViewFilter=v;
+  document.querySelectorAll('.tvf-btn').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
+  renderTasks();
+}
+
 function renderTasks(){
   const canEdit=(currentBuilder===curLot.builder_name);
   let h='';
@@ -652,11 +685,36 @@ function renderTasks(){
   TASKS.forEach(t=>{if(!seen[t.phase]){seen[t.phase]=true;phaseOrder.push(t.phase);}});
   phaseOrder.sort((a,b)=>a-b);
   const phaseName={};TASKS.forEach(t=>phaseName[t.phase]=t.phase_name);
-  let activePhase=null,earliest=Infinity;
-  TASKS.forEach(t=>{if(!(act[t.num]&&act[t.num].finished)&&t._projected_es<earliest){earliest=t._projected_es;activePhase=t.phase;}});
+  let activePhase=null;
+  // ACTIVE PHASE = furthest phase containing a started/finished CRITICAL task.
+  // Non-critical tasks (float) never drive the active phase — neither earliest nor latest.
+  TASKS.forEach(t=>{
+    const a=act[t.num];
+    if(t.is_crit && a && (a.started||a.finished)){
+      if(activePhase===null || t.phase>activePhase) activePhase=t.phase;
+    }
+  });
+  // fallback: no critical task started yet -> earliest phase present
+  if(activePhase===null && phaseOrder.length) activePhase=phaseOrder[0];
   if(!userToggledPhases){phaseOrder.forEach(ph=>{collapsedPhases[ph]=(ph!==activePhase);});}
+
+  // ── work / action filter ──
+  const nWork=TASKS.filter(t=>(t.type||'work')!=='action').length;
+  const nAct =TASKS.filter(t=>(t.type||'work')==='action').length;
+  h+='<div class="tvf">'
+    +'<button class="tvf-btn'+(taskViewFilter==='all'?' on':'')+'" data-v="all" onclick="setTaskViewFilter(\'all\')">All <span>'+TASKS.length+'</span></button>'
+    +'<button class="tvf-btn'+(taskViewFilter==='work'?' on':'')+'" data-v="work" onclick="setTaskViewFilter(\'work\')">🔨 On site <span>'+nWork+'</span></button>'
+    +'<button class="tvf-btn'+(taskViewFilter==='action'?' on':'')+'" data-v="action" onclick="setTaskViewFilter(\'action\')">📋 My to-dos <span>'+nAct+'</span></button>'
+    +'</div>';
+
   phaseOrder.forEach(ph=>{
-    const inPhase=TASKS.filter(t=>t.phase===ph);
+    const allInPhase=TASKS.filter(t=>t.phase===ph);
+    const inPhase=allInPhase.filter(t=>{
+      const ty=(t.type||'work');
+      if(taskViewFilter==='work')   return ty!=='action';
+      if(taskViewFilter==='action') return ty==='action';
+      return true;
+    });
     if(!inPhase.length)return;
     // sort by projected early start, then task order as tiebreak
     inPhase.sort((a,b)=>(a._projected_es-b._projected_es)||(a.order-b.order)||(a.num-b.num));
@@ -664,11 +722,12 @@ function renderTasks(){
     const doneCt=inPhase.filter(t=>act[t.num]&&act[t.num].finished).length;
     const caret=collapsed?'▸':'▾';
     const activeTag=(ph===activePhase)?'<span class="active-badge">active</span>':'';
-    h+='<div class="ph" data-ph="'+ph+'"><span>'+caret+' '+(phaseName[ph]||('Phase '+ph))+' '+activeTag+'</span><span class="pc">'+doneCt+'/'+inPhase.length+'</span></div>';
+    h+='<div class="ph" data-ph="'+ph+'"><span>'+caret+' Phase '+ph+' · '+(phaseName[ph]||('Phase '+ph))+' '+activeTag+'</span><span class="pc">'+doneCt+'/'+inPhase.length+'</span></div>';
     if(collapsed)return;
     inPhase.forEach(t=>{
       const a=act[t.num]||{};
-      const cls=a.finished?'done':(a.started?'started':'');
+      const isAction=(t.type||'work')==='action';
+      const cls=(a.finished?'done':(a.started?'started':''))+(isAction?' actiontask':'');
       const ps=offToDate(t._projected_es),pf=offToDate(t._projected_ef);
       let acts='';
       if(a.finished){
@@ -749,7 +808,101 @@ async function finishTask(n){
   }
   const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+
+  // ── DELAY REASON CAPTURE (critical tasks finished late) ──
+  // Planned finish comes from the engine's planned pass (_planned_ef offset).
+  let delayPayload=null;
+  if(t.is_crit && t._planned_ef!=null){
+    const plannedDate=offToDate(t._planned_ef);
+    const plannedYmd=ymd(plannedDate);
+    if(v > plannedYmd){
+      const daysLate=wdBetween(plannedYmd, v);
+      // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
+      // (tables not deployed, API error), let the finish go through without it.
+      let reasonsOk=true;
+      try{
+        if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
+        if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
+      }catch(e){ reasonsOk=false; }
+      if(reasonsOk){
+        const picked=await openDelayReasonModal(n, t.name, plannedYmd, v, daysLate);
+        if(picked===null) return;            // cancelled -> abort the finish
+        delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
+                      days_late:daysLate, expected_done:plannedYmd, actual_finish:v};
+      }
+    }
+  }
+
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};renderSchedule();await saveTask(t);
+
+  if(delayPayload){
+    try{
+    await sbCall('addTaskDelay', Object.assign({
+      lot_id:curLot.id, lot_task_id:t._id, bt_num:n, task_name:t.name,
+      lot_number:curLot.lot_number, community:curLot.community,
+      builder_name:curLot.builder_name||currentBuilder,
+      source_lot_id:null, author:currentBuilder
+    }, delayPayload));
+    }catch(e){ console.warn('delay not recorded:', e); }
+  }
+}
+
+// working days between two YYYY-MM-DD dates (exclusive of start, inclusive of end)
+function wdBetween(a,b){
+  let d=new Date(a+'T00:00:00'), e=new Date(b+'T00:00:00'), c=0;
+  while(d<e){ d.setDate(d.getDate()+1); const w=d.getDay(); if(w!==0&&w!==6) c++; }
+  return c;
+}
+
+// ── DELAY REASON MODAL ──
+let _drResolve=null, _drReasons=null;
+async function openDelayReasonModal(btNum, taskName, plannedYmd, actualYmd, daysLate){
+  if(!Array.isArray(_drReasons)) _drReasons = [];
+  return new Promise(res=>{
+    _drResolve=res;
+    const opts=_drReasons.map(r=>'<button class="dr-opt" data-id="'+r.id+'" data-label="'+String(r.label).replace(/"/g,'&quot;')+'">'+r.label+'</button>').join('');
+    const html='<div id="dr-overlay" class="dr-overlay"><div class="dr-modal">'
+      +'<div class="dr-title">Why was this late?</div>'
+      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Planned '+plannedYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
+      +'<div class="dr-opts">'+opts+'</div>'
+      +'<textarea id="dr-note" class="dr-note" placeholder="Optional note (required if you choose Other)\u2026"></textarea>'
+      +'<div id="dr-warn" style="display:none;color:#c0392b;font-size:12px;margin-top:6px">A note is required when choosing \u201cOther\u201d.</div>'
+      +'<div class="dr-foot"><button class="dr-cancel">Cancel</button><button class="dr-save" id="dr-save" disabled>Save</button></div>'
+      +'</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    const ov=document.getElementById('dr-overlay');
+    const noteEl=document.getElementById('dr-note');
+    const warnEl=document.getElementById('dr-warn');
+    const saveEl=document.getElementById('dr-save');
+    let picked=null;
+
+    function refresh(){
+      const note=((noteEl||{}).value||'').trim();
+      const needsNote = picked && /^other$/i.test(picked.label) && !note;
+      warnEl.style.display = needsNote ? 'block' : 'none';
+      if(noteEl) noteEl.style.borderColor = needsNote ? '#c0392b' : '#dfe4e7';
+      saveEl.disabled = !picked || needsNote;
+    }
+
+    ov.querySelectorAll('.dr-opt').forEach(b=>{
+      b.onclick=()=>{
+        ov.querySelectorAll('.dr-opt').forEach(x=>x.classList.remove('sel'));
+        b.classList.add('sel');
+        picked={id:b.dataset.id, label:b.dataset.label};
+        refresh();
+        if(/^other$/i.test(b.dataset.label) && noteEl) noteEl.focus();
+      };
+    });
+    if(noteEl) noteEl.oninput=refresh;
+
+    saveEl.onclick=()=>{
+      if(saveEl.disabled) return;
+      const note=((noteEl||{}).value||'').trim();
+      ov.remove(); const r=_drResolve; _drResolve=null;
+      r({id:picked.id, label:picked.label, note:note});
+    };
+    ov.querySelector('.dr-cancel').onclick=()=>{ ov.remove(); const r=_drResolve; _drResolve=null; r(null); };
+  });
 }
 async function undoTask(n){
   const t=bn[n];act[n]={started:false,finished:false,start:null,finish:null};renderSchedule();await saveTask(t);
@@ -1270,6 +1423,29 @@ async function _bpApply(){
       const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
       if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
       if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
+
+      // INHERIT DELAY REASONS — a push copies a delay that happened on the source lot,
+      // so the target inherits the same reason with source_lot_id set (lets reporting
+      // count BY LOT or BY EVENT). No prompting during push.
+      const btsPushed = (_bpMode==='task') ? [_bpBtNum] : batch.map(b=>{
+        const hit = Object.keys(byNum).find(k=>byNum[k].id===b.task_id); return hit!=null?parseInt(hit):null;
+      }).filter(x=>x!=null);
+      for(const bt of btsPushed){
+        const srcDelay = await sbCall('getDelaysForTask',{lot_id:curLot.id, bt_num:bt});
+        if(srcDelay && srcDelay.reason_label){
+          const tgt = byNum[bt];
+          if(tgt){
+            await sbCall('addTaskDelay',{
+              lot_id:lot.id, lot_task_id:tgt.id, bt_num:bt, task_name:srcDelay.task_name,
+              lot_number:lot.lot_number, community:lot.community, builder_name:lot.builder_name||currentBuilder,
+              reason_id:srcDelay.reason_id, reason_label:srcDelay.reason_label,
+              note:(srcDelay.note||'')+'  (inherited from '+curLot.lot_number+')',
+              days_late:srcDelay.days_late, expected_done:srcDelay.expected_done, actual_finish:srcDelay.actual_finish,
+              source_lot_id:curLot.id, author:currentBuilder
+            });
+          }
+        }
+      }
       if(lotHadError) failedLots.push(lot.lot_number); else doneLots.push(lot.lot_number);
     }catch(e){
       fail++; lotHadError=true; failedLots.push(lot.lot_number);
