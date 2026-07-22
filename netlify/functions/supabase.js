@@ -396,6 +396,81 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(stale) };
       }
 
+      // ══════════════════════════════════════════════════════
+      // DELAY REASON CAPTURE
+      // ══════════════════════════════════════════════════════
+
+      case 'getDelayReasons': {
+        const inc = payload && payload.include_archived;
+        const filt = inc ? '' : '&is_archived=eq.false';
+        const r = await supabaseRequest('GET', `sched_delay_reasons?select=*${filt}&order=sort_order,label`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'upsertDelayReason': {
+        const { id, label, sort_order, is_archived } = payload;
+        if (!id && !label) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'label required' }) };
+        }
+        let r;
+        if (id) {
+          const upd = {};
+          if (label !== undefined) upd.label = label;
+          if (sort_order !== undefined) upd.sort_order = sort_order;
+          if (is_archived !== undefined) upd.is_archived = is_archived;
+          r = await supabaseRequest('PATCH', `sched_delay_reasons?id=eq.${id}`, upd);
+        } else {
+          r = await supabaseRequest('POST', 'sched_delay_reasons', {
+            label, sort_order: sort_order != null ? sort_order : 50, is_archived: false
+          });
+        }
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'addTaskDelay': {
+        // One row per lot+task. source_lot_id set when inherited via bulk push,
+        // so reporting can count BY LOT (all rows) or BY EVENT (dedupe by source).
+        const { lot_id, lot_task_id, bt_num, task_name, lot_number, community, builder_name,
+                reason_id, reason_label, note, days_late, expected_done, actual_finish,
+                source_lot_id, author } = payload;
+        if (!lot_task_id || !reason_label) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_task_id and reason_label are required' }) };
+        }
+        const r = await supabaseRequest('POST', 'sched_task_delays', {
+          lot_id: lot_id || null, lot_task_id, bt_num: bt_num != null ? bt_num : null,
+          task_name: task_name || null, lot_number: lot_number || null,
+          community: community || null, builder_name: builder_name || null,
+          reason_id: reason_id || null, reason_label,
+          note: note || '', days_late: days_late != null ? days_late : 0,
+          expected_done: expected_done || null, actual_finish: actual_finish || null,
+          source_lot_id: source_lot_id || null, author: author || null
+        });
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getTaskDelays': {
+        // Reporting feed. Optional filters: community, builder_name, since (date).
+        const p = payload || {};
+        let q = 'sched_task_delays?select=*';
+        if (p.community)    q += `&community=eq.${encodeURIComponent(p.community)}`;
+        if (p.builder_name) q += `&builder_name=eq.${encodeURIComponent(p.builder_name)}`;
+        if (p.since)        q += `&created_at=gte.${p.since}`;
+        q += '&order=created_at.desc';
+        const r = await supabaseRequest('GET', q);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'getDelaysForTask': {
+        // Used by bulk push to inherit the source lot's reason for a given task.
+        const { lot_id, bt_num } = payload;
+        if (!lot_id || bt_num == null) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_id and bt_num required' }) };
+        }
+        const r = await supabaseRequest('GET',
+          `sched_task_delays?lot_id=eq.${lot_id}&bt_num=eq.${bt_num}&select=*&order=created_at.desc&limit=1`);
+        return { statusCode: 200, body: JSON.stringify((r.data || [])[0] || null) };
+      }
+
       case 'getAllLotPhases': {
         // For every active lot: compute active phase and per-phase task snapshots.
         // ACTIVE PHASE = the furthest phase that contains a started/finished CRITICAL task.
