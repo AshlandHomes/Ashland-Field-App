@@ -4,9 +4,12 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
 
 async function supabaseRequest(method, path, body) {
-  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+  const _m = path.match(/^([a-zA-Z0-9_]+)(.*)$/);
+  const _path = _m ? (TABLE_PREFIX + _m[1] + _m[2]) : path;
+  const url = `${SUPABASE_URL}/rest/v1/${_path}`;
   const headers = {
     'Content-Type': 'application/json',
     'apikey': SUPABASE_KEY,
@@ -14,6 +17,16 @@ async function supabaseRequest(method, path, body) {
   };
   if (method === 'POST' || method === 'PATCH') {
     headers['Prefer'] = 'return=representation';
+  }
+  // PostgREST caps results at 1000 rows by default, and that server cap overrides
+  // any &limit= in the URL. A Range header DOES lift the cap. If a GET asks for a
+  // large limit, translate it into a Range so big result sets aren't truncated.
+  if (method === 'GET') {
+    const lm = /[?&]limit=(\d+)/.exec(path);
+    if (lm && parseInt(lm[1]) > 1000) {
+      headers['Range-Unit'] = 'items';
+      headers['Range'] = '0-' + (parseInt(lm[1]) - 1);
+    }
   }
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
@@ -220,6 +233,360 @@ exports.handler = async function(event) {
       // SCHEDULE ENGINE — template + lot stamping
       // ══════════════════════════════════════════════════════
 
+      // ══════════════════════════════════════════════════════
+      // SCHEDULE TEMPLATE BUILDER
+      // ══════════════════════════════════════════════════════
+
+      case 'createTemplate': {
+        const { name, description, total_days } = payload;
+        if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name is required' }) };
+        const r = await supabaseRequest('POST', 'sched_templates', {
+          name,
+          description: description || null,
+          total_days: total_days != null ? total_days : null,
+          status: 'active'
+        });
+        const row = Array.isArray(r.data) ? r.data[0] : r.data;
+        return { statusCode: 200, body: JSON.stringify(row || null) };
+      }
+
+      case 'updateTemplate': {
+        const { id, ...updates } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        const r = await supabaseRequest('PATCH', `sched_templates?id=eq.${id}`, updates);
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'deleteTemplate': {
+        // Refuse if any lot was stamped from this template — history must stay intact.
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+        const used = await supabaseRequest('GET', `sched_lots?template_id=eq.${id}&select=id&limit=1`);
+        if ((used.data || []).length) {
+          return { statusCode: 200, body: JSON.stringify({ error: 'This template is in use by existing lots. Archive it instead.' }) };
+        }
+        // PostgREST has no subqueries — fetch the stage-map ids, then delete their joins.
+        const smDel = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${id}&select=id`);
+        const smDelIds = (smDel.data || []).map(s => s.id);
+        if (smDelIds.length) {
+          await supabaseRequest('DELETE', `sched_stage_map_tasks?stage_map_id=in.(${smDelIds.join(',')})`);
+        }
+        await supabaseRequest('DELETE', `sched_template_stage_map?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_gates?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_tasks?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_phases?template_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_templates?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
+      case 'cloneTemplate': {
+        // Deep copy: template + phases + tasks + gates + stage map + trigger joins.
+        // IDs are remapped so the copy is fully independent of the source.
+        const { source_id, name } = payload;
+        if (!source_id || !name) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'source_id and name are required' }) };
+        }
+        const srcRes = await supabaseRequest('GET', `sched_templates?id=eq.${source_id}&select=*`);
+        const src = (srcRes.data || [])[0];
+        if (!src) return { statusCode: 400, body: JSON.stringify({ error: 'Source template not found' }) };
+
+        const tRes = await supabaseRequest('POST', 'sched_templates', {
+          name,
+          description: src.description || null,
+          total_days: src.total_days != null ? src.total_days : null,
+          status: 'active'
+        });
+        const newT = Array.isArray(tRes.data) ? tRes.data[0] : tRes.data;
+        if (!newT || !newT.id) {
+          return { statusCode: 500, body: JSON.stringify({ error: 'Failed to create template copy' }) };
+        }
+        const newId = newT.id;
+
+        // phases
+        const phRes = await supabaseRequest('GET', `sched_template_phases?template_id=eq.${source_id}&select=*&order=phase_order`);
+        const phases = phRes.data || [];
+        const phaseMap = {};
+        if (phases.length) {
+          const rows = phases.map(p => ({ template_id: newId, name: p.name, phase_order: p.phase_order }));
+          const ins = await supabaseRequest('POST', 'sched_template_phases', rows);
+          const made = ins.data || [];
+          // match by phase_order (unique within a template)
+          phases.forEach(p => {
+            const hit = made.find(m => m.phase_order === p.phase_order);
+            if (hit) phaseMap[p.id] = hit.id;
+          });
+        }
+
+        // tasks
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${source_id}&select=*&order=task_order`);
+        const tasks = tkRes.data || [];
+        const taskMap = {};
+        if (tasks.length) {
+          const rows = tasks.map(t => ({
+            template_id: newId, bt_num: t.bt_num, name: t.name,
+            phase_id: phaseMap[t.phase_id] || null,
+            duration: t.duration, lag: t.lag, relative_start: t.relative_start,
+            predecessors: t.predecessors, notification: t.notification,
+            relative_finish: t.relative_finish, is_critical: t.is_critical,
+            task_type: t.task_type || 'work', task_order: t.task_order
+          }));
+          const ins = await supabaseRequest('POST', 'sched_template_tasks', rows);
+          const made = ins.data || [];
+          tasks.forEach(t => {
+            const hit = made.find(m => m.bt_num === t.bt_num);
+            if (hit) taskMap[t.id] = hit.id;
+          });
+        }
+
+        // gates
+        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${source_id}&select=*&order=gate_order`);
+        const gates = gRes.data || [];
+        if (gates.length) {
+          await supabaseRequest('POST', 'sched_template_gates', gates.map(g => ({
+            template_id: newId, name: g.name, icon: g.icon,
+            hold_stage_code: g.hold_stage_code, gate_order: g.gate_order
+          })));
+        }
+
+        // stage map
+        const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${source_id}&select=*&order=stage_order`);
+        const sm = smRes.data || [];
+        const smMap = {};
+        if (sm.length) {
+          const rows = sm.map(s => ({
+            template_id: newId, stage_code: s.stage_code, stage_label: s.stage_label,
+            is_manual: s.is_manual, stage_order: s.stage_order
+          }));
+          const ins = await supabaseRequest('POST', 'sched_template_stage_map', rows);
+          const made = ins.data || [];
+          sm.forEach(s => {
+            const hit = made.find(m => m.stage_code === s.stage_code);
+            if (hit) smMap[s.id] = hit.id;
+          });
+          // trigger joins
+          const smIds = sm.map(s => s.id);
+          if (smIds.length) {
+            const jRes = await supabaseRequest('GET', `sched_stage_map_tasks?stage_map_id=in.(${smIds.join(',')})&select=*`);
+            const joins = (jRes.data || [])
+              .filter(j => smMap[j.stage_map_id] && taskMap[j.task_id])
+              .map(j => ({ stage_map_id: smMap[j.stage_map_id], task_id: taskMap[j.task_id] }));
+            if (joins.length) await supabaseRequest('POST', 'sched_stage_map_tasks', joins);
+          }
+        }
+
+        return { statusCode: 200, body: JSON.stringify({
+          success: true, id: newId, name,
+          phases: phases.length, tasks: tasks.length, gates: gates.length, stages: sm.length
+        }) };
+      }
+
+      case 'getTemplateDetail': {
+        // counts for the template list
+        const { template_id } = payload;
+        if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
+        const [ph, tk, gt, sm, lots] = await Promise.all([
+          supabaseRequest('GET', `sched_template_phases?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${template_id}&select=id`),
+          supabaseRequest('GET', `sched_lots?template_id=eq.${template_id}&select=id`)
+        ]);
+        return { statusCode: 200, body: JSON.stringify({
+          phases: (ph.data||[]).length, tasks: (tk.data||[]).length,
+          gates: (gt.data||[]).length, stages: (sm.data||[]).length,
+          lots_using: (lots.data||[]).length
+        }) };
+      }
+
+      case 'recalcTemplateCriticalPath': {
+        // TRUE CPM. Forward pass -> earliest start/finish. Backward pass -> latest
+        // start/finish. Float = LS - ES. Critical when float <= 0, i.e. any slip
+        // pushes the completion date. This is CALCULATED, not hand-flagged —
+        // force_critical only ADDS tasks you always want treated as critical.
+        const { template_id } = payload;
+        if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
+
+        const tkRes = await supabaseRequest('GET',
+          `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num,duration,lag,relative_start,predecessors,force_critical&order=task_order`);
+        const tasks = tkRes.data || [];
+        if (!tasks.length) {
+          return { statusCode: 200, body: JSON.stringify({ success: true, tasks: 0, critical: 0 }) };
+        }
+
+        const byNum = {};
+        tasks.forEach(t => { byNum[t.bt_num] = t; });
+        const dur = t => (t.duration != null ? t.duration : 1);
+
+        // ---- forward pass (memoised, cycle-safe) ----
+        const ES = {}, EF = {};
+        function calcEF(num, stack) {
+          if (EF[num] !== undefined) return EF[num];
+          const t = byNum[num];
+          if (!t) return 0;
+          if (stack.indexOf(num) >= 0) { ES[num] = 1; EF[num] = dur(t); return EF[num]; }
+          const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
+          let start = null;
+          preds.forEach(p => {
+            if (byNum[p]) {
+              const pe = calcEF(p, stack.concat([num]));
+              const cand = pe + 1 + (t.lag || 0);
+              if (start === null || cand > start) start = cand;
+            }
+          });
+          // relative_start is a FLOOR, not a fallback: a task never starts earlier
+          // than its planned day even if its predecessors finish sooner.
+          if (t.relative_start != null && (start === null || t.relative_start > start)) {
+            start = t.relative_start;
+          }
+          if (start === null) start = 1;
+          ES[num] = start;
+          EF[num] = start + dur(t) - 1;
+          return EF[num];
+        }
+        tasks.forEach(t => calcEF(t.bt_num, []));
+
+        const projectEnd = Math.max.apply(null, tasks.map(t => EF[t.bt_num] || 0));
+
+        // ---- successors map ----
+        const succ = {};
+        tasks.forEach(t => {
+          (Array.isArray(t.predecessors) ? t.predecessors : []).forEach(p => {
+            if (byNum[p]) (succ[p] = succ[p] || []).push(t.bt_num);
+          });
+        });
+
+        // ---- backward pass ----
+        const LF = {}, LS = {};
+        function calcLS(num, stack) {
+          if (LS[num] !== undefined) return LS[num];
+          const t = byNum[num];
+          if (!t) return projectEnd;
+          if (stack.indexOf(num) >= 0) { LF[num] = projectEnd; LS[num] = projectEnd - dur(t) + 1; return LS[num]; }
+          const ss = succ[num] || [];
+          let finish = null;
+          ss.forEach(s => {
+            const st = byNum[s];
+            if (!st) return;
+            const sls = calcLS(s, stack.concat([num]));
+            const cand = sls - 1 - (st.lag || 0);
+            if (finish === null || cand < finish) finish = cand;
+          });
+          if (finish === null) finish = projectEnd;
+          LF[num] = finish;
+          LS[num] = finish - dur(t) + 1;
+          return LS[num];
+        }
+        tasks.forEach(t => calcLS(t.bt_num, []));
+
+        // ---- float + write ----
+        let criticalCount = 0;
+        const updates = tasks.map(t => {
+          const float = (LS[t.bt_num] || 0) - (ES[t.bt_num] || 0);
+          const isCrit = (float <= 0) || !!t.force_critical;
+          if (isCrit) criticalCount++;
+          return { id: t.id, is_critical: isCrit, float: float };
+        });
+
+        for (const u of updates) {
+          await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${u.id}`, { is_critical: u.is_critical });
+        }
+
+        return { statusCode: 200, body: JSON.stringify({
+          success: true, tasks: tasks.length, critical: criticalCount,
+          project_days: projectEnd
+        }) };
+      }
+
+      case 'getTemplateBuilder': {
+        // Full editable payload for one template: phases + tasks (with real ids).
+        const { template_id } = payload;
+        if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
+        const [ph, tk, tpl] = await Promise.all([
+          supabaseRequest('GET', `sched_template_phases?template_id=eq.${template_id}&select=*&order=phase_order`),
+          supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=*&order=task_order`),
+          supabaseRequest('GET', `sched_templates?id=eq.${template_id}&select=*`)
+        ]);
+        return { statusCode: 200, body: JSON.stringify({
+          template: (tpl.data || [])[0] || null,
+          phases: ph.data || [],
+          tasks: tk.data || []
+        }) };
+      }
+
+      case 'upsertTemplatePhase': {
+        const { id, template_id, name, phase_order } = payload;
+        if (!id && (!template_id || !name)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and name required' }) };
+        }
+        let r;
+        if (id) {
+          const upd = {};
+          if (name !== undefined) upd.name = name;
+          if (phase_order !== undefined) upd.phase_order = phase_order;
+          r = await supabaseRequest('PATCH', `sched_template_phases?id=eq.${id}`, upd);
+        } else {
+          r = await supabaseRequest('POST', 'sched_template_phases', {
+            template_id, name, phase_order: phase_order != null ? phase_order : 0
+          });
+        }
+        const row = Array.isArray(r.data) ? r.data[0] : r.data;
+        return { statusCode: 200, body: JSON.stringify(row || null) };
+      }
+
+      case 'deleteTemplatePhase': {
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+        const t = await supabaseRequest('GET', `sched_template_tasks?phase_id=eq.${id}&select=id&limit=1`);
+        if ((t.data || []).length) {
+          return { statusCode: 200, body: JSON.stringify({ error: 'This phase still has tasks. Move or delete them first.' }) };
+        }
+        await supabaseRequest('DELETE', `sched_template_phases?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
+      case 'upsertTemplateTask': {
+        const { id, template_id, bt_num, name, phase_id, duration, lag,
+                relative_start, relative_finish, predecessors, is_critical,
+                task_type, task_order, notification } = payload;
+        if (!id && (!template_id || !name)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and name required' }) };
+        }
+        const f = {};
+        if (bt_num !== undefined)          f.bt_num = bt_num;
+        if (name !== undefined)            f.name = name;
+        if (phase_id !== undefined)        f.phase_id = phase_id;
+        if (duration !== undefined)        f.duration = duration;
+        if (lag !== undefined)             f.lag = lag;
+        if (relative_start !== undefined)  f.relative_start = relative_start;
+        if (relative_finish !== undefined) f.relative_finish = relative_finish;
+        if (predecessors !== undefined)    f.predecessors = predecessors;
+        if (is_critical !== undefined)     f.is_critical = is_critical;
+        if (task_type !== undefined)       f.task_type = task_type;
+        if (task_order !== undefined)      f.task_order = task_order;
+        if (notification !== undefined)    f.notification = notification;
+        if (payload.trade !== undefined)          f.trade = payload.trade;
+        if (payload.force_critical !== undefined) f.force_critical = payload.force_critical;
+        let r;
+        if (id) {
+          r = await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${id}`, f);
+        } else {
+          f.template_id = template_id;
+          if (f.task_type === undefined) f.task_type = 'work';
+          r = await supabaseRequest('POST', 'sched_template_tasks', f);
+        }
+        const row = Array.isArray(r.data) ? r.data[0] : r.data;
+        return { statusCode: 200, body: JSON.stringify(row || null) };
+      }
+
+      case 'deleteTemplateTask': {
+        const { id } = payload;
+        if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+        // clear any stage-map trigger referencing this task
+        await supabaseRequest('DELETE', `sched_stage_map_tasks?task_id=eq.${id}`);
+        await supabaseRequest('DELETE', `sched_template_tasks?id=eq.${id}`);
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+      }
+
       case 'getTemplates': {
         const r = await supabaseRequest('GET', 'sched_templates?select=id,name,description,status,total_days&order=name');
         return { statusCode: 200, body: JSON.stringify(r.data || []) };
@@ -340,11 +707,14 @@ exports.handler = async function(event) {
         const lotById = {}; lotRows.forEach(l=>lotById[l.id]=l);
         const stale = [];
         if (ids.length) {
-          const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${ids.join(',')})&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical`);
-          const rows = tt.data || [];
+          // Per-lot fetch to avoid PostgREST's 1000-row cap on combined queries.
+          const rows = [];
           const byLot = {};
-          rows.forEach(r=>{ (byLot[r.lot_id]=byLot[r.lot_id]||{})[r.bt_num]=r; });
+          await Promise.all(ids.map(async (lotId) => {
+            const r = await supabaseRequest('GET',
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,actual_finish,duration,predecessors,is_critical`);
+            (r.data || []).forEach(row => { rows.push(row); (byLot[row.lot_id]=byLot[row.lot_id]||{})[row.bt_num]=row; });
+          }));
           rows.forEach(r=>{
             if (!r.is_critical) return;
             if (r.status === 'finished') return;
@@ -380,41 +750,135 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(stale) };
       }
 
+      // ══════════════════════════════════════════════════════
+      // DELAY REASON CAPTURE
+      // ══════════════════════════════════════════════════════
+
+      case 'getDelayReasons': {
+        const inc = payload && payload.include_archived;
+        const filt = inc ? '' : '&is_archived=eq.false';
+        const r = await supabaseRequest('GET', `sched_delay_reasons?select=*${filt}&order=sort_order,label`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'upsertDelayReason': {
+        const { id, label, sort_order, is_archived } = payload;
+        if (!id && !label) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'label required' }) };
+        }
+        let r;
+        if (id) {
+          const upd = {};
+          if (label !== undefined) upd.label = label;
+          if (sort_order !== undefined) upd.sort_order = sort_order;
+          if (is_archived !== undefined) upd.is_archived = is_archived;
+          r = await supabaseRequest('PATCH', `sched_delay_reasons?id=eq.${id}`, upd);
+        } else {
+          r = await supabaseRequest('POST', 'sched_delay_reasons', {
+            label, sort_order: sort_order != null ? sort_order : 50, is_archived: false
+          });
+        }
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'addTaskDelay': {
+        // One row per lot+task. source_lot_id set when inherited via bulk push,
+        // so reporting can count BY LOT (all rows) or BY EVENT (dedupe by source).
+        const { lot_id, lot_task_id, bt_num, task_name, lot_number, community, builder_name,
+                reason_id, reason_label, note, days_late, expected_done, actual_finish,
+                source_lot_id, author } = payload;
+        if (!lot_task_id || !reason_label) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_task_id and reason_label are required' }) };
+        }
+        const r = await supabaseRequest('POST', 'sched_task_delays', {
+          lot_id: lot_id || null, lot_task_id, bt_num: bt_num != null ? bt_num : null,
+          task_name: task_name || null, lot_number: lot_number || null,
+          community: community || null, builder_name: builder_name || null,
+          reason_id: reason_id || null, reason_label,
+          note: note || '', days_late: days_late != null ? days_late : 0,
+          expected_done: expected_done || null, actual_finish: actual_finish || null,
+          source_lot_id: source_lot_id || null, author: author || null
+        });
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getTaskDelays': {
+        // Reporting feed. Optional filters: community, builder_name, since (date).
+        const p = payload || {};
+        let q = 'sched_task_delays?select=*';
+        if (p.community)    q += `&community=eq.${encodeURIComponent(p.community)}`;
+        if (p.builder_name) q += `&builder_name=eq.${encodeURIComponent(p.builder_name)}`;
+        if (p.since)        q += `&created_at=gte.${p.since}`;
+        q += '&order=created_at.desc';
+        const r = await supabaseRequest('GET', q);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
+      case 'getDelaysForTask': {
+        // Used by bulk push to inherit the source lot's reason for a given task.
+        const { lot_id, bt_num } = payload;
+        if (!lot_id || bt_num == null) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'lot_id and bt_num required' }) };
+        }
+        const r = await supabaseRequest('GET',
+          `sched_task_delays?lot_id=eq.${lot_id}&bt_num=eq.${bt_num}&select=*&order=created_at.desc&limit=1`);
+        return { statusCode: 200, body: JSON.stringify((r.data || [])[0] || null) };
+      }
+
       case 'getAllLotPhases': {
-        // For every active lot: compute active phase (phase of earliest unfinished task)
-        // and a per-phase task snapshot. One call, computed server-side.
-        // Returns { [lot_id]: { activePhase, activePhaseName, phases: { [phase_order]: {name, tasks:[{num,name,status}]} } } }
+        // For every active lot: compute active phase and per-phase task snapshots.
+        // ACTIVE PHASE = the furthest phase that contains a started/finished CRITICAL task.
+        // Non-critical tasks NEVER dictate the active phase (float items don't hold it back
+        // or push it forward). Also returns "behind": incomplete CRITICAL tasks in phases
+        // earlier than the active phase (bypassed critical work).
+        // Returns { [lot_id]: { activePhase, activePhaseName,
+        //   phases: { [phase_order]: {name, tasks:[{num,name,status,is_critical}]} },
+        //   behind: [{num,name,status,phase_order,phase_name}] } }
         const lots = await supabaseRequest('GET', 'sched_lots?select=id,status&status=eq.active');
         const lotRows = lots.data || [];
         const ids = lotRows.map(l => l.id);
         const out = {};
         if (ids.length) {
-          const inList = ids.join(',');
-          const tt = await supabaseRequest('GET',
-            `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order&order=task_order`);
-          const rows = tt.data || [];
+          // Fetch per-lot to avoid PostgREST's hard 1000-row cap on combined queries.
+          // Each lot has ~100 tasks, so no single query is ever near the cap.
           const byLot = {};
-          rows.forEach(r => { (byLot[r.lot_id] = byLot[r.lot_id] || []).push(r); });
+          await Promise.all(ids.map(async (lotId) => {
+            const r = await supabaseRequest('GET',
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade&order=task_order`);
+            byLot[lotId] = r.data || [];
+          }));
           Object.keys(byLot).forEach(lotId => {
             const ts = byLot[lotId];
-            // active phase = phase of first task (task_order) whose status !== 'finished'
+            // ACTIVE PHASE = furthest phase_order among CRITICAL tasks that are started or finished
             let activePhase = null, activePhaseName = null;
-            for (const r of ts) {
-              if (r.status !== 'finished') { activePhase = r.phase_order; activePhaseName = r.phase_name; break; }
+            ts.forEach(r => {
+              if (r.is_critical && (r.status === 'started' || r.status === 'finished')) {
+                if (activePhase === null || r.phase_order > activePhase) {
+                  activePhase = r.phase_order; activePhaseName = r.phase_name;
+                }
+              }
+            });
+            // fallback: nothing critical started yet -> earliest phase that has any task
+            if (activePhase === null && ts.length) {
+              activePhase = ts[0].phase_order; activePhaseName = ts[0].phase_name;
             }
-            if (activePhase === null && ts.length) { // all finished — use last phase
-              const last = ts[ts.length - 1]; activePhase = last.phase_order; activePhaseName = last.phase_name;
-            }
+            // per-phase snapshot (all tasks, with critical flag)
             const phases = {};
             ts.forEach(r => {
               const p = r.phase_order;
-              (phases[p] = phases[p] || { name: r.phase_name, tasks: [] }).tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started' });
+              (phases[p] = phases[p] || { name: r.phase_name, tasks: [] })
+                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical, task_type: r.task_type || 'work', trade: r.trade || null });
             });
-            out[lotId] = { activePhase, activePhaseName, phases };
+            // BEHIND = incomplete CRITICAL tasks in phases earlier than active
+            const behind = ts.filter(r =>
+              r.is_critical && r.status !== 'finished' && r.phase_order < activePhase
+            ).map(r => ({ num: r.bt_num, name: r.name, status: r.status || 'not_started', phase_order: r.phase_order, phase_name: r.phase_name }));
+            out[lotId] = { activePhase, activePhaseName, phases, behind };
           });
         }
         return { statusCode: 200, body: JSON.stringify(out) };
       }
+
 
       case 'getScheduleLotTasks': {
         const { lot_id } = payload;
