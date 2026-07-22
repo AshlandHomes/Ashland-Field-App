@@ -839,7 +839,7 @@ exports.handler = async function(event) {
           const byLot = {};
           await Promise.all(ids.map(async (lotId) => {
             const r = await supabaseRequest('GET',
-              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical&order=task_order`);
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade&order=task_order`);
             byLot[lotId] = r.data || [];
           }));
           Object.keys(byLot).forEach(lotId => {
@@ -862,7 +862,7 @@ exports.handler = async function(event) {
             ts.forEach(r => {
               const p = r.phase_order;
               (phases[p] = phases[p] || { name: r.phase_name, tasks: [] })
-                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical });
+                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical, task_type: r.task_type || 'work', trade: r.trade || null });
             });
             // BEHIND = incomplete CRITICAL tasks in phases earlier than active
             const behind = ts.filter(r =>
