@@ -312,6 +312,7 @@ tr:hover td{background:#f9fafb}
               <div class="table-actions">
                 <button class="btn btn-secondary" onclick="openAddPhaseModal()">+ Add Phase</button>
                 <button class="btn btn-primary" onclick="openAddTaskModal()">+ Add Task</button>
+                <button class="btn btn-secondary" onclick="recalcCriticalPath()">↻ Recalculate critical path</button>
                 <button class="btn btn-secondary" onclick="closeTemplateEditor()">← Back</button>
               </div>
             </div>
@@ -623,10 +624,19 @@ tr:hover td{background:#f9fafb}
       </div>
     </div>
     <div class="field">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input id="task-critical" type="checkbox" style="width:16px;height:16px"> Critical path task
+      <label>Trade <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+      <input id="task-trade" type="text" placeholder="e.g. Plumber, Framer, Electrician">
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Who performs this task. Used to analyse delays by trade.</p>
+    </div>
+    <div class="field" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:11px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label style="margin:0">Critical Path</label>
+        <span id="task-crit-status" style="font-size:12px;font-weight:700"></span>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Calculated automatically from durations and predecessors — a task is critical when it has zero float, meaning any delay pushes the completion date.</p>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+        <input id="task-force-critical" type="checkbox" style="width:16px;height:16px"> Always treat as critical (override)
       </label>
-      <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Critical tasks drive the completion date and the active phase. Non-critical tasks have float and don't.</p>
     </div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-task')">Cancel</button>
@@ -2072,6 +2082,24 @@ async function toggleReason(id, archive){
   await loadDelaysView();
 }
 
+function _setCritStatus(isCrit){
+  const el = document.getElementById('task-crit-status');
+  if(!el) return;
+  if(isCrit === null){ el.textContent = 'calculated on save'; el.style.color = '#94a3b8'; return; }
+  el.textContent = isCrit ? '◆ CRITICAL (zero float)' : '○ Has float';
+  el.style.color = isCrit ? '#4338ca' : '#64748b';
+}
+
+async function recalcCriticalPath(){
+  const r = await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
+  if(r && r.success){
+    await openTemplateEditor(tplEdit.id);
+    alert('Critical path recalculated: ' + r.critical + ' of ' + r.tasks + ' tasks are critical. Schedule runs ' + r.project_days + ' working days.');
+  } else {
+    alert('Could not recalculate.');
+  }
+}
+
 // ── PREDECESSOR PICKER ──
 let _predSel = [];   // array of bt_num
 
@@ -2201,7 +2229,7 @@ function _tplTaskRow(t){
   return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
     +'<div>'+(t.is_critical?'<span style="color:#4338ca">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
     +  '<strong>#'+(t.bt_num!=null?t.bt_num:'?')+'</strong> '+(t.name||'')
-    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+'</div></div>'
+    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+(t.force_critical?' · <span style="color:#4338ca">forced critical</span>':'')+'</div></div>'
     +'<div style="display:flex;gap:6px;white-space:nowrap">'
     +  '<button class="btn btn-secondary btn-sm" onclick="openEditTaskModal(\'' + t.id + '\')">Edit</button>'
     +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTaskUI(\'' + t.id + '\')">Delete</button>'
@@ -2265,7 +2293,9 @@ function openAddTaskModal(){
   document.getElementById('task-rf').value='';
   document.getElementById('task-order').value=nextOrd;
   document.getElementById('task-type').value='work';
-  document.getElementById('task-critical').checked=false;
+  document.getElementById('task-trade').value='';
+  document.getElementById('task-force-critical').checked=false;
+  _setCritStatus(null);
   document.getElementById('modal-task').classList.add('open');
   setTimeout(function(){document.getElementById('task-name').focus();},50);
 }
@@ -2284,7 +2314,9 @@ function openEditTaskModal(id){
   document.getElementById('task-rf').value=t.relative_finish!=null?t.relative_finish:'';
   document.getElementById('task-order').value=t.task_order!=null?t.task_order:'';
   document.getElementById('task-type').value=t.task_type||'work';
-  document.getElementById('task-critical').checked=!!t.is_critical;
+  document.getElementById('task-trade').value=t.trade||'';
+  document.getElementById('task-force-critical').checked=!!t.force_critical;
+  _setCritStatus(!!t.is_critical);
   document.getElementById('modal-task').classList.add('open');
 }
 async function submitTask(){
@@ -2299,12 +2331,14 @@ async function submitTask(){
     duration: num('task-duration'), lag: num('task-lag'),
     relative_start: num('task-rs'), relative_finish: num('task-rf'),
     predecessors: preds,
-    is_critical: document.getElementById('task-critical').checked,
+    trade: (document.getElementById('task-trade').value||'').trim() || null,
+    force_critical: document.getElementById('task-force-critical').checked,
     task_type: document.getElementById('task-type').value,
     task_order: num('task-order')
   };
   if(id) body.id = id; else body.template_id = tplEdit.id;
   await sbCall('upsertTemplateTask', body);
+  await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
   closeModal('modal-task');
   await openTemplateEditor(tplEdit.id);
 }
@@ -2312,6 +2346,7 @@ async function deleteTaskUI(id){
   const t = tplEdit.tasks.find(x=>x.id===id);
   if(!confirm('Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?')) return;
   await sbCall('deleteTemplateTask', { id });
+  await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
   await openTemplateEditor(tplEdit.id);
 }
 
