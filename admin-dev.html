@@ -304,6 +304,21 @@ tr:hover td{background:#f9fafb}
           <div id="templates-list" style="padding:6px 12px 12px"><div class="loading">Loading…</div></div>
         </div>
 
+        <!-- TEMPLATE EDITOR -->
+        <div id="tpl-editor" style="display:none">
+          <div class="table-wrap" style="margin-bottom:20px">
+            <div class="table-header">
+              <h2 id="tpl-editor-title">Edit Template</h2>
+              <div class="table-actions">
+                <button class="btn btn-secondary" onclick="openAddPhaseModal()">+ Add Phase</button>
+                <button class="btn btn-primary" onclick="openAddTaskModal()">+ Add Task</button>
+                <button class="btn btn-secondary" onclick="closeTemplateEditor()">← Back</button>
+              </div>
+            </div>
+            <div id="tpl-editor-body" style="padding:8px 12px 14px"><div class="loading">Loading…</div></div>
+          </div>
+        </div>
+
         <div class="table-wrap">
           <div class="table-header"><h2>How schedules work</h2></div>
           <div style="padding:14px 20px;font-size:13px;color:#475569;line-height:1.65">
@@ -551,6 +566,58 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <!-- ADD BUILDER -->
+<div class="modal-overlay" id="modal-phase">
+  <div class="modal">
+    <h2 id="phase-modal-title">Add Phase</h2>
+    <input type="hidden" id="phase-id">
+    <div class="field"><label>Phase Name</label><input id="phase-name" type="text" placeholder="e.g. Framing #1"></div>
+    <div class="field"><label>Phase Order</label><input id="phase-order" type="number" placeholder="e.g. 5"></div>
+    <p style="font-size:12px;color:var(--muted);margin:-4px 0 4px">Order controls the sequence of phases (1, 2, 3…). Tasks are assigned to a phase.</p>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-phase')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitPhase()">Save →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-task">
+  <div class="modal" style="max-width:560px">
+    <h2 id="task-modal-title">Add Task</h2>
+    <input type="hidden" id="task-id">
+    <div class="field"><label>Task Number</label><input id="task-btnum" type="number" placeholder="e.g. 55"></div>
+    <div class="field"><label>Task Name</label><input id="task-name" type="text" placeholder="e.g. Foam Penetrations"></div>
+    <div class="field"><label>Phase</label><select id="task-phase"></select></div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Duration (days)</label><input id="task-duration" type="number" placeholder="1"></div>
+      <div class="field" style="flex:1"><label>Lag (days)</label><input id="task-lag" type="number" placeholder="0"></div>
+    </div>
+    <div class="field">
+      <label>Predecessors <span style="color:var(--muted);font-weight:400">(task numbers, comma-separated)</span></label>
+      <input id="task-preds" type="text" placeholder="e.g. 52, 43">
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Relative Start <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rs" type="number"></div>
+      <div class="field" style="flex:1"><label>Relative Finish <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rf" type="number"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Task Order</label><input id="task-order" type="number" placeholder="sequence"></div>
+      <div class="field" style="flex:1"><label>Type</label>
+        <select id="task-type"><option value="work">work</option><option value="action">action</option></select>
+      </div>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input id="task-critical" type="checkbox" style="width:16px;height:16px"> Critical path task
+      </label>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Critical tasks drive the completion date and the active phase. Non-critical tasks have float and don't.</p>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-task')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTask()">Save →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-template">
   <div class="modal">
     <h2>Add Schedule Template</h2>
@@ -1988,6 +2055,184 @@ async function toggleReason(id, archive){
   await loadDelaysView();
 }
 
+// ── TEMPLATE EDITOR ──
+let tplEdit = { id:null, template:null, phases:[], tasks:[] };
+
+async function openTemplateEditor(id){
+  tplEdit.id = id;
+  document.querySelectorAll('#setpane-schedules > .table-wrap').forEach(w=>w.style.display='none');
+  document.getElementById('tpl-editor').style.display = 'block';
+  document.getElementById('tpl-editor-body').innerHTML = '<div class="loading">Loading…</div>';
+  const d = await sbCall('getTemplateBuilder', { template_id: id }) || {};
+  tplEdit.template = d.template || null;
+  tplEdit.phases = d.phases || [];
+  tplEdit.tasks = d.tasks || [];
+  document.getElementById('tpl-editor-title').textContent =
+    'Edit: ' + (tplEdit.template ? tplEdit.template.name : '') +
+    '  (' + tplEdit.phases.length + ' phases · ' + tplEdit.tasks.length + ' tasks)';
+  renderTemplateEditor();
+}
+
+function closeTemplateEditor(){
+  document.getElementById('tpl-editor').style.display = 'none';
+  document.querySelectorAll('#setpane-schedules > .table-wrap').forEach(w=>w.style.display='');
+  loadTemplatesView();
+}
+
+function renderTemplateEditor(){
+  const box = document.getElementById('tpl-editor-body');
+  if(!tplEdit.phases.length && !tplEdit.tasks.length){
+    box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Empty template. Add a phase, then add tasks to it.</p>';
+    return;
+  }
+  const byPhase = {};
+  tplEdit.tasks.forEach(t=>{ const k=t.phase_id||'none'; (byPhase[k]=byPhase[k]||[]).push(t); });
+
+  let html = tplEdit.phases.slice().sort((a,b)=>(a.phase_order||0)-(b.phase_order||0)).map(p=>{
+    const ts = (byPhase[p.id]||[]).sort((a,b)=>(a.task_order||0)-(b.task_order||0));
+    const crit = ts.filter(t=>t.is_critical).length;
+    return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#f8fafc">'
+      +  '<div style="font-weight:700;color:#334155">Phase '+p.phase_order+' · '+p.name+'</div>'
+      +  '<div style="display:flex;gap:6px;align-items:center">'
+      +    '<span class="flag-meta">'+ts.length+' tasks · '+crit+' critical</span>'
+      +    '<button class="btn btn-secondary btn-sm" onclick="openEditPhaseModal(\'' + p.id + '\')">Edit</button>'
+      +    '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deletePhaseUI(\'' + p.id + '\')">Delete</button>'
+      +  '</div></div>'
+      +'<div style="padding:4px 8px 8px">'
+      + (ts.length ? ts.map(_tplTaskRow).join('') : '<p style="color:var(--muted);padding:8px 4px;font-size:13px">No tasks in this phase.</p>')
+      +'</div></div>';
+  }).join('');
+
+  const orphans = (byPhase['none']||[]);
+  if(orphans.length){
+    html += '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;margin-bottom:8px;overflow:hidden">'
+      +'<div style="padding:9px 11px;font-weight:700;color:#b45309">⚠ Tasks with no phase ('+orphans.length+')</div>'
+      +'<div style="padding:4px 8px 8px">'+orphans.map(_tplTaskRow).join('')+'</div></div>';
+  }
+  box.innerHTML = html;
+}
+
+function _tplTaskRow(t){
+  const preds = Array.isArray(t.predecessors) && t.predecessors.length ? t.predecessors.join(', ') : '—';
+  return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+    +'<div>'+(t.is_critical?'<span style="color:#4338ca">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
+    +  '<strong>#'+(t.bt_num!=null?t.bt_num:'?')+'</strong> '+(t.name||'')
+    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+'</div></div>'
+    +'<div style="display:flex;gap:6px;white-space:nowrap">'
+    +  '<button class="btn btn-secondary btn-sm" onclick="openEditTaskModal(\'' + t.id + '\')">Edit</button>'
+    +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTaskUI(\'' + t.id + '\')">Delete</button>'
+    +'</div></div>';
+}
+
+function openAddPhaseModal(){
+  document.getElementById('phase-modal-title').textContent='Add Phase';
+  document.getElementById('phase-id').value='';
+  document.getElementById('phase-name').value='';
+  document.getElementById('phase-order').value = (tplEdit.phases.length
+    ? Math.max.apply(null, tplEdit.phases.map(p=>p.phase_order||0))+1 : 1);
+  document.getElementById('modal-phase').classList.add('open');
+  setTimeout(function(){document.getElementById('phase-name').focus();},50);
+}
+function openEditPhaseModal(id){
+  const p = tplEdit.phases.find(x=>x.id===id); if(!p) return;
+  document.getElementById('phase-modal-title').textContent='Edit Phase';
+  document.getElementById('phase-id').value=p.id;
+  document.getElementById('phase-name').value=p.name||'';
+  document.getElementById('phase-order').value=p.phase_order!=null?p.phase_order:'';
+  document.getElementById('modal-phase').classList.add('open');
+}
+async function submitPhase(){
+  const id=document.getElementById('phase-id').value||null;
+  const name=(document.getElementById('phase-name').value||'').trim();
+  const orderRaw=(document.getElementById('phase-order').value||'').trim();
+  if(!name){ alert('Enter a phase name'); return; }
+  const body = id ? { id, name } : { template_id: tplEdit.id, name };
+  if(orderRaw!=='') body.phase_order = parseInt(orderRaw);
+  await sbCall('upsertTemplatePhase', body);
+  closeModal('modal-phase');
+  await openTemplateEditor(tplEdit.id);
+}
+async function deletePhaseUI(id){
+  const p = tplEdit.phases.find(x=>x.id===id);
+  if(!confirm('Delete phase "'+(p?p.name:'')+'"?')) return;
+  const r = await sbCall('deleteTemplatePhase', { id });
+  if(r && r.error){ alert(r.error); return; }
+  await openTemplateEditor(tplEdit.id);
+}
+
+function _fillPhaseSelect(sel){
+  sel.innerHTML = '<option value="">— no phase —</option>' + tplEdit.phases
+    .slice().sort((a,b)=>(a.phase_order||0)-(b.phase_order||0))
+    .map(p=>'<option value="'+p.id+'">Phase '+p.phase_order+' · '+p.name+'</option>').join('');
+}
+function openAddTaskModal(){
+  if(!tplEdit.phases.length){ alert('Add a phase first — tasks live inside phases.'); return; }
+  document.getElementById('task-modal-title').textContent='Add Task';
+  document.getElementById('task-id').value='';
+  const nextBt = tplEdit.tasks.length ? Math.max.apply(null,tplEdit.tasks.map(t=>t.bt_num||0))+1 : 1;
+  const nextOrd = tplEdit.tasks.length ? Math.max.apply(null,tplEdit.tasks.map(t=>t.task_order||0))+1 : 1;
+  document.getElementById('task-btnum').value=nextBt;
+  document.getElementById('task-name').value='';
+  _fillPhaseSelect(document.getElementById('task-phase'));
+  document.getElementById('task-duration').value=1;
+  document.getElementById('task-lag').value=0;
+  document.getElementById('task-preds').value='';
+  document.getElementById('task-rs').value='';
+  document.getElementById('task-rf').value='';
+  document.getElementById('task-order').value=nextOrd;
+  document.getElementById('task-type').value='work';
+  document.getElementById('task-critical').checked=false;
+  document.getElementById('modal-task').classList.add('open');
+  setTimeout(function(){document.getElementById('task-name').focus();},50);
+}
+function openEditTaskModal(id){
+  const t = tplEdit.tasks.find(x=>x.id===id); if(!t) return;
+  document.getElementById('task-modal-title').textContent='Edit Task';
+  document.getElementById('task-id').value=t.id;
+  document.getElementById('task-btnum').value=t.bt_num!=null?t.bt_num:'';
+  document.getElementById('task-name').value=t.name||'';
+  _fillPhaseSelect(document.getElementById('task-phase'));
+  document.getElementById('task-phase').value=t.phase_id||'';
+  document.getElementById('task-duration').value=t.duration!=null?t.duration:1;
+  document.getElementById('task-lag').value=t.lag!=null?t.lag:0;
+  document.getElementById('task-preds').value=Array.isArray(t.predecessors)?t.predecessors.join(', '):'';
+  document.getElementById('task-rs').value=t.relative_start!=null?t.relative_start:'';
+  document.getElementById('task-rf').value=t.relative_finish!=null?t.relative_finish:'';
+  document.getElementById('task-order').value=t.task_order!=null?t.task_order:'';
+  document.getElementById('task-type').value=t.task_type||'work';
+  document.getElementById('task-critical').checked=!!t.is_critical;
+  document.getElementById('modal-task').classList.add('open');
+}
+async function submitTask(){
+  const id=document.getElementById('task-id').value||null;
+  const name=(document.getElementById('task-name').value||'').trim();
+  if(!name){ alert('Enter a task name'); return; }
+  const num=function(v){ const s=(document.getElementById(v).value||'').trim(); return s===''?null:parseInt(s); };
+  const predsRaw=(document.getElementById('task-preds').value||'').trim();
+  const preds = predsRaw ? predsRaw.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)) : [];
+  const body = {
+    bt_num: num('task-btnum'), name,
+    phase_id: document.getElementById('task-phase').value || null,
+    duration: num('task-duration'), lag: num('task-lag'),
+    relative_start: num('task-rs'), relative_finish: num('task-rf'),
+    predecessors: preds,
+    is_critical: document.getElementById('task-critical').checked,
+    task_type: document.getElementById('task-type').value,
+    task_order: num('task-order')
+  };
+  if(id) body.id = id; else body.template_id = tplEdit.id;
+  await sbCall('upsertTemplateTask', body);
+  closeModal('modal-task');
+  await openTemplateEditor(tplEdit.id);
+}
+async function deleteTaskUI(id){
+  const t = tplEdit.tasks.find(x=>x.id===id);
+  if(!confirm('Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?')) return;
+  await sbCall('deleteTemplateTask', { id });
+  await openTemplateEditor(tplEdit.id);
+}
+
 // ── SCHEDULE TEMPLATES ──
 let templates = [], templateStats = {}, _cloneSrcId = null;
 
@@ -2018,6 +2263,7 @@ function renderTemplatesList(){
       +     (t.description ? ' · ' + t.description : '') + '</div>'
       + '</div>'
       + '<div style="display:flex;gap:6px;white-space:nowrap">'
+      +   '<button class="btn btn-primary btn-sm" onclick="openTemplateEditor(\''+t.id+'\')">Edit</button>'
       +   '<button class="btn btn-secondary btn-sm" onclick="openCloneTemplateModal(\''+t.id+'\')">Clone</button>'
       +   '<button class="btn btn-secondary btn-sm" onclick="renameTemplate(\''+t.id+'\')">Rename</button>'
       +   '<button class="btn btn-secondary btn-sm" onclick="toggleTemplateArchive(\''+t.id+'\','+(archived?'false':'true')+')">' + (archived ? 'Restore' : 'Archive') + '</button>'
