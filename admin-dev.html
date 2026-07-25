@@ -139,8 +139,8 @@ tr:hover td{background:#f9fafb}
 .set-pane.active{display:block}
 
 /* ===== ICON LEGEND ===== */
-.icon-legend-btn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:#fff;color:#64748b;font-size:12px;font-weight:700;cursor:pointer;vertical-align:middle;margin-left:6px;padding:0;line-height:1}
-.icon-legend-btn:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
+.legend-pill{display:inline-flex;align-items:center;gap:4px;background:var(--brand);color:#fff;border:none;border-radius:14px;padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer;vertical-align:middle;margin-left:10px;font-family:inherit;letter-spacing:.02em}
+.legend-pill:hover{background:var(--brand-dark,#0082A0)}
 .icon-legend-list{display:flex;flex-direction:column;gap:2px;margin:4px 0 8px}
 .ilg{display:flex;align-items:center;gap:12px;padding:7px 4px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#475569}
 .ilg-i{flex:0 0 28px;text-align:center;font-size:15px}
@@ -204,7 +204,7 @@ tr:hover td{background:#f9fafb}
     <div class="section active" id="section-lots">
       <div class="table-wrap">
         <div class="table-header">
-          <h2>Lots <button class="icon-legend-btn" onclick="openIconLegend()" title="What do these icons mean?">?</button></h2>
+          <h2>Lots <button class="legend-pill" onclick="openIconLegend()" title="What do these icons mean?">ⓘ Legend</button></h2>
           <div class="table-actions">
             <select class="filter-select" id="filter-community" onchange="renderLotsTable()"><option value="">All Communities</option></select>
             <select class="filter-select" id="filter-builder" onchange="renderLotsTable()"><option value="">All Builders</option></select>
@@ -425,7 +425,7 @@ tr:hover td{background:#f9fafb}
 
 <div class="modal-overlay" id="modal-lot-phase">
   <div class="modal">
-    <h2>📍 Phase of Construction <button class="icon-legend-btn" onclick="openIconLegend()" title="What do these icons mean?">?</button></h2>
+    <h2>📍 Phase of Construction <button class="legend-pill" onclick="openIconLegend()" title="What do these icons mean?">ⓘ Legend</button></h2>
     <div class="modal-sub" id="phase-modal-lot-label"></div>
     <div id="phase-modal-list"></div>
     <div class="modal-btns">
