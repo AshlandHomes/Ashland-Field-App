@@ -195,6 +195,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tvf-btn.on span{background:rgba(255,255,255,.25);color:#fff}
 .t.actiontask{background:#fbfaff}
 .t.actiontask .tname::before{content:'📋 ';font-size:11px;opacity:.75}
+
+.ilg{display:flex;align-items:center;gap:12px;padding:8px 4px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#475569}
+.ilg-i{flex:0 0 30px;text-align:center;font-size:16px}
+.legend-fab{position:fixed;bottom:16px;right:16px;z-index:9998;width:40px;height:40px;border-radius:50%;background:#4C4C4C;color:#fff;border:none;font-size:18px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);opacity:.85}
 </style>
 </head>
 <body>
@@ -818,22 +822,33 @@ async function finishTask(n){
     const plannedYmd=ymd(plannedDate);
     if(v > plannedYmd){
       const daysLate=wdBetween(plannedYmd, v);
-      const picked=await openDelayReasonModal(n, t.name, plannedYmd, v, daysLate);
-      if(picked===null) return;              // cancelled -> abort the finish
-      delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
-                    days_late:daysLate, expected_done:plannedYmd, actual_finish:v};
+      // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
+      // (tables not deployed, API error), let the finish go through without it.
+      let reasonsOk=true;
+      try{
+        if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
+        if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
+      }catch(e){ reasonsOk=false; }
+      if(reasonsOk){
+        const picked=await openDelayReasonModal(n, t.name, plannedYmd, v, daysLate);
+        if(picked===null) return;            // cancelled -> abort the finish
+        delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
+                      days_late:daysLate, expected_done:plannedYmd, actual_finish:v};
+      }
     }
   }
 
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};renderSchedule();await saveTask(t);
 
   if(delayPayload){
+    try{
     await sbCall('addTaskDelay', Object.assign({
       lot_id:curLot.id, lot_task_id:t._id, bt_num:n, task_name:t.name,
       lot_number:curLot.lot_number, community:curLot.community,
       builder_name:curLot.builder_name||currentBuilder,
       source_lot_id:null, author:currentBuilder
     }, delayPayload));
+    }catch(e){ console.warn('delay not recorded:', e); }
   }
 }
 
@@ -847,7 +862,7 @@ function wdBetween(a,b){
 // ── DELAY REASON MODAL ──
 let _drResolve=null, _drReasons=null;
 async function openDelayReasonModal(btNum, taskName, plannedYmd, actualYmd, daysLate){
-  if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}) || []; }
+  if(!Array.isArray(_drReasons)) _drReasons = [];
   return new Promise(res=>{
     _drResolve=res;
     const opts=_drReasons.map(r=>'<button class="dr-opt" data-id="'+r.id+'" data-label="'+String(r.label).replace(/"/g,'&quot;')+'">'+r.label+'</button>').join('');
@@ -1454,5 +1469,30 @@ async function _bpApply(){
 }
 
 </script>
+
+<div id="icon-legend-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100002;align-items:flex-end;justify-content:center">
+  <div style="background:#fff;width:100%;max-width:520px;max-height:86vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px">
+    <div style="font-weight:700;font-size:17px;color:#2c3e50;margin-bottom:12px">Icon Legend</div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <div class="ilg"><span class="ilg-i" style="color:#0082A0">◆</span><span>Critical task — drives completion date</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#cbd5e1">◇</span><span>Non-critical task — has float</span></div>
+      <div class="ilg"><span class="ilg-i">📋</span><span>Action task — ordering / scheduling</span></div>
+      <div class="ilg"><span class="ilg-i">🔨</span><span>On-site work</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:var(--amber,#e67e22)">⚡</span><span>Held at stage 5.9 — utilities not confirmed</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#1E8449">✓</span><span>Confirmed — utility or vendor</span></div>
+      <div class="ilg"><span class="ilg-i">✅</span><span>All complete / ready</span></div>
+      <div class="ilg"><span class="ilg-i">⧉</span><span>Push this to other lots</span></div>
+      <div class="ilg"><span class="ilg-i">🚩</span><span>This task has a flagged note</span></div>
+      <div class="ilg"><span class="ilg-i">🔴</span><span>Management flag (red)</span></div>
+      <div class="ilg"><span class="ilg-i">🟡</span><span>Reminder flag (yellow)</span></div>
+      <div class="ilg"><span class="ilg-i">📝</span><span>Task has notes</span></div>
+      <div class="ilg"><span class="ilg-i">🔒</span><span>Locked — not your lot to edit</span></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button onclick="document.getElementById('icon-legend-ov').style.display='none'" style="background:#00A9D1;border:none;border-radius:9px;padding:11px 22px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Got it</button>
+    </div>
+  </div>
+</div>
+<button class="legend-fab" onclick="document.getElementById('icon-legend-ov').style.display='flex'" title="Icon legend">?</button>
 </body>
 </html>

@@ -137,6 +137,13 @@ tr:hover td{background:#f9fafb}
 .set-tab.active{background:#0082A0;border-color:#0082A0;color:#fff}
 .set-pane{display:none}
 .set-pane.active{display:block}
+
+/* ===== ICON LEGEND ===== */
+.icon-legend-btn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:#fff;color:#64748b;font-size:12px;font-weight:700;cursor:pointer;vertical-align:middle;margin-left:6px;padding:0;line-height:1}
+.icon-legend-btn:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
+.icon-legend-list{display:flex;flex-direction:column;gap:2px;margin:4px 0 8px}
+.ilg{display:flex;align-items:center;gap:12px;padding:7px 4px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#475569}
+.ilg-i{flex:0 0 28px;text-align:center;font-size:15px}
 </style>
 </head>
 <body>
@@ -197,14 +204,14 @@ tr:hover td{background:#f9fafb}
     <div class="section active" id="section-lots">
       <div class="table-wrap">
         <div class="table-header">
-          <h2>Lots</h2>
+          <h2>Lots <button class="icon-legend-btn" onclick="openIconLegend()" title="What do these icons mean?">?</button></h2>
           <div class="table-actions">
             <select class="filter-select" id="filter-community" onchange="renderLotsTable()"><option value="">All Communities</option></select>
             <select class="filter-select" id="filter-builder" onchange="renderLotsTable()"><option value="">All Builders</option></select>
             <select class="filter-select" id="filter-close" onchange="renderLotsTable()">
               <option value="">All Statuses</option>
               <option value="active">Active Only</option>
-              <option value="ready">⚠️ Ready to Close</option>
+              <option value="ready">✅ Ready to Close</option>
               <option value="scheduled">📅 Close Scheduled</option>
               <option value="pastdue">🔴 Past-Due Close</option>
               <option value="closed">🏠 Closed</option>
@@ -251,7 +258,7 @@ tr:hover td{background:#f9fafb}
         <button class="set-tab active" data-pane="builders"  onclick="showSettingsPane('builders',this)">👷 Builders</button>
         <button class="set-tab"        data-pane="subs"      onclick="showSettingsPane('subs',this)">🏘 Subdivisions &amp; Companies</button>
         <button class="set-tab"        data-pane="reasons"   onclick="showSettingsPane('reasons',this)">⏱ Delay Reasons</button>
-        <button class="set-tab"        data-pane="schedules" onclick="showSettingsPane('schedules',this)">📋 Schedule Templates</button>
+        <button class="set-tab"        data-pane="schedules" onclick="showSettingsPane('schedules',this)">🗓 Schedule Templates</button>
       </div>
 
       <!-- Builders -->
@@ -327,7 +334,7 @@ tr:hover td{background:#f9fafb}
             <p style="margin:0 0 10px"><strong>Phases</strong> group tasks into weeks of construction. <strong>Tasks</strong> carry duration, lag, predecessors and a critical-path flag. Critical tasks drive the completion date and the active phase; non-critical tasks have float and don't.</p>
             <p style="margin:0 0 10px"><strong>Stage map</strong> ties stage codes (0.3–9.5) to the tasks that trigger them — finish the trigger tasks, the stage advances automatically.</p>
             <p style="margin:0 0 10px;padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px">
-              <strong>⚡ Gates are optional.</strong> A gate is an extra hold you can layer on top of the schedule — the utility gates (gas, power, water) are the example in use today. When a gate is unconfirmed, the lot's <em>reported</em> stage is capped (at 5.9) even though its <em>true</em> stage has advanced. This surfaces houses that are physically built past a point but can't be reported there yet. <strong>A template works fine with no gates at all</strong> — only add them when you need that extra hold.
+              <strong>🔓 Gates are optional.</strong> A gate is an extra hold you can layer on top of the schedule — the utility gates (gas, power, water) are the example in use today. When a gate is unconfirmed, the lot's <em>reported</em> stage is capped (at 5.9) even though its <em>true</em> stage has advanced. This surfaces houses that are physically built past a point but can't be reported there yet. <strong>A template works fine with no gates at all</strong> — only add them when you need that extra hold.
             </p>
             <p style="margin:0"><strong>Cloning</strong> copies everything — phases, tasks, gates, stage map — into an independent new template. Fastest way to make a Basement or Townhome variant of an existing schedule, then edit the differences.</p>
           </div>
@@ -388,9 +395,37 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-icon-legend">
+  <div class="modal" style="max-width:460px">
+    <h2>Icon Legend</h2>
+    <div class="icon-legend-list">
+      <div class="ilg"><span class="ilg-i">◆</span><span>Critical-path task — drives the completion date</span></div>
+      <div class="ilg"><span class="ilg-i">◇</span><span>Non-critical task — has float</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#cbd5e1">○</span><span>Not started</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#d97706">◐</span><span>In progress</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#1E8449">●</span><span>Finished</span></div>
+      <div class="ilg"><span class="ilg-i">📋</span><span>Action task — ordering / scheduling, not physical work</span></div>
+      <div class="ilg"><span class="ilg-i">🔨</span><span>On-site work</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#b91c1c">⚠</span><span>Needs attention — stale, behind, or unassigned</span></div>
+      <div class="ilg"><span class="ilg-i">✅</span><span>Ready / good — e.g. ready to close</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#1E8449">✓</span><span>Confirmed — a gate or vendor confirmed</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:var(--amber)">⚡</span><span>Held at stage 5.9 by open utility gates</span></div>
+      <div class="ilg"><span class="ilg-i">⏰</span><span>Stale critical task — overdue to start</span></div>
+      <div class="ilg"><span class="ilg-i">🚩</span><span>Flagged note</span></div>
+      <div class="ilg"><span class="ilg-i">🔴</span><span>Red flag / past-due close</span></div>
+      <div class="ilg"><span class="ilg-i">🟡</span><span>Yellow flag / reminder</span></div>
+      <div class="ilg"><span class="ilg-i">📅</span><span>Close scheduled</span></div>
+      <div class="ilg"><span class="ilg-i">🏠</span><span>Closed</span></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-primary" onclick="closeModal('modal-icon-legend')">Got it</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-lot-phase">
   <div class="modal">
-    <h2>📍 Phase of Construction</h2>
+    <h2>📍 Phase of Construction <button class="icon-legend-btn" onclick="openIconLegend()" title="What do these icons mean?">?</button></h2>
     <div class="modal-sub" id="phase-modal-lot-label"></div>
     <div id="phase-modal-list"></div>
     <div class="modal-btns">
@@ -1207,7 +1242,7 @@ function closeBadgeHtml(lot) {
       + '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>';
   }
   if (parseFloat(lot.reported_stage||0) >= 6) {
-    return '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready</span>';
+    return '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">✅ Ready</span>';
   }
   return '<span style="color:var(--muted)">—</span>';
 }
@@ -1800,7 +1835,7 @@ function renderSubdivisionsTable() {
         : '<span class="badge" style="background:#d5f5e3;color:#1E8449">✓ Current</span>';
 
     const closeBadge = ready>0
-      ? `<span class="badge" style="background:#fef9e7;color:#e67e22">⚠ ${ready} ready</span>`
+      ? `<span class="badge" style="background:#fef9e7;color:#e67e22">✅ ${ready} ready</span>`
       : '<span style="color:var(--muted)">—</span>';
 
     const archiveBadge = sub.is_archived ? '<span class="badge" style="background:#f3f4f6;color:var(--muted);margin-left:6px">Archived</span>' : '';
@@ -2482,6 +2517,10 @@ async function deleteTemplateUI(id, name){
   const r = await sbCall('deleteTemplate', { id });
   if(r && r.error){ alert(r.error); return; }
   await loadTemplatesView();
+}
+
+function openIconLegend(){
+  document.getElementById('modal-icon-legend').classList.add('open');
 }
 
 function showSettingsPane(name, el){
