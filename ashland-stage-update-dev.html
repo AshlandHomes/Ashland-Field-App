@@ -509,16 +509,30 @@ function runEngine(mode){
     function ef(n,stk){
       if(memo[n]!==undefined)return memo[n];
       const t=bn[n];if(stk.includes(n))return t.rf||1;
-      let pd=null;
-      (t.preds||[]).forEach(p=>{if(bn[p]){const pe=ef(p,[...stk,n]);pd=(pd===null)?pe+1:Math.max(pd,pe+1);}});
+      // Resolve predecessors. Positive/zero lag = forward from predecessor FINISH.
+      // Negative lag = lead time, scheduled backward from predecessor START.
+      let pd=null;        // forward driver
+      let backDriver=null; // backward (lead-time) driver
+      (t.preds||[]).forEach(p=>{if(bn[p]){
+        ef(p,[...stk,n]);
+        const pStart=bn[p]['_'+mode+'_es'], pFin=bn[p]['_'+mode+'_ef'];
+        if(t.lag<0){
+          const cand=pStart+t.lag;                       // lag negative -> earlier than pred start
+          backDriver=(backDriver===null)?cand:Math.min(backDriver,cand);
+        } else {
+          const cand=pFin+1+t.lag;                        // forward from pred finish
+          pd=(pd===null)?cand:Math.max(pd,cand);
+        }
+      }});
       let es;const a=act[n]||{};
       const aStartOff=(mode==='projected'&&a.started&&a.start)?actOffset(a.start):null;
-      const ps=(pd!==null)?pd+t.lag:null;
       if(aStartOff!==null){es=aStartOff;}
+      else if(t.lag<0&&backDriver!==null){es=backDriver;}
       else{
-        es=ps!==null?ps:(t.rs||1);
+        es=pd!==null?pd:(t.rs||1);
         if(mode==='projected'&&!a.started&&t.est_start_date){const estOff=actOffset(t.est_start_date);if(estOff!==null)es=Math.max(es,estOff);}
       }
+      if(es<1)es=1;   // FLOOR at construction start — nothing schedules before day 1
       let e;const aFinOff=(mode==='projected'&&a.finished&&a.finish)?actOffset(a.finish):null;
       if(aFinOff!==null){e=aFinOff;}else{e=es+t.dur-1;}
       memo[n]=e;t['_'+mode+'_es']=es;t['_'+mode+'_ef']=e;return e;
@@ -762,7 +776,6 @@ function renderTasks(){
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
         +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+startLabel+'</div>'
-        +'<div style="font-size:10px;color:#c0392b;font-family:monospace">DBG #'+t.num+' preds=['+(t.preds||[]).join(',')+'] _es='+t._projected_es+' est='+(t.est_start_date||'—')+'</div>'
         +'<div class="tacts">'+acts+'</div></div>';
     });
   });
