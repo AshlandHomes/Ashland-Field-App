@@ -762,7 +762,6 @@ function renderTasks(){
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
         +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+startLabel+'</div>'
-        +'<div style="font-size:10px;color:#c0392b;font-family:monospace">DBG est='+(t.est_start_date||'—')+' estOff='+(t.est_start_date?actOffset(t.est_start_date):'n/a')+' _es='+t._projected_es+' rs='+t.rs+' startDate='+(startDate?ymd(startDate):'null')+' started='+(a.started?'Y':'N')+'</div>'
         +'<div class="tacts">'+acts+'</div></div>';
     });
   });
@@ -858,7 +857,7 @@ async function finishTask(n){
 }
 
 // working days between two YYYY-MM-DD dates (exclusive of start, inclusive of end)
-function wdBetween(a,b){
+function wdBetweenYmd(a,b){
   let d=new Date(a+'T00:00:00'), e=new Date(b+'T00:00:00'), c=0;
   while(d<e){ d.setDate(d.getDate()+1); const w=d.getDay(); if(w!==0&&w!==6) c++; }
   return c;
