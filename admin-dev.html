@@ -1473,20 +1473,26 @@ function _phFmtDate(d){
   return (dt.getMonth()+1)+'/'+dt.getDate();
 }
 function _phDateChip(t){
-  // Finished/started -> show the real actual date (hard fact).
-  // Not started -> show scheduled/est date, tagged CONFIRMED (builder locked it) or SCHEDULED (system).
+  // Finished/started -> real actual date (hard fact).
   if(t.status==='finished' && t.actual_finish){
     return '<span style=\"color:#15803d;font-weight:600\">✓ done '+_phFmtDate(t.actual_finish)+'</span>';
   }
   if(t.status==='started' && t.actual_start){
     return '<span style=\"color:#0082A0;font-weight:600\">▶ started '+_phFmtDate(t.actual_start)+'</span>';
   }
-  const d = t.est_start_date;
+  // Upcoming -> the projected date computed by the backend (same date the field app shows).
+  const d = t.projected_date || t.est_start_date;
   if(!d) return '<span style=\"color:#cbd5e1\">—</span>';
+  // Confirmed = builder locked it via the field app (vendor_confirmed on an est_start_date override).
   if(t.vendor_confirmed){
-    return '<span style=\"color:#15803d;font-weight:700\" title=\"Confirmed by the builder in the field\">🔒 '+_phFmtDate(d)+' confirmed</span>';
+    return '<span style=\"color:#15803d;font-weight:700\" title=\"Confirmed by the builder in the field — a committed date\">🔒 '+_phFmtDate(d)+' confirmed</span>';
   }
-  return '<span style=\"color:#94a3b8\" title=\"System-scheduled date — not yet confirmed by the builder\">🕓 '+_phFmtDate(d)+' scheduled</span>';
+  // Overridden but not confirmed = someone set est_start_date but no confirm yet.
+  if(t.est_start_date){
+    return '<span style=\"color:#0082A0;font-weight:600\" title=\"Manually set start date (override), not yet confirmed\">✎ '+_phFmtDate(d)+' set</span>';
+  }
+  // Pure system projection.
+  return '<span style=\"color:#94a3b8\" title=\"System-projected date — computed from the schedule, not yet confirmed\">🕓 '+_phFmtDate(d)+' projected</span>';
 }
 function _phTaskRow(t){
   const crit = t.is_critical ? '<span style=\"color:#0082A0\">◆</span> ' : '';
