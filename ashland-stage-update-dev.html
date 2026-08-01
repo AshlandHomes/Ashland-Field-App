@@ -959,7 +959,14 @@ function openEditTask(n){
     '<option value="'+ph+'"'+(ph===t.phase?' selected':'')+'>'+( phaseNames[ph]||('Phase '+ph))+'</option>'
   ).join('');
 
-  document.getElementById('edit-est-start').value=t.est_start_date||'';
+  // Default the field to the current SYSTEM-projected start date (as YYYY-MM-DD),
+  // unless an override already exists. This makes it an editable estimated start
+  // with an optional override — never a confusing blank field.
+  let prefill = t.est_start_date || '';
+  if(!prefill && t._projected_es != null){
+    prefill = ymd(offToDate(t._projected_es));
+  }
+  document.getElementById('edit-est-start').value = prefill;
   renderEditPredChips();
   document.getElementById('editmodal').classList.add('open');
 }
@@ -1035,7 +1042,16 @@ async function saveEditTask(){
   const newPhase=parseInt(phaseEl.value);
   const newPhaseName=phaseEl.options[phaseEl.selectedIndex].text;
   const estStartRaw=document.getElementById('edit-est-start').value.trim();
-  const newEstStart=(estStartRaw&&isValidDate(estStartRaw))?estStartRaw:null;
+  let newEstStart=(estStartRaw&&isValidDate(estStartRaw))?estStartRaw:null;
+  // The field is pre-filled with the system projected date. Only store it as an
+  // OVERRIDE if the user actually changed it away from that projected date —
+  // otherwise every save would freeze the task to its current projected date.
+  if(newEstStart && t._projected_es != null){
+    const projectedYmd = ymd(offToDate(t._projected_es));
+    if(newEstStart === projectedYmd && !t.est_start_date){
+      newEstStart = null; // unchanged from the system date -> no override
+    }
+  }
 
   if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
 
