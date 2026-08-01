@@ -239,6 +239,30 @@
     return { end: end, mode: mode, byNum: byNum, tasks: out };
   }
 
+  // ── surface adapter: FIELD APP ───────────────────────────────────────────
+  // The field app carries tasks as {num,rs,dur,lag,rf,preds,order,type,est_start_date}
+  // with actuals in a SEPARATE map act[num] = {started,finished,start,finish}.
+  // This wrapper reshapes that into the canonical form, runs the one engine, and
+  // returns { end, byNum } for the caller to write back onto its task objects.
+  // NOTE: force_critical is intentionally NOT sourced here — the field app never
+  // loaded it, so its critical set stays pure-CPM (behavior parity with the old
+  // inline runEngine). Do not add force_critical here without a behavior sign-off.
+  function computeFieldSchedule(TASKS, act, startDate, mode) {
+    act = act || {};
+    var tasks = (TASKS || []).map(function (t) {
+      var a = act[t.num] || {};
+      return {
+        num: t.num, name: t.name, duration: t.dur, lag: t.lag, predecessors: t.preds,
+        relativeStart: t.rs, relativeFinish: t.rf, taskType: t.type, taskOrder: t.order,
+        estStartDate: t.est_start_date, isCritical: t.is_crit,
+        status: a.finished ? 'finished' : (a.started ? 'started' : 'not_started'),
+        actualStart: a.start, actualFinish: a.finish
+      };
+    });
+    var r = computeSchedule(tasks, { startDate: startDate, mode: mode });
+    return { end: r.end, byNum: r.byNum };
+  }
+
   // ── integrity rules (BUILD_SPEC §3) — used by template builder + runtime ──
   // Returns [{ num, rule, message }]. Does not throw; the UI decides how to
   // surface / block on these.
@@ -319,6 +343,8 @@
     // core
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
-    computeStage: computeStage
+    computeStage: computeStage,
+    // surface adapters
+    computeFieldSchedule: computeFieldSchedule
   };
 }));

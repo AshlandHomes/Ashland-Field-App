@@ -346,6 +346,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
   </div>
 </div>
 
+<script src="schedule-engine.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
@@ -492,92 +493,22 @@ let TASKS=[],bn={},act={},startDate=null;
 let collapsedPhases={},userToggledPhases=false;
 let curLot=null,stageMap=[],lotGates=[],curManual=null;
 
-function addWD(start,off){let d=new Date(start);d.setHours(0,0,0,0);let c=1;while(c<off){d.setDate(d.getDate()+1);const w=d.getDay();if(w!==0&&w!==6)c++;}return d;}
-function wdBetween(a,b){let d1=new Date(a),d2=new Date(b);d1.setHours(0,0,0,0);d2.setHours(0,0,0,0);if(d1.getTime()===d2.getTime())return 0;const sign=d2>d1?1:-1;let cur=new Date(d1),c=0;while(cur.getTime()!==d2.getTime()){cur.setDate(cur.getDate()+sign);const w=cur.getDay();if(w!==0&&w!==6)c+=sign;}return c;}
+// Working-day helpers now live in the single shared engine (schedule-engine.js).
+// Thin hoisted wrappers preserve the existing call convention (startDate is a module global here).
+function wdBetween(a,b){return ScheduleEngine.wdBetween(a,b);}
+function ymd(d){return ScheduleEngine.ymd(d);}
 function fmt(d){return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-function ymd(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')}
 function isValidDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(new Date(s+'T00:00:00').getTime());}
 function todayYmd(){return ymd(new Date());}
-function actOffset(iso){if(!startDate||!iso)return null;return wdBetween(startDate,new Date(iso+'T00:00:00'))+1;}
-function offToDate(off){if(off>=1)return addWD(startDate,off);let d=new Date(startDate);d.setHours(0,0,0,0);let c=1;while(c>off){d.setDate(d.getDate()-1);const w=d.getDay();if(w!==0&&w!==6)c--;}return d;}
+function offToDate(off){return ScheduleEngine.offToDate(off, startDate);}
 
 function runEngine(mode){
-  // If predecessor data exists in DB: full recursive CPM engine
-  const hasPreds=TASKS.some(t=>t.preds&&t.preds.length>0);
-  if(hasPreds){
-    const memo={};
-    function ef(n,stk){
-      if(memo[n]!==undefined)return memo[n];
-      const t=bn[n];if(stk.includes(n))return t.rf||1;
-      // Resolve predecessors. Positive/zero lag = forward from predecessor FINISH.
-      // Negative lag = lead time, scheduled backward from predecessor START.
-      let pd=null;        // forward driver
-      let backDriver=null; // backward (lead-time) driver
-      (t.preds||[]).forEach(p=>{if(bn[p]){
-        ef(p,[...stk,n]);
-        const pStart=bn[p]['_'+mode+'_es'], pFin=bn[p]['_'+mode+'_ef'];
-        if(t.lag<0){
-          const cand=pStart+t.lag;                       // lag negative -> earlier than pred start
-          backDriver=(backDriver===null)?cand:Math.min(backDriver,cand);
-        } else {
-          const cand=pFin+1+t.lag;                        // forward from pred finish
-          pd=(pd===null)?cand:Math.max(pd,cand);
-        }
-      }});
-      let es;const a=act[n]||{};
-      const aStartOff=(mode==='projected'&&a.started&&a.start)?actOffset(a.start):null;
-      if(aStartOff!==null){es=aStartOff;}
-      else if(t.lag<0&&backDriver!==null){es=backDriver;}
-      else{
-        es=pd!==null?pd:(t.rs||1);
-        if(mode==='projected'&&!a.started&&t.est_start_date){const estOff=actOffset(t.est_start_date);if(estOff!==null)es=Math.max(es,estOff);}
-      }
-      if(es<1)es=1;   // FLOOR at construction start — nothing schedules before day 1
-      let e;const aFinOff=(mode==='projected'&&a.finished&&a.finish)?actOffset(a.finish):null;
-      if(aFinOff!==null){e=aFinOff;}else{e=es+t.dur-1;}
-      memo[n]=e;t['_'+mode+'_es']=es;t['_'+mode+'_ef']=e;return e;
-    }
-    TASKS.forEach(t=>ef(t.num,[]));
-    const end=Math.max(...TASKS.map(t=>t['_'+mode+'_ef']));
-    if(mode==='planned'){
-      const succ={};TASKS.forEach(t=>succ[t.num]=[]);
-      TASKS.forEach(t=>(t.preds||[]).forEach(p=>{if(succ[p])succ[p].push(t.num)}));
-      const lf={};
-      function latef(n,stk){if(lf[n]!==undefined)return lf[n];if(stk.includes(n))return end;const ss=succ[n];let v=ss.length===0?end:Math.min(...ss.map(s=>latef(s,[...stk,n])-bn[s].dur+1-1-bn[s].lag));lf[n]=v;return v;}
-      TASKS.forEach(t=>{t._lf=latef(t.num,[]);t._ls=t._lf-t.dur+1;t._tf=t._ls-t._planned_es;t._crit=(t._tf<=0)});
-    }
-    return end;
-  }
-  // No predecessor data in DB: sequential slip-propagation engine.
-  // Processes tasks in relative_start order, accumulating the maximum schedule slip
-  // seen so far and applying it to all subsequent tasks. This correctly cascades
-  // delays through the schedule without requiring predecessor relationships.
-  const sorted=[...TASKS].sort((a,b)=>(a.rs||1)-(b.rs||1)||(a.order||0)-(b.order||0));
-  let maxSlip=0;
-  if(mode==='projected'){
-    sorted.forEach(t=>{
-      const a=act[t.num]||{};
-      const aStartOff=(a.started&&a.start)?actOffset(a.start):null;
-      const aFinOff=(a.finished&&a.finish)?actOffset(a.finish):null;
-      const estOff=(!a.started&&t.est_start_date)?actOffset(t.est_start_date):null;
-      // How many WD is this task displaced from its planned position?
-      let slip=0;
-      if(aFinOff!==null){slip=aFinOff-((t.rs||1)+t.dur-1);}
-      else if(aStartOff!==null){slip=aStartOff-(t.rs||1);}
-      else if(estOff!==null){slip=Math.max(0,estOff-(t.rs||1));}
-      maxSlip=Math.max(maxSlip,slip);
-      const es=(t.rs||1)+maxSlip;
-      t['_projected_es']=es;t['_projected_ef']=aFinOff!==null?aFinOff:es+t.dur-1;
-    });
-  }else{
-    sorted.forEach(t=>{t['_planned_es']=t.rs||1;t['_planned_ef']=(t.rs||1)+t.dur-1;});
-  }
-  const end=Math.max(...TASKS.map(t=>t['_'+mode+'_ef']));
-  if(mode==='planned'){
-    // Float relative to end; use is_crit from DB to mark actual critical path tasks
-    TASKS.forEach(t=>{t._lf=end;t._ls=t._lf-t.dur+1;t._tf=t._ls-(t._planned_es||t.rs||1);t._crit=(t._tf<=0)||!!t.is_crit;});
-  }
-  return end;
+  // Single source of truth: schedule-engine.js. This is now a thin adapter that
+  // feeds the field-app task shape to the shared engine and writes the computed
+  // offsets back onto the task objects the UI reads (_{mode}_es/_ef, _crit).
+  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode);
+  TASKS.forEach(t=>{const x=r.byNum[t.num];if(!x)return;t['_'+mode+'_es']=x.es;t['_'+mode+'_ef']=x.ef;if(mode==='planned')t._crit=x.critical;});
+  return r.end;
 }
 function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return{planEnd:p,projEnd:pr};}
 
