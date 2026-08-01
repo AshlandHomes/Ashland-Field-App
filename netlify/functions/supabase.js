@@ -425,20 +425,33 @@ exports.handler = async function(event) {
           if (!t) return 0;
           if (stack.indexOf(num) >= 0) { ES[num] = 1; EF[num] = dur(t); return EF[num]; }
           const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
-          let start = null;
+          const lag = (t.lag || 0);
+          let fwd = null;    // forward driver (from predecessor finish)
+          let back = null;   // backward lead-time driver (from predecessor start)
           preds.forEach(p => {
             if (byNum[p]) {
-              const pe = calcEF(p, stack.concat([num]));
-              const cand = pe + 1 + (t.lag || 0);
-              if (start === null || cand > start) start = cand;
+              calcEF(p, stack.concat([num]));   // ensure predecessor computed
+              const pStart = ES[p], pFin = EF[p];
+              if (lag < 0) {
+                const cand = pStart + lag;                 // negative lag = before pred start
+                if (back === null || cand < back) back = cand;
+              } else {
+                const cand = pFin + 1 + lag;               // forward from pred finish
+                if (fwd === null || cand > fwd) fwd = cand;
+              }
             }
           });
-          // relative_start is a FLOOR, not a fallback: a task never starts earlier
-          // than its planned day even if its predecessors finish sooner.
-          if (t.relative_start != null && (start === null || t.relative_start > start)) {
-            start = t.relative_start;
+          let start;
+          if (lag < 0 && back !== null) {
+            start = back;
+          } else {
+            start = fwd;
+            // relative_start is only a FALLBACK for tasks with no forward driver —
+            // NOT a floor. In a predecessor-driven schedule the chain drives timing;
+            // a competing fixed floor would stop the cascade.
+            if (start === null) start = (t.relative_start != null ? t.relative_start : 1);
           }
-          if (start === null) start = 1;
+          if (start < 1) start = 1;   // FLOOR at construction start
           ES[num] = start;
           EF[num] = start + dur(t) - 1;
           return EF[num];
