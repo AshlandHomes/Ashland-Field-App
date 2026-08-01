@@ -750,10 +750,14 @@ function renderTasks(){
       const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
       const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
       const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
-      const dispStart=(!a.started&&t.est_start_date)?new Date(t.est_start_date+'T00:00:00'):ps;
+      // Start and finish BOTH derive from the engine's _projected_es (which already
+      // honors the est_start_date override as a floor). Do NOT show the override
+      // literally for start while taking finish from the engine — that produced an
+      // impossible "start after finish" when the two were computed separately.
+      const dispFinish=offToDate(t._projected_es + (t.dur-1));
       const startLabel=(!a.started&&!a.finished)
-        ?fmt(dispStart)+' → '+fmt(pf)
-        :(a.started?fmt(ps)+' → '+(a.finish?fmt(new Date(a.finish+'T00:00:00')):'…'):fmt(dispStart)+' → '+fmt(pf));
+        ?fmt(ps)+' → '+fmt(dispFinish)
+        :(a.started?fmt(ps)+' → '+(a.finish?fmt(new Date(a.finish+'T00:00:00')):'…'):fmt(ps)+' → '+fmt(dispFinish));
       h+='<div class="t '+cls+'">'
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
         +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
