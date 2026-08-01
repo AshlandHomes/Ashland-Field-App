@@ -762,7 +762,7 @@ function renderTasks(){
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
         +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+startLabel+'</div>'
-        +'<div style="font-size:10px;color:#c0392b;font-family:monospace">DBG est='+(t.est_start_date||'—')+' estOff='+(t.est_start_date?actOffset(t.est_start_date):'n/a')+' _es='+t._projected_es+' rs='+t.rs+' cStart='+(curLot.construction_start_date||'none')+' started='+(a.started?'Y':'N')+'</div>'
+        +'<div style="font-size:10px;color:#c0392b;font-family:monospace">DBG est='+(t.est_start_date||'—')+' estOff='+(t.est_start_date?actOffset(t.est_start_date):'n/a')+' _es='+t._projected_es+' rs='+t.rs+' startDate='+(startDate?ymd(startDate):'null')+' started='+(a.started?'Y':'N')+'</div>'
         +'<div class="tacts">'+acts+'</div></div>';
     });
   });
