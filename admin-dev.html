@@ -1465,7 +1465,7 @@ function _phKeep(t){
   return true;
 }
 
-function _phDot(s){ return s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>'); }
+function _phDot(s){ const st='font-size:16px;font-weight:900;vertical-align:middle'; return s==='finished'?'<span style=\"color:#1E8449;'+st+'\">●</span>':(s==='started'?'<span style=\"color:#d97706;'+st+'\">◐</span>':'<span style=\"color:#cbd5e1;'+st+'\">○</span>'); }
 function _phLbl(s){ return s==='finished'?'Finished':(s==='started'?'Started':'Not started'); }
 function _phFmtDate(d){
   if(!d) return '';
@@ -1495,13 +1495,13 @@ function _phDateChip(t){
   return '<span style=\"color:#94a3b8\" title=\"System-projected date — computed from the schedule, not yet confirmed\">🕓 '+_phFmtDate(d)+' projected</span>';
 }
 function _phTaskRow(t){
-  const crit = t.is_critical ? '<span style=\"color:#0082A0\">◆</span> ' : '';
+  const crit = t.is_critical ? '<span style=\"color:#0082A0;font-size:15px;vertical-align:middle\">◆</span> ' : '';
   const isAction = (t.task_type||'work')==='action';
-  const mark = isAction ? '📋 ' : '';
+  const mark = isAction ? '<span style=\"font-size:15px;vertical-align:middle\">📋</span> ' : '';
   const trade = t.trade ? ' <span style=\"font-size:11px;color:#64748b\">· '+t.trade+'</span>' : '';
   return '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px;align-items:center'+(isAction?';background:#fbfaff':'')+'\">'
-    +'<div>'+_phDot(t.status)+' '+crit+mark+'<strong>#'+t.num+'</strong> '+(t.name||'')+trade+'</div>'
-    +'<div class=\"flag-meta\" style=\"white-space:nowrap;text-align:right\">'+_phDateChip(t)+'</div></div>';
+    +'<div style=\"font-size:14px\">'+_phDot(t.status)+' '+crit+mark+'<strong>#'+t.num+'</strong> '+(t.name||'')+trade+'</div>'
+    +'<div class=\"flag-meta\" style=\"white-space:nowrap;text-align:right;font-size:12.5px\">'+_phDateChip(t)+'</div></div>';
 }
 function togglePhaseSection(pid){
   const el=document.getElementById('phsec-'+pid); const ar=document.getElementById('phar-'+pid);
