@@ -966,7 +966,10 @@ function openEditTask(n){
   if(!prefill && t._projected_es != null){
     prefill = ymd(offToDate(t._projected_es));
   }
-  document.getElementById('edit-est-start').value = prefill;
+  const estEl = document.getElementById('edit-est-start');
+  estEl.value = prefill;
+  estEl.dataset.prefill = prefill;   // remember what we pre-filled so we can detect a real change
+  estEl.dataset.hadOverride = t.est_start_date ? '1' : '';
   renderEditPredChips();
   document.getElementById('editmodal').classList.add('open');
 }
@@ -1041,16 +1044,16 @@ async function saveEditTask(){
   const phaseEl=document.getElementById('edit-phase');
   const newPhase=parseInt(phaseEl.value);
   const newPhaseName=phaseEl.options[phaseEl.selectedIndex].text;
-  const estStartRaw=document.getElementById('edit-est-start').value.trim();
+  const estEl2=document.getElementById('edit-est-start');
+  const estStartRaw=estEl2.value.trim();
   let newEstStart=(estStartRaw&&isValidDate(estStartRaw))?estStartRaw:null;
-  // The field is pre-filled with the system projected date. Only store it as an
-  // OVERRIDE if the user actually changed it away from that projected date —
-  // otherwise every save would freeze the task to its current projected date.
-  if(newEstStart && t._projected_es != null){
-    const projectedYmd = ymd(offToDate(t._projected_es));
-    if(newEstStart === projectedYmd && !t.est_start_date){
-      newEstStart = null; // unchanged from the system date -> no override
-    }
+  // Override only if the user actually CHANGED the field away from the pre-filled
+  // projected date. If it equals the pre-fill and there was no prior override, it's
+  // not an override (avoids freezing every task to its current projected date).
+  const prefilled = estEl2.dataset.prefill || '';
+  const hadOverride = estEl2.dataset.hadOverride === '1';
+  if(newEstStart && newEstStart === prefilled && !hadOverride){
+    newEstStart = null;
   }
 
   if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
