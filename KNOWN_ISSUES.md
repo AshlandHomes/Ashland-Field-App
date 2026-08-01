@@ -27,3 +27,22 @@ preserves each surface's existing critical semantics exactly (parity gate).
 have both surfaces use `(float ≤ 0) OR force_critical` — i.e. the field app
 adopts the 51-task definition. Requires confirming the builder-facing critical
 highlighting is expected to include force_critical tasks.
+
+## KI-2 — Admin lots-list "planned completion" is a hardcoded 99-WD estimate
+
+**Status:** open — reconcile after the restructure, with owner sign-off.
+**Surfaced:** Step 2 (admin wiring).
+
+`calcPlannedCompletion()` in `admin-dev.html` (lots list) shows
+`construction_start + 99 working days` — a hardcoded constant that ignores the
+lot's actual schedule. The real engine computes the Slab critical path at **94**
+working days (planned), and each lot's projected end varies with actuals /
+overrides. So the admin lots-list completion estimate can differ from the real
+projected completion the field app shows.
+
+The restructure only centralized the working-day math (the inline weekend-walk
+now calls `ScheduleEngine.addWD`, output unchanged — still 99). Replacing the
+hardcoded 99 with the engine's computed per-lot end is a **behavior change** for
+a later step. Note: the per-task projected dates in the admin schedule view are
+already correct (backend `computeLotProjected`); this KI is only the lots-list
+summary column.

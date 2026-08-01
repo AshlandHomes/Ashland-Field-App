@@ -879,6 +879,7 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<script src="schedule-engine.js?v=1"></script>
 <script>
 // ── CONSTANTS ──
 const SUPABASE_FN = '/.netlify/functions/supabase';
@@ -1187,10 +1188,11 @@ function fmtDate(str) {
 function calcPlannedCompletion(startStr) {
   if (!startStr) return null;
   const p = startStr.split('-');
-  let d = new Date(+p[0], +p[1]-1, +p[2]);
-  let wd = 0;
-  while (wd < 99) { d.setDate(d.getDate()+1); if (d.getDay()!==0&&d.getDay()!==6) wd++; }
-  return d;
+  // 99 working days after start (a hardcoded template-length estimate — see
+  // KNOWN_ISSUES KI-2). Working-day math comes from the shared engine; addWD's
+  // offset 1 == the start date, so "99 WD after start" is offset 100. Preserves
+  // the previous inline weekend-walk output exactly.
+  return ScheduleEngine.addWD(new Date(+p[0], +p[1]-1, +p[2]), 100);
 }
 
 function isUpdatedRecently(ts) {
@@ -1237,11 +1239,10 @@ async function openStageModal(lotId){
     });
     if(latest){
       holdSince = latest;
+      // Working days from the earn-past-5.9 date to today, via the shared engine.
       const today = new Date(); today.setHours(0,0,0,0);
-      const cur = new Date(latest); cur.setHours(0,0,0,0);
-      let wd = 0;
-      while(cur < today){ cur.setDate(cur.getDate()+1); const w = cur.getDay(); if(w!==0 && w!==6) wd++; }
-      holdDays = wd;
+      const since = new Date(latest); since.setHours(0,0,0,0);
+      holdDays = ScheduleEngine.wdBetween(since, today);
     }
   }
 
