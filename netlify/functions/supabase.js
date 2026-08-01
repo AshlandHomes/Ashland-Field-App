@@ -834,9 +834,10 @@ exports.handler = async function(event) {
         // Returns { [lot_id]: { activePhase, activePhaseName,
         //   phases: { [phase_order]: {name, tasks:[{num,name,status,is_critical}]} },
         //   behind: [{num,name,status,phase_order,phase_name}] } }
-        const lots = await supabaseRequest('GET', 'sched_lots?select=id,status&status=eq.active');
+        const lots = await supabaseRequest('GET', 'sched_lots?select=id,status,construction_start_date&status=eq.active');
         const lotRows = lots.data || [];
         const ids = lotRows.map(l => l.id);
+          const startById = {}; lotRows.forEach(l => { startById[l.id] = l.construction_start_date || null; });
         const out = {};
         if (ids.length) {
           // Fetch per-lot to avoid PostgREST's hard 1000-row cap on combined queries.
@@ -844,9 +845,89 @@ exports.handler = async function(event) {
           const byLot = {};
           await Promise.all(ids.map(async (lotId) => {
             const r = await supabaseRequest('GET',
-              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade,est_start_date,actual_start,actual_finish,vendor_confirmed&order=task_order`);
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade,est_start_date,actual_start,actual_finish,vendor_confirmed,relative_start,duration,lag,predecessors&order=task_order`);
             byLot[lotId] = r.data || [];
           }));
+          // ── PROJECTED-DATE ENGINE (mirrors the field app so dates coincide) ──
+          // Working-day helpers: weekends excluded, offset 1 = the start date itself.
+          function addWD(start, off){
+            let d = new Date(start); d.setHours(0,0,0,0); let c = 1;
+            while (c < off){ d.setDate(d.getDate()+1); const w = d.getDay(); if (w!==0 && w!==6) c++; }
+            return d;
+          }
+          function wdBetween(a, b){
+            let d1=new Date(a), d2=new Date(b); d1.setHours(0,0,0,0); d2.setHours(0,0,0,0);
+            if (d1.getTime()===d2.getTime()) return 0;
+            const sign = d2>d1?1:-1; let cur=new Date(d1), c=0;
+            while (cur.getTime()!==d2.getTime()){ cur.setDate(cur.getDate()+sign); const w=cur.getDay(); if (w!==0&&w!==6) c+=sign; }
+            return c;
+          }
+          function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+          // Compute each task's PROJECTED start offset (working days from construction start),
+          // honoring: actual start (if started), est_start_date override as a FLOOR,
+          // predecessor finishes + lag, and relative_start as a baseline floor.
+          function computeProjected(tasks, startDate){
+            const bn = {}; tasks.forEach(t => { bn[t.bt_num] = t; });
+            const start = startDate ? new Date(startDate+'T00:00:00') : null;
+            const actOffset = (iso) => (start && iso) ? wdBetween(start, new Date(iso+'T00:00:00'))+1 : null;
+            const hasPreds = tasks.some(t => Array.isArray(t.predecessors) && t.predecessors.length>0);
+            const memoEF = {};
+            function ef(n, stk){
+              if (memoEF[n] !== undefined) return memoEF[n];
+              const t = bn[n]; if (!t) return 1;
+              if (stk.indexOf(n) >= 0) { t._es = t.relative_start||1; return (t.relative_start||1)+((t.duration||1)-1); }
+              const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
+              let pd = null;
+              preds.forEach(p => { if (bn[p]){ const pe = ef(p, stk.concat([n])); pd = (pd===null)? pe+1 : Math.max(pd, pe+1); } });
+              const a = { started:(t.status==='started'||t.status==='finished'),
+                          finished:(t.status==='finished'),
+                          start:t.actual_start, finish:t.actual_finish };
+              const aStartOff = (a.started && a.start) ? actOffset(a.start) : null;
+              const ps = (pd!==null) ? pd + (t.lag||0) : null;
+              let es;
+              if (aStartOff !== null) { es = aStartOff; }
+              else {
+                es = (ps!==null) ? ps : (t.relative_start||1);
+                // est_start_date override acts as a FLOOR
+                if (!a.started && t.est_start_date){ const eo = actOffset(t.est_start_date); if (eo!==null) es = Math.max(es, eo); }
+              }
+              const aFinOff = (a.finished && a.finish) ? actOffset(a.finish) : null;
+              const e = (aFinOff!==null) ? aFinOff : es + (t.duration||1) - 1;
+              t._es = es; memoEF[n] = e; return e;
+            }
+            if (hasPreds){
+              tasks.forEach(t => ef(t.bt_num, []));
+            } else {
+              // sequential slip-propagation (no predecessor data)
+              const sorted = tasks.slice().sort((a,b)=>((a.relative_start||1)-(b.relative_start||1))||((a.task_order||0)-(b.task_order||0)));
+              let maxSlip = 0;
+              sorted.forEach(t => {
+                const a = { started:(t.status==='started'||t.status==='finished'),
+                            finished:(t.status==='finished'), start:t.actual_start, finish:t.actual_finish };
+                const aStartOff=(a.started&&a.start)?actOffset(a.start):null;
+                const aFinOff=(a.finished&&a.finish)?actOffset(a.finish):null;
+                const estOff=(!a.started&&t.est_start_date)?actOffset(t.est_start_date):null;
+                let slip=0;
+                if (aFinOff!==null) slip=aFinOff-((t.relative_start||1)+(t.duration||1)-1);
+                else if (aStartOff!==null) slip=aStartOff-(t.relative_start||1);
+                else if (estOff!==null) slip=Math.max(0, estOff-(t.relative_start||1));
+                maxSlip=Math.max(maxSlip, slip);
+                t._es=(t.relative_start||1)+maxSlip;
+              });
+            }
+            // attach a real projected calendar date to each task
+            tasks.forEach(t => {
+              if (start && t._es != null){ t._projected_date = ymd(addWD(start, t._es)); }
+              else { t._projected_date = null; }
+            });
+          }
+
+          // run the engine per lot before building the snapshot
+          Object.keys(byLot).forEach(lotId => {
+            computeProjected(byLot[lotId], startById[lotId]);
+          });
+
           Object.keys(byLot).forEach(lotId => {
             const ts = byLot[lotId];
             // ACTIVE PHASE = furthest phase_order among CRITICAL tasks that are started or finished
@@ -867,7 +948,7 @@ exports.handler = async function(event) {
             ts.forEach(r => {
               const p = r.phase_order;
               (phases[p] = phases[p] || { name: r.phase_name, tasks: [] })
-                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical, task_type: r.task_type || 'work', trade: r.trade || null, est_start_date: r.est_start_date || null, actual_start: r.actual_start || null, actual_finish: r.actual_finish || null, vendor_confirmed: !!r.vendor_confirmed });
+                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical, task_type: r.task_type || 'work', trade: r.trade || null, est_start_date: r.est_start_date || null, actual_start: r.actual_start || null, actual_finish: r.actual_finish || null, vendor_confirmed: !!r.vendor_confirmed, projected_date: r._projected_date || null });
             });
             // BEHIND = incomplete CRITICAL tasks in phases earlier than active
             const behind = ts.filter(r =>
