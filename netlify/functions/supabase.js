@@ -916,10 +916,20 @@ exports.handler = async function(event) {
                 t._es=(t.relative_start||1)+maxSlip;
               });
             }
-            // attach a real projected calendar date to each task
+            // attach a real projected calendar date to each task.
+            // MATCH THE FIELD APP DISPLAY RULE (its line: dispStart = (!started && est_start_date)
+            // ? est_start_date : computed): when a not-started task has an override date, the
+            // DISPLAYED start is that literal override — even though the engine also uses it as a
+            // floor for downstream cascade. Started/finished tasks show their computed/actual date.
             tasks.forEach(t => {
-              if (start && t._es != null){ t._projected_date = ymd(addWD(start, t._es)); }
-              else { t._projected_date = null; }
+              const started = (t.status==='started' || t.status==='finished');
+              if (!started && t.est_start_date){
+                t._projected_date = t.est_start_date;         // literal override, matches field app
+              } else if (start && t._es != null){
+                t._projected_date = ymd(addWD(start, t._es));  // computed projection
+              } else {
+                t._projected_date = null;
+              }
             });
           }
 
