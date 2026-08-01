@@ -227,6 +227,7 @@ tr:hover td{background:#f9fafb}
             </select>
             <input class="search-input" id="lot-search" placeholder="Search lots…" oninput="renderLotsTable()">
             <button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
+            <button class="btn btn-secondary" onclick="openBulkLotModal()">▦ Add Multiple</button>
           </div>
         </div>
         <div id="lots-table-body"><div class="loading">Loading lots…</div></div>
@@ -450,6 +451,45 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <!-- ADD LOT -->
+<div class="modal-overlay" id="modal-bulk-lot">
+  <div class="modal" style="max-width:820px">
+    <h2>Add Multiple Lots</h2>
+    <div class="field">
+      <label>Subdivision</label>
+      <select id="bulk-subdivision" onchange="onBulkSubChange()"><option value="">Select subdivision…</option></select>
+    </div>
+    <div id="bulk-body" style="display:none">
+      <div id="bulk-builder-row" style="margin-bottom:10px"></div>
+      <div class="field">
+        <label>Schedule Type <span style="color:var(--muted);font-weight:400">(applies to all rows)</span></label>
+        <select id="bulk-template"><option value="">Select schedule…</option></select>
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:10px">
+        <table id="bulk-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Lot Number</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Address</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Plan Name</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Start Date</th>
+              <th style="width:34px"></th>
+            </tr>
+          </thead>
+          <tbody id="bulk-rows"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <button class="btn btn-secondary btn-sm" onclick="addBulkRow()">+ Add Row</button>
+        <span id="bulk-count" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-bulk-lot')">Cancel</button>
+      <button class="btn btn-primary" id="bulk-save-btn" onclick="submitBulkLots()" disabled>Add Lots →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-lot">
   <div class="modal">
     <h2>Add Lot</h2>
@@ -1500,6 +1540,138 @@ function openFlagsModal(lotId) {
       }).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No flags</p>';
   document.getElementById('modal-lot-flags').classList.add('open');
+}
+
+// ── BULK ADD LOTS ──
+let bulkBuilder = null;   // resolved builder for the chosen subdivision
+
+function openBulkLotModal(){
+  document.getElementById('bulk-subdivision').innerHTML =
+    '<option value="">Select subdivision…</option>'
+    + subdivisions.filter(s=>!s.is_archived).map(s =>
+        `<option value="${s.id}" data-code="${s.code}">${s.name} (${s.code})</option>`
+      ).join('');
+  document.getElementById('bulk-body').style.display = 'none';
+  document.getElementById('bulk-rows').innerHTML = '';
+  document.getElementById('bulk-save-btn').disabled = true;
+  document.getElementById('modal-bulk-lot').classList.add('open');
+}
+
+async function onBulkSubChange(){
+  const sel = document.getElementById('bulk-subdivision');
+  const opt = sel.options[sel.selectedIndex];
+  const subId = sel.value;
+  const subCode = opt ? opt.dataset.code : '';
+  const body = document.getElementById('bulk-body');
+
+  if(!subId){ body.style.display='none'; document.getElementById('bulk-save-btn').disabled=true; return; }
+
+  // Resolve builder from subdivision assignment — the system knows, user shouldn't pick per-lot.
+  const sub = subdivisions.find(s=>s.id===subId);
+  const subBuilders = sub ? builders.filter(b=>!b.is_admin && (b.subdivisions||[]).includes(sub.code)) : [];
+  const brow = document.getElementById('bulk-builder-row');
+
+  if(subBuilders.length === 0){
+    // Block: subdivision has no builder assigned
+    body.style.display = 'block';
+    brow.innerHTML = '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px;font-size:13px">'
+      + '⚠ No builder is assigned to this subdivision. Assign one in Settings → Subdivisions before adding lots.</div>';
+    document.getElementById('bulk-rows').innerHTML = '';
+    document.getElementById('bulk-save-btn').disabled = true;
+    bulkBuilder = null;
+    return;
+  } else if(subBuilders.length === 1){
+    bulkBuilder = subBuilders[0].name;
+    brow.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;border-radius:8px;padding:9px 11px;font-size:13px">'
+      + '✓ Builder: <strong>'+bulkBuilder+'</strong> (assigned to this subdivision)</div>';
+  } else {
+    // Multiple builders on this subdivision — one selector applies to all rows
+    bulkBuilder = subBuilders[0].name;
+    brow.innerHTML = '<div class="field" style="margin-bottom:0"><label>Builder <span style="color:var(--muted);font-weight:400">(applies to all rows)</span></label>'
+      + '<select id="bulk-builder-sel" onchange="bulkBuilder=this.value">'
+      + subBuilders.map(b=>`<option value="${b.name}">${b.name}</option>`).join('')
+      + '</select></div>';
+  }
+
+  // Template dropdown
+  document.getElementById('bulk-template').innerHTML = '<option value="">Select schedule…</option>'
+    + scheduleTemplates.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+
+  body.style.display = 'block';
+  document.getElementById('bulk-rows').innerHTML = '';
+  for(let i=0;i<5;i++) addBulkRow();
+  document.getElementById('bulk-save-btn').disabled = false;
+  updateBulkCount();
+}
+
+function addBulkRow(){
+  const tr = document.createElement('tr');
+  tr.style.borderTop = '1px solid #f1f5f9';
+  tr.innerHTML =
+     '<td style="padding:4px"><input type="text" class="bulk-num" placeholder="Lot 14" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px"><input type="text" class="bulk-addr" placeholder="Street address" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px"><input type="text" class="bulk-plan" placeholder="Magnolia 2100" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px"><input type="date" class="bulk-start" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px;text-align:center"><button onclick="this.closest(\'tr\').remove();updateBulkCount()" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:16px">×</button></td>';
+  document.getElementById('bulk-rows').appendChild(tr);
+  updateBulkCount();
+}
+
+function updateBulkCount(){
+  const rows = document.querySelectorAll('#bulk-rows tr').length;
+  const filled = Array.from(document.querySelectorAll('.bulk-num')).filter(i=>i.value.trim()).length;
+  document.getElementById('bulk-count').textContent = filled + ' of ' + rows + ' rows have a lot number';
+}
+
+async function submitBulkLots(){
+  const subSel = document.getElementById('bulk-subdivision');
+  const subOpt = subSel.options[subSel.selectedIndex];
+  const subCode = subOpt ? subOpt.dataset.code : '';
+  const template_id = document.getElementById('bulk-template').value;
+
+  if(!subCode){ alert('Select a subdivision.'); return; }
+  if(!template_id){ alert('Select a schedule type.'); return; }
+  if(!bulkBuilder){ alert('This subdivision has no builder assigned.'); return; }
+
+  // gather rows with a lot number
+  const rows = Array.from(document.querySelectorAll('#bulk-rows tr')).map(tr=>({
+    lot_number: tr.querySelector('.bulk-num').value.trim(),
+    address:    tr.querySelector('.bulk-addr').value.trim(),
+    plan_name:  tr.querySelector('.bulk-plan').value.trim(),
+    start_date: tr.querySelector('.bulk-start').value || null
+  })).filter(r=>r.lot_number);
+
+  if(!rows.length){ alert('Enter at least one lot number.'); return; }
+
+  // duplicate check within this community
+  const existing = new Set(scheduleLots.filter(l=>l.community===subCode).map(l=>(l.lot_number||'').toLowerCase()));
+  const dupes = rows.filter(r=>existing.has(r.lot_number.toLowerCase())).map(r=>r.lot_number);
+  if(dupes.length){ alert('These lot numbers already exist in '+subCode+':\n'+dupes.join(', ')+'\n\nRemove or rename them first.'); return; }
+
+  const btn = document.getElementById('bulk-save-btn');
+  btn.disabled = true;
+
+  let ok=0, fail=0;
+  for(let i=0;i<rows.length;i++){
+    const r = rows[i];
+    btn.textContent = 'Adding '+(i+1)+' of '+rows.length+'…';
+    const stamp = await sbCall('stampLot', {template_id, lot_number:r.lot_number, address:r.address||null, community:subCode});
+    if(stamp && stamp.success){
+      const updates = { builder_name: bulkBuilder };
+      if(r.start_date) updates.construction_start_date = r.start_date;
+      if(r.plan_name)  updates.plan_name = r.plan_name;
+      await sbCall('updateScheduleLot', {id: stamp.lot_id, ...updates});
+      ok++;
+    } else { fail++; }
+  }
+
+  btn.textContent = 'Add Lots →';
+  btn.disabled = false;
+  closeModal('modal-bulk-lot');
+  alert(ok+' lot'+(ok===1?'':'s')+' added to '+subCode+(fail?(' · '+fail+' failed'):'')+'.');
+  await reloadLots();
+  populateFilters();
+  renderSubdivisionsTable();
 }
 
 // ── ADD LOT ──
