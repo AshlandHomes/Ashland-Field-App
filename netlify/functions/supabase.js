@@ -1,6 +1,8 @@
 // Netlify serverless function — Supabase data proxy
 // Supports both legacy (eyJ) and new (sb_publishable_) key formats
 
+// Single source of truth for all schedule math (shared with the field app + admin).
+const ScheduleEngine = require('../../schedule-engine.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -413,92 +415,9 @@ exports.handler = async function(event) {
           return { statusCode: 200, body: JSON.stringify({ success: true, tasks: 0, critical: 0 }) };
         }
 
-        const byNum = {};
-        tasks.forEach(t => { byNum[t.bt_num] = t; });
-        const dur = t => (t.duration != null ? t.duration : 1);
-
-        // ---- forward pass (memoised, cycle-safe) ----
-        const ES = {}, EF = {};
-        function calcEF(num, stack) {
-          if (EF[num] !== undefined) return EF[num];
-          const t = byNum[num];
-          if (!t) return 0;
-          if (stack.indexOf(num) >= 0) { ES[num] = 1; EF[num] = dur(t); return EF[num]; }
-          const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
-          const lag = (t.lag || 0);
-          let fwd = null;    // forward driver (from predecessor finish)
-          let back = null;   // backward lead-time driver (from predecessor start)
-          preds.forEach(p => {
-            if (byNum[p]) {
-              calcEF(p, stack.concat([num]));   // ensure predecessor computed
-              const pStart = ES[p], pFin = EF[p];
-              if (lag < 0) {
-                const cand = pStart + lag;                 // negative lag = before pred start
-                if (back === null || cand < back) back = cand;
-              } else {
-                const cand = pFin + 1 + lag;               // forward from pred finish
-                if (fwd === null || cand > fwd) fwd = cand;
-              }
-            }
-          });
-          let start;
-          if (lag < 0 && back !== null) {
-            start = back;
-          } else {
-            start = fwd;
-            // relative_start is only a FALLBACK for tasks with no forward driver —
-            // NOT a floor. In a predecessor-driven schedule the chain drives timing;
-            // a competing fixed floor would stop the cascade.
-            if (start === null) start = (t.relative_start != null ? t.relative_start : 1);
-          }
-          if (start < 1) start = 1;   // FLOOR at construction start
-          ES[num] = start;
-          EF[num] = start + dur(t) - 1;
-          return EF[num];
-        }
-        tasks.forEach(t => calcEF(t.bt_num, []));
-
-        const projectEnd = Math.max.apply(null, tasks.map(t => EF[t.bt_num] || 0));
-
-        // ---- successors map ----
-        const succ = {};
-        tasks.forEach(t => {
-          (Array.isArray(t.predecessors) ? t.predecessors : []).forEach(p => {
-            if (byNum[p]) (succ[p] = succ[p] || []).push(t.bt_num);
-          });
-        });
-
-        // ---- backward pass ----
-        const LF = {}, LS = {};
-        function calcLS(num, stack) {
-          if (LS[num] !== undefined) return LS[num];
-          const t = byNum[num];
-          if (!t) return projectEnd;
-          if (stack.indexOf(num) >= 0) { LF[num] = projectEnd; LS[num] = projectEnd - dur(t) + 1; return LS[num]; }
-          const ss = succ[num] || [];
-          let finish = null;
-          ss.forEach(s => {
-            const st = byNum[s];
-            if (!st) return;
-            const sls = calcLS(s, stack.concat([num]));
-            const cand = sls - 1 - (st.lag || 0);
-            if (finish === null || cand < finish) finish = cand;
-          });
-          if (finish === null) finish = projectEnd;
-          LF[num] = finish;
-          LS[num] = finish - dur(t) + 1;
-          return LS[num];
-        }
-        tasks.forEach(t => calcLS(t.bt_num, []));
-
-        // ---- float + write ----
-        let criticalCount = 0;
-        const updates = tasks.map(t => {
-          const float = (LS[t.bt_num] || 0) - (ES[t.bt_num] || 0);
-          const isCrit = (float <= 0) || !!t.force_critical;
-          if (isCrit) criticalCount++;
-          return { id: t.id, is_critical: isCrit, float: float };
-        });
+        // TRUE CPM via the single shared engine (schedule-engine.js): forward +
+        // backward pass, float = LS - ES, critical when float <= 0 OR force_critical.
+        const { updates, criticalCount, projectEnd } = ScheduleEngine.computeTemplateCritical(tasks);
 
         for (const u of updates) {
           await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${u.id}`, { is_critical: u.is_critical });
@@ -861,86 +780,12 @@ exports.handler = async function(event) {
               `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade,est_start_date,actual_start,actual_finish,vendor_confirmed,relative_start,duration,lag,predecessors&order=task_order`);
             byLot[lotId] = r.data || [];
           }));
-          // ── PROJECTED-DATE ENGINE (mirrors the field app so dates coincide) ──
-          // Working-day helpers: weekends excluded, offset 1 = the start date itself.
-          function addWD(start, off){
-            let d = new Date(start); d.setHours(0,0,0,0); let c = 1;
-            while (c < off){ d.setDate(d.getDate()+1); const w = d.getDay(); if (w!==0 && w!==6) c++; }
-            return d;
-          }
-          function wdBetween(a, b){
-            let d1=new Date(a), d2=new Date(b); d1.setHours(0,0,0,0); d2.setHours(0,0,0,0);
-            if (d1.getTime()===d2.getTime()) return 0;
-            const sign = d2>d1?1:-1; let cur=new Date(d1), c=0;
-            while (cur.getTime()!==d2.getTime()){ cur.setDate(cur.getDate()+sign); const w=cur.getDay(); if (w!==0&&w!==6) c+=sign; }
-            return c;
-          }
-          function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+          // PROJECTED-DATE ENGINE now lives in the single shared engine (schedule-engine.js).
+          // See ScheduleEngine.computeLotProjected — invoked per lot below.
 
-          // Compute each task's PROJECTED start offset (working days from construction start),
-          // honoring: actual start (if started), est_start_date override as a FLOOR,
-          // predecessor finishes + lag, and relative_start as a baseline floor.
-          function computeProjected(tasks, startDate){
-            const bn = {}; tasks.forEach(t => { bn[t.bt_num] = t; });
-            const start = startDate ? new Date(startDate+'T00:00:00') : null;
-            const actOffset = (iso) => (start && iso) ? wdBetween(start, new Date(iso+'T00:00:00'))+1 : null;
-            const hasPreds = tasks.some(t => Array.isArray(t.predecessors) && t.predecessors.length>0);
-            const memoEF = {};
-            function ef(n, stk){
-              if (memoEF[n] !== undefined) return memoEF[n];
-              const t = bn[n]; if (!t) return 1;
-              if (stk.indexOf(n) >= 0) { t._es = t.relative_start||1; return (t.relative_start||1)+((t.duration||1)-1); }
-              const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
-              let pd = null;
-              preds.forEach(p => { if (bn[p]){ const pe = ef(p, stk.concat([n])); pd = (pd===null)? pe+1 : Math.max(pd, pe+1); } });
-              const a = { started:(t.status==='started'||t.status==='finished'),
-                          finished:(t.status==='finished'),
-                          start:t.actual_start, finish:t.actual_finish };
-              const aStartOff = (a.started && a.start) ? actOffset(a.start) : null;
-              const ps = (pd!==null) ? pd + (t.lag||0) : null;
-              let es;
-              if (aStartOff !== null) { es = aStartOff; }
-              else {
-                es = (ps!==null) ? ps : (t.relative_start||1);
-                // est_start_date override acts as a FLOOR
-                if (!a.started && t.est_start_date){ const eo = actOffset(t.est_start_date); if (eo!==null) es = Math.max(es, eo); }
-              }
-              const aFinOff = (a.finished && a.finish) ? actOffset(a.finish) : null;
-              const e = (aFinOff!==null) ? aFinOff : es + (t.duration||1) - 1;
-              t._es = es; memoEF[n] = e; return e;
-            }
-            if (hasPreds){
-              tasks.forEach(t => ef(t.bt_num, []));
-            } else {
-              // sequential slip-propagation (no predecessor data)
-              const sorted = tasks.slice().sort((a,b)=>((a.relative_start||1)-(b.relative_start||1))||((a.task_order||0)-(b.task_order||0)));
-              let maxSlip = 0;
-              sorted.forEach(t => {
-                const a = { started:(t.status==='started'||t.status==='finished'),
-                            finished:(t.status==='finished'), start:t.actual_start, finish:t.actual_finish };
-                const aStartOff=(a.started&&a.start)?actOffset(a.start):null;
-                const aFinOff=(a.finished&&a.finish)?actOffset(a.finish):null;
-                const estOff=(!a.started&&t.est_start_date)?actOffset(t.est_start_date):null;
-                let slip=0;
-                if (aFinOff!==null) slip=aFinOff-((t.relative_start||1)+(t.duration||1)-1);
-                else if (aStartOff!==null) slip=aStartOff-(t.relative_start||1);
-                else if (estOff!==null) slip=Math.max(0, estOff-(t.relative_start||1));
-                maxSlip=Math.max(maxSlip, slip);
-                t._es=(t.relative_start||1)+maxSlip;
-              });
-            }
-            // Projected start date = the engine's computed _es, which already honors the
-            // est_start_date override as a FLOOR. Start and finish both derive from _es so
-            // they stay consistent (no impossible start-after-finish). Matches the field app.
-            tasks.forEach(t => {
-              if (start && t._es != null){ t._projected_date = ymd(addWD(start, t._es)); }
-              else { t._projected_date = null; }
-            });
-          }
-
-          // run the engine per lot before building the snapshot
+          // run the shared engine per lot before building the snapshot
           Object.keys(byLot).forEach(lotId => {
-            computeProjected(byLot[lotId], startById[lotId]);
+            ScheduleEngine.computeLotProjected(byLot[lotId], startById[lotId]);
           });
 
           Object.keys(byLot).forEach(lotId => {

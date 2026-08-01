@@ -263,6 +263,36 @@
     return { end: r.end, byNum: r.byNum };
   }
 
+  // ── surface adapter: BACKEND template critical writer ────────────────────
+  // supabase.js recalcTemplateCriticalPath. tasks: sched_template_tasks rows
+  // {id, bt_num, duration, lag, relative_start, predecessors, force_critical}.
+  // Returns { updates:[{id,bt_num,is_critical,float}], criticalCount, projectEnd }.
+  // Planned mode, no start date — pure offsets; critical = float<=0 OR force_critical.
+  function computeTemplateCritical(tasks) {
+    var r = computeSchedule(tasks, { mode: 'planned' });
+    var criticalCount = 0;
+    var updates = (tasks || []).map(function (t) {
+      var x = r.byNum[t.bt_num] || {};
+      if (x.critical) criticalCount++;
+      return { id: t.id, bt_num: t.bt_num, is_critical: !!x.critical, float: x.float };
+    });
+    return { updates: updates, criticalCount: criticalCount, projectEnd: r.end };
+  }
+
+  // ── surface adapter: BACKEND lot projected dates ─────────────────────────
+  // supabase.js getAllLotPhases. tasks: sched_lot_tasks rows. Mutates each task
+  // in place, writing _es (offset) and _projected_date (YYYY-MM-DD), then returns
+  // the array. startDate is the lot's construction_start_date (string|Date|null).
+  function computeLotProjected(tasks, startDate) {
+    var r = computeSchedule(tasks, { startDate: startDate, mode: 'projected' });
+    (tasks || []).forEach(function (t) {
+      var x = r.byNum[t.bt_num];
+      if (x) { t._es = x.es; t._projected_date = x.projectedDate; }
+      else { t._es = null; t._projected_date = null; }
+    });
+    return tasks;
+  }
+
   // ── integrity rules (BUILD_SPEC §3) — used by template builder + runtime ──
   // Returns [{ num, rule, message }]. Does not throw; the UI decides how to
   // surface / block on these.
@@ -345,6 +375,8 @@
     validateSchedule: validateSchedule,
     computeStage: computeStage,
     // surface adapters
-    computeFieldSchedule: computeFieldSchedule
+    computeFieldSchedule: computeFieldSchedule,
+    computeTemplateCritical: computeTemplateCritical,
+    computeLotProjected: computeLotProjected
   };
 }));
