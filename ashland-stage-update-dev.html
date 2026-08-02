@@ -749,7 +749,7 @@ async function startTask(n){
   const defaultDate=t.est_start_date||todayYmd();
   const v=await openDatePicker('Start — #'+n+' '+t.name,defaultDate);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
-  const av=ScheduleEngine.validateActual({actualStart:v,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
+  const av=ScheduleEngine.validateDateEntry({actualStart:v,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
   if(!av.ok){alert(av.message);return;}
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
 }
@@ -764,7 +764,7 @@ async function finishTask(n){
   }
   const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
-  const av=ScheduleEngine.validateActual({actualStart:(act[n]&&act[n].start)||null,actualFinish:v,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
+  const av=ScheduleEngine.validateDateEntry({actualFinish:v,priorStart:(act[n]&&act[n].start)||null,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
   if(!av.ok){alert(av.message);return;}
 
   // ── DELAY REASON CAPTURE (critical tasks finished late) ──
@@ -1004,6 +1004,9 @@ async function saveEditTask(){
   if(newEstStart && newEstStart === prefilled && !hadOverride){
     newEstStart = null;
   }
+  // Guard the override: construction-start floor only (FUTURE overrides are allowed — no today ceiling).
+  const ev=ScheduleEngine.validateDateEntry({estStartDate:newEstStart,constructionStart:curLot.construction_start_date||null});
+  if(!ev.ok){alert(ev.message);return;}
 
   if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
 

@@ -331,34 +331,48 @@
     return violations;
   }
 
-  // ── data-entry guard: actuals must be physically possible ────────────────
-  // A task's actual_start / actual_finish must fall in [constructionStart, today]
-  // and finish must not precede start. Blocks the two impossible classes at the
-  // source: dates before the job began (the gamed pre-construction dates) and
-  // future dates. Legitimate BACKDATING inside the window is allowed — a builder
-  // catching up enters the real past dates. Same rule + messages for the field
-  // app (entry UX) and the backend (authoritative gate).
+  // ── data-entry guard: dates must be physically possible ──────────────────
+  // Two DIFFERENT rules, by field type:
+  //   • actual_start / actual_finish — a CLAIM ABOUT THE PAST. Must fall in the
+  //     full window [constructionStart, today]: can't have happened before the
+  //     job began (the gamed pre-construction dates) and can't be in the future.
+  //     Also finish must not precede start. Legitimate BACKDATING inside the
+  //     window is allowed — a builder catching up enters the real past dates.
+  //   • est_start_date — a PROJECTION / OVERRIDE, legitimately set in the FUTURE
+  //     ("this task will start next month"). Construction-start floor ONLY; the
+  //     "not after today" ceiling does NOT apply to it.
+  // Same rules + messages for the field app (entry UX) and backend (the gate).
   //
-  // All dates are 'YYYY-MM-DD' strings; ISO dates compare correctly as strings,
-  // so there is no Date parsing or timezone ambiguity here.
-  // opts: { actualStart?, actualFinish?, constructionStart?, today? }
+  // All dates are 'YYYY-MM-DD'; ISO dates compare correctly as strings, so there
+  // is no Date parsing or timezone ambiguity.
+  // opts: { actualStart?, actualFinish?, priorStart?, estStartDate?, constructionStart?, today? }
   // returns { ok:true } | { ok:false, field, reason, message }
-  function validateActual(opts) {
+  function validateDateEntry(opts) {
     opts = opts || {};
     var cs = opts.constructionStart || null;
     var today = opts.today || null;
-    var fields = [['actual_start', opts.actualStart], ['actual_finish', opts.actualFinish]];
-    for (var i = 0; i < fields.length; i++) {
-      var field = fields[i][0], d = fields[i][1];
+    // ACTUALS — full window.
+    var actuals = [['actual_start', opts.actualStart], ['actual_finish', opts.actualFinish]];
+    for (var i = 0; i < actuals.length; i++) {
+      var field = actuals[i][0], d = actuals[i][1];
       if (!d) continue;                                    // absent / cleared-to-null is allowed
       if (cs && d < cs) return { ok: false, field: field, reason: 'before_start',
         message: 'This date is before construction started (' + cs + '). Enter the real date.' };
       if (today && d > today) return { ok: false, field: field, reason: 'future',
         message: "This date is in the future. A task can't be completed on a date that hasn't happened yet." };
     }
-    if (opts.actualStart && opts.actualFinish && opts.actualFinish < opts.actualStart) {
+    // finish >= start. The reference start is the one being SET (actualStart) if
+    // present, else priorStart (the task's existing start) — priorStart is NOT
+    // window-validated, so a task with legacy bad start data can still be finished.
+    var effStart = (opts.actualStart != null) ? opts.actualStart : (opts.priorStart || null);
+    if (effStart && opts.actualFinish && opts.actualFinish < effStart) {
       return { ok: false, field: 'actual_finish', reason: 'finish_before_start',
-        message: "Finish date can't be before the start date (" + opts.actualStart + ")." };
+        message: "Finish date can't be before the start date (" + effStart + ")." };
+    }
+    // est_start_date OVERRIDE — construction-start floor only; future is allowed.
+    if (opts.estStartDate && cs && opts.estStartDate < cs) {
+      return { ok: false, field: 'est_start_date', reason: 'before_start',
+        message: 'This override is before construction started (' + cs + '). Enter a date on or after it.' };
     }
     return { ok: true };
   }
@@ -405,7 +419,7 @@
     // core
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
-    validateActual: validateActual,
+    validateDateEntry: validateDateEntry,
     computeStage: computeStage,
     // surface adapters
     computeFieldSchedule: computeFieldSchedule,

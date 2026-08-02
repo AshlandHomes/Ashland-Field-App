@@ -49,7 +49,7 @@ async function supabaseRequest(method, path, body) {
 }
 
 // ── actual-date entry guard ──────────────────────────────────────────────
-// Authoritative backstop for the rule ScheduleEngine.validateActual enforces:
+// Authoritative backstop for the rule ScheduleEngine.validateDateEntry enforces:
 // actual_start/actual_finish must fall in [construction_start, today] and finish
 // must not precede start. Every write of an actual funnels through the two cases
 // below (updateScheduleLotTask, bulkUpdateLotTasks), so guarding them = no back
@@ -57,7 +57,7 @@ async function supabaseRequest(method, path, body) {
 // builder's local date for the precise message. (UTC >= local for US zones, so
 // legitimate local-today entries always pass; the backend just refuses the
 // egregious future dates the UI would also refuse.)
-async function loadActualGuardCtx(taskIds) {
+async function loadDateGuardCtx(taskIds) {
   const ids = [...new Set((taskIds || []).filter(Boolean))];
   if (!ids.length) return { taskById: {}, csByLot: {} };
   const tr = await supabaseRequest('GET', `sched_lot_tasks?id=in.(${ids.join(',')})&select=id,lot_id,actual_start`);
@@ -67,13 +67,22 @@ async function loadActualGuardCtx(taskIds) {
   const csByLot = {}; (lr.data || []).forEach(l => { csByLot[l.id] = l.construction_start_date || null; });
   return { taskById, csByLot };
 }
-function checkActualEntry(u, ctx, today) {
-  if (!u || (u.actual_start === undefined && u.actual_finish === undefined)) return { ok: true };
-  if (!u.actual_start && !u.actual_finish) return { ok: true };  // clearing to null is allowed
+// Validates only the fields being SET; actuals get the full [cs, today] window,
+// est_start_date gets the construction-start floor only (future overrides allowed).
+// The task's existing actual_start is passed as priorStart (finish>=start reference,
+// not re-validated — so legacy bad start data can't block a legitimate write).
+function checkDateEntry(u, ctx, today) {
+  if (!u) return { ok: true };
+  const setting = {};
+  if (u.actual_start   !== undefined) setting.actualStart  = u.actual_start;
+  if (u.actual_finish  !== undefined) setting.actualFinish = u.actual_finish;
+  if (u.est_start_date !== undefined) setting.estStartDate = u.est_start_date;
+  if (setting.actualStart === undefined && setting.actualFinish === undefined && setting.estStartDate === undefined) return { ok: true };
   const t = ctx.taskById[u.task_id];
-  const cs = t ? ctx.csByLot[t.lot_id] : null;
-  const startForCheck = (u.actual_start !== undefined) ? u.actual_start : (t ? t.actual_start : null);
-  return ScheduleEngine.validateActual({ actualStart: startForCheck, actualFinish: u.actual_finish, constructionStart: cs, today: today });
+  setting.priorStart = t ? t.actual_start : null;
+  setting.constructionStart = t ? ctx.csByLot[t.lot_id] : null;
+  setting.today = today;
+  return ScheduleEngine.validateDateEntry(setting);
 }
 
 exports.handler = async function(event) {
@@ -869,12 +878,12 @@ exports.handler = async function(event) {
         }
         const stamp = new Date().toISOString();
         const guardToday = stamp.slice(0, 10);
-        const guardCtx = await loadActualGuardCtx(updates.map(u => u && u.task_id));
+        const guardCtx = await loadDateGuardCtx(updates.map(u => u && u.task_id));
         let done = 0; const failed = [];
         for (const u of updates) {
           if (!u || !u.task_id) { failed.push({ task_id: u && u.task_id, error: 'missing task_id' }); continue; }
-          // Hard gate: skip (and report) any impossible actual date; valid updates still write.
-          const gv = checkActualEntry(u, guardCtx, guardToday);
+          // Hard gate: skip (and report) any impossible date; valid updates still write.
+          const gv = checkDateEntry(u, guardCtx, guardToday);
           if (!gv.ok) { failed.push({ task_id: u.task_id, error: gv.message }); continue; }
           const upd = { updated_at: stamp };
           if (u.status !== undefined) upd.status = u.status;
@@ -900,10 +909,11 @@ exports.handler = async function(event) {
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
         }
-        // Hard gate: reject impossible actual dates (before construction start / future / finish<start).
-        if (actual_start !== undefined || actual_finish !== undefined) {
-          const gctx = await loadActualGuardCtx([task_id]);
-          const gv = checkActualEntry({ task_id, actual_start, actual_finish }, gctx, new Date().toISOString().slice(0, 10));
+        // Hard gate: reject impossible dates. Actuals -> [construction_start, today];
+        // est_start_date -> construction-start floor only (future overrides allowed).
+        if (actual_start !== undefined || actual_finish !== undefined || est_start_date !== undefined) {
+          const gctx = await loadDateGuardCtx([task_id]);
+          const gv = checkDateEntry({ task_id, actual_start, actual_finish, est_start_date }, gctx, new Date().toISOString().slice(0, 10));
           if (!gv.ok) return { statusCode: 400, body: JSON.stringify({ error: gv.message, field: gv.field, reason: gv.reason }) };
         }
         const updates = { updated_at: new Date().toISOString() };

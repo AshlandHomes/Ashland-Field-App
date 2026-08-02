@@ -108,3 +108,22 @@ liability and a future-confusion/drift risk.
 (`ashland-field-ops`) is the single live surface going forward — consistent with
 the single-source-of-truth model (`DEPLOY.md`): one editable source, one live
 surface.
+
+## KI-6 — No builder-facing way to backdate an actual to a real past date (UX)
+
+**Status:** open — future enhancement (validation is already ready for it).
+**Surfaced:** actual-date entry-block work.
+
+The field app's Start/Finish buttons open the date picker defaulting to today, and
+a builder catching up on real past work needs to enter the *real* past dates. The
+entry-block validation **already allows** any actual in `[construction_start, today]`,
+so a backdated-but-valid date passes — but the UX doesn't make backdating obvious
+(and there's no dedicated "log completed work with its real date" flow), so a
+builder may feel forced to today. Without an easy backdate path, catch-up (e.g.
+Brendon's Ruby Creek legacy lots) risks recreating the bulk-stamp / out-of-sequence
+problem.
+
+**When we build the backdate UI (not now):** the validation is the right shape
+already — it permits `construction_start ≤ date ≤ today` and blocks outside it, so
+the UI just needs to surface picking a past date within that window (and finish ≥
+start). No validation change required.
