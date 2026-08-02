@@ -1,6 +1,8 @@
 // Netlify serverless function — Supabase data proxy
 // Supports both legacy (eyJ) and new (sb_publishable_) key formats
 
+// Single source of truth for all schedule math (shared with the field app + admin).
+const ScheduleEngine = require('../../schedule-engine.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -413,79 +415,9 @@ exports.handler = async function(event) {
           return { statusCode: 200, body: JSON.stringify({ success: true, tasks: 0, critical: 0 }) };
         }
 
-        const byNum = {};
-        tasks.forEach(t => { byNum[t.bt_num] = t; });
-        const dur = t => (t.duration != null ? t.duration : 1);
-
-        // ---- forward pass (memoised, cycle-safe) ----
-        const ES = {}, EF = {};
-        function calcEF(num, stack) {
-          if (EF[num] !== undefined) return EF[num];
-          const t = byNum[num];
-          if (!t) return 0;
-          if (stack.indexOf(num) >= 0) { ES[num] = 1; EF[num] = dur(t); return EF[num]; }
-          const preds = Array.isArray(t.predecessors) ? t.predecessors : [];
-          let start = null;
-          preds.forEach(p => {
-            if (byNum[p]) {
-              const pe = calcEF(p, stack.concat([num]));
-              const cand = pe + 1 + (t.lag || 0);
-              if (start === null || cand > start) start = cand;
-            }
-          });
-          // relative_start is a FLOOR, not a fallback: a task never starts earlier
-          // than its planned day even if its predecessors finish sooner.
-          if (t.relative_start != null && (start === null || t.relative_start > start)) {
-            start = t.relative_start;
-          }
-          if (start === null) start = 1;
-          ES[num] = start;
-          EF[num] = start + dur(t) - 1;
-          return EF[num];
-        }
-        tasks.forEach(t => calcEF(t.bt_num, []));
-
-        const projectEnd = Math.max.apply(null, tasks.map(t => EF[t.bt_num] || 0));
-
-        // ---- successors map ----
-        const succ = {};
-        tasks.forEach(t => {
-          (Array.isArray(t.predecessors) ? t.predecessors : []).forEach(p => {
-            if (byNum[p]) (succ[p] = succ[p] || []).push(t.bt_num);
-          });
-        });
-
-        // ---- backward pass ----
-        const LF = {}, LS = {};
-        function calcLS(num, stack) {
-          if (LS[num] !== undefined) return LS[num];
-          const t = byNum[num];
-          if (!t) return projectEnd;
-          if (stack.indexOf(num) >= 0) { LF[num] = projectEnd; LS[num] = projectEnd - dur(t) + 1; return LS[num]; }
-          const ss = succ[num] || [];
-          let finish = null;
-          ss.forEach(s => {
-            const st = byNum[s];
-            if (!st) return;
-            const sls = calcLS(s, stack.concat([num]));
-            const cand = sls - 1 - (st.lag || 0);
-            if (finish === null || cand < finish) finish = cand;
-          });
-          if (finish === null) finish = projectEnd;
-          LF[num] = finish;
-          LS[num] = finish - dur(t) + 1;
-          return LS[num];
-        }
-        tasks.forEach(t => calcLS(t.bt_num, []));
-
-        // ---- float + write ----
-        let criticalCount = 0;
-        const updates = tasks.map(t => {
-          const float = (LS[t.bt_num] || 0) - (ES[t.bt_num] || 0);
-          const isCrit = (float <= 0) || !!t.force_critical;
-          if (isCrit) criticalCount++;
-          return { id: t.id, is_critical: isCrit, float: float };
-        });
+        // TRUE CPM via the single shared engine (schedule-engine.js): forward +
+        // backward pass, float = LS - ES, critical when float <= 0 OR force_critical.
+        const { updates, criticalCount, projectEnd } = ScheduleEngine.computeTemplateCritical(tasks);
 
         for (const u of updates) {
           await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${u.id}`, { is_critical: u.is_critical });
@@ -834,9 +766,10 @@ exports.handler = async function(event) {
         // Returns { [lot_id]: { activePhase, activePhaseName,
         //   phases: { [phase_order]: {name, tasks:[{num,name,status,is_critical}]} },
         //   behind: [{num,name,status,phase_order,phase_name}] } }
-        const lots = await supabaseRequest('GET', 'sched_lots?select=id,status&status=eq.active');
+        const lots = await supabaseRequest('GET', 'sched_lots?select=id,status,construction_start_date&status=eq.active');
         const lotRows = lots.data || [];
         const ids = lotRows.map(l => l.id);
+          const startById = {}; lotRows.forEach(l => { startById[l.id] = l.construction_start_date || null; });
         const out = {};
         if (ids.length) {
           // Fetch per-lot to avoid PostgREST's hard 1000-row cap on combined queries.
@@ -844,9 +777,17 @@ exports.handler = async function(event) {
           const byLot = {};
           await Promise.all(ids.map(async (lotId) => {
             const r = await supabaseRequest('GET',
-              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade&order=task_order`);
+              `sched_lot_tasks?lot_id=eq.${lotId}&select=lot_id,bt_num,name,status,phase_order,phase_name,task_order,is_critical,task_type,trade,est_start_date,actual_start,actual_finish,vendor_confirmed,relative_start,duration,lag,predecessors&order=task_order`);
             byLot[lotId] = r.data || [];
           }));
+          // PROJECTED-DATE ENGINE now lives in the single shared engine (schedule-engine.js).
+          // See ScheduleEngine.computeLotProjected — invoked per lot below.
+
+          // run the shared engine per lot before building the snapshot
+          Object.keys(byLot).forEach(lotId => {
+            ScheduleEngine.computeLotProjected(byLot[lotId], startById[lotId]);
+          });
+
           Object.keys(byLot).forEach(lotId => {
             const ts = byLot[lotId];
             // ACTIVE PHASE = furthest phase_order among CRITICAL tasks that are started or finished
@@ -867,7 +808,7 @@ exports.handler = async function(event) {
             ts.forEach(r => {
               const p = r.phase_order;
               (phases[p] = phases[p] || { name: r.phase_name, tasks: [] })
-                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical, task_type: r.task_type || 'work', trade: r.trade || null });
+                .tasks.push({ num: r.bt_num, name: r.name, status: r.status || 'not_started', is_critical: !!r.is_critical, task_type: r.task_type || 'work', trade: r.trade || null, est_start_date: r.est_start_date || null, actual_start: r.actual_start || null, actual_finish: r.actual_finish || null, vendor_confirmed: !!r.vendor_confirmed, projected_date: r._projected_date || null });
             });
             // BEHIND = incomplete CRITICAL tasks in phases earlier than active
             const behind = ts.filter(r =>

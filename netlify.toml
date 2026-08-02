@@ -1,0 +1,18 @@
+# Ashland Field App — Netlify configuration
+# The site serves the repo root (plain static HTML, no build step); serverless
+# functions live in netlify/functions.
+
+[build]
+  functions = "netlify/functions"
+
+[build.environment]
+  # test/ is parity/test tooling, not app code. Keep it out of Netlify's secret
+  # scanner (it references env-var NAMES in docs/examples, never real values).
+  SECRETS_SCAN_OMIT_PATHS = "test/**"
+
+[functions]
+  # Pin the bundler explicitly rather than relying on the account default.
+  node_bundler = "esbuild"
+  # Guarantee the shared schedule engine ships with the functions that require it
+  # (esbuild already inlines the require; this is belt-and-suspenders).
+  included_files = ["schedule-engine.js"]

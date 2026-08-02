@@ -40,10 +40,13 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .topbar-btn:hover{background:rgba(255,255,255,.1)}
 .topbar-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
 
-.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex}
+.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex;align-items:center}
 .nav-tab{padding:14px 20px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap}
 .nav-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
 .nav-tab:hover:not(.active){color:var(--ink)}
+.nav-legend{margin-left:auto;display:inline-flex;align-items:center;gap:4px;background:var(--brand);color:#fff;border:none;border-radius:14px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.02em}
+.nav-legend:hover{background:var(--brand-dark,#0082A0)}
+
 
 .content{flex:1;padding:28px 32px;max-width:1440px;width:100%}
 .section{display:none}.section.active{display:block}
@@ -137,6 +140,13 @@ tr:hover td{background:#f9fafb}
 .set-tab.active{background:#0082A0;border-color:#0082A0;color:#fff}
 .set-pane{display:none}
 .set-pane.active{display:block}
+
+/* ===== ICON LEGEND ===== */
+.legend-pill{display:inline-flex;align-items:center;gap:4px;background:var(--brand);color:#fff;border:none;border-radius:14px;padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer;vertical-align:middle;margin-left:10px;font-family:inherit;letter-spacing:.02em}
+.legend-pill:hover{background:var(--brand-dark,#0082A0)}
+.icon-legend-list{display:flex;flex-direction:column;gap:2px;margin:4px 0 8px}
+.ilg{display:flex;align-items:center;gap:12px;padding:7px 4px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#475569}
+.ilg-i{flex:0 0 28px;text-align:center;font-size:15px}
 </style>
 </head>
 <body>
@@ -177,6 +187,7 @@ tr:hover td{background:#f9fafb}
     <div class="nav-tab active" onclick="showSection('lots',this)">🏗 Lots</div>
     <div class="nav-tab" onclick="showSection('delays',this);loadDelaysView()">⏱ Delays</div>
     <div class="nav-tab" onclick="showSection('settings',this);loadSettingsView()">⚙ Settings</div>
+    <button class="nav-legend" onclick="openIconLegend()" title="What do the icons mean?">ⓘ Legend</button>
   </div>
 
   <div class="content">
@@ -200,7 +211,7 @@ tr:hover td{background:#f9fafb}
             <select class="filter-select" id="filter-close" onchange="renderLotsTable()">
               <option value="">All Statuses</option>
               <option value="active">Active Only</option>
-              <option value="ready">⚠️ Ready to Close</option>
+              <option value="ready">✅ Ready to Close</option>
               <option value="scheduled">📅 Close Scheduled</option>
               <option value="pastdue">🔴 Past-Due Close</option>
               <option value="closed">🏠 Closed</option>
@@ -212,6 +223,7 @@ tr:hover td{background:#f9fafb}
             </select>
             <input class="search-input" id="lot-search" placeholder="Search lots…" oninput="renderLotsTable()">
             <button class="btn btn-primary" onclick="openAddLotModal()">+ Add Lot</button>
+            <button class="btn btn-secondary" onclick="openBulkLotModal()">▦ Add Multiple</button>
           </div>
         </div>
         <div id="lots-table-body"><div class="loading">Loading lots…</div></div>
@@ -247,7 +259,7 @@ tr:hover td{background:#f9fafb}
         <button class="set-tab active" data-pane="builders"  onclick="showSettingsPane('builders',this)">👷 Builders</button>
         <button class="set-tab"        data-pane="subs"      onclick="showSettingsPane('subs',this)">🏘 Subdivisions &amp; Companies</button>
         <button class="set-tab"        data-pane="reasons"   onclick="showSettingsPane('reasons',this)">⏱ Delay Reasons</button>
-        <button class="set-tab"        data-pane="schedules" onclick="showSettingsPane('schedules',this)">📋 Schedule Templates</button>
+        <button class="set-tab"        data-pane="schedules" onclick="showSettingsPane('schedules',this)">🗓 Schedule Templates</button>
       </div>
 
       <!-- Builders -->
@@ -323,7 +335,7 @@ tr:hover td{background:#f9fafb}
             <p style="margin:0 0 10px"><strong>Phases</strong> group tasks into weeks of construction. <strong>Tasks</strong> carry duration, lag, predecessors and a critical-path flag. Critical tasks drive the completion date and the active phase; non-critical tasks have float and don't.</p>
             <p style="margin:0 0 10px"><strong>Stage map</strong> ties stage codes (0.3–9.5) to the tasks that trigger them — finish the trigger tasks, the stage advances automatically.</p>
             <p style="margin:0 0 10px;padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px">
-              <strong>⚡ Gates are optional.</strong> A gate is an extra hold you can layer on top of the schedule — the utility gates (gas, power, water) are the example in use today. When a gate is unconfirmed, the lot's <em>reported</em> stage is capped (at 5.9) even though its <em>true</em> stage has advanced. This surfaces houses that are physically built past a point but can't be reported there yet. <strong>A template works fine with no gates at all</strong> — only add them when you need that extra hold.
+              <strong>🔓 Gates are optional.</strong> A gate is an extra hold you can layer on top of the schedule — the utility gates (gas, power, water) are the example in use today. When a gate is unconfirmed, the lot's <em>reported</em> stage is capped (at 5.9) even though its <em>true</em> stage has advanced. This surfaces houses that are physically built past a point but can't be reported there yet. <strong>A template works fine with no gates at all</strong> — only add them when you need that extra hold.
             </p>
             <p style="margin:0"><strong>Cloning</strong> copies everything — phases, tasks, gates, stage map — into an independent new template. Fastest way to make a Basement or Townhome variant of an existing schedule, then edit the differences.</p>
           </div>
@@ -384,9 +396,37 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-icon-legend">
+  <div class="modal" style="max-width:460px">
+    <h2>Icon Legend</h2>
+    <div class="icon-legend-list">
+      <div class="ilg"><span class="ilg-i">◆</span><span>Critical-path task — drives the completion date</span></div>
+      <div class="ilg"><span class="ilg-i">◇</span><span>Non-critical task — has float</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#cbd5e1">○</span><span>Not started</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#d97706">◐</span><span>In progress</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#1E8449">●</span><span>Finished</span></div>
+      <div class="ilg"><span class="ilg-i">📋</span><span>Action task — ordering / scheduling, not physical work</span></div>
+      <div class="ilg"><span class="ilg-i">🔨</span><span>On-site work</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#b91c1c">⚠</span><span>Needs attention — stale, behind, or unassigned</span></div>
+      <div class="ilg"><span class="ilg-i">✅</span><span>Ready / good — e.g. ready to close</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:#1E8449">✓</span><span>Confirmed — a gate or vendor confirmed</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:var(--amber)">⚡</span><span>Held at stage 5.9 by open utility gates</span></div>
+      <div class="ilg"><span class="ilg-i">⏰</span><span>Stale critical task — overdue to start</span></div>
+      <div class="ilg"><span class="ilg-i">🚩</span><span>Flagged note</span></div>
+      <div class="ilg"><span class="ilg-i">🔴</span><span>Red flag / past-due close</span></div>
+      <div class="ilg"><span class="ilg-i">🟡</span><span>Yellow flag / reminder</span></div>
+      <div class="ilg"><span class="ilg-i">📅</span><span>Close scheduled</span></div>
+      <div class="ilg"><span class="ilg-i">🏠</span><span>Closed</span></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-primary" onclick="closeModal('modal-icon-legend')">Got it</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-lot-phase">
   <div class="modal">
-    <h2>📍 Phase of Construction</h2>
+    <h2>📍 Phase of Construction <button class="legend-pill" onclick="openIconLegend()" title="What do these icons mean?">ⓘ Legend</button></h2>
     <div class="modal-sub" id="phase-modal-lot-label"></div>
     <div id="phase-modal-list"></div>
     <div class="modal-btns">
@@ -407,6 +447,45 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <!-- ADD LOT -->
+<div class="modal-overlay" id="modal-bulk-lot">
+  <div class="modal" style="max-width:820px">
+    <h2>Add Multiple Lots</h2>
+    <div class="field">
+      <label>Subdivision</label>
+      <select id="bulk-subdivision" onchange="onBulkSubChange()"><option value="">Select subdivision…</option></select>
+    </div>
+    <div id="bulk-body" style="display:none">
+      <div id="bulk-builder-row" style="margin-bottom:10px"></div>
+      <div class="field">
+        <label>Schedule Type <span style="color:var(--muted);font-weight:400">(applies to all rows)</span></label>
+        <select id="bulk-template"><option value="">Select schedule…</option></select>
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:10px">
+        <table id="bulk-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Lot Number</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Address</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Plan Name</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:700;color:#475569">Start Date</th>
+              <th style="width:34px"></th>
+            </tr>
+          </thead>
+          <tbody id="bulk-rows"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <button class="btn btn-secondary btn-sm" onclick="addBulkRow()">+ Add Row</button>
+        <span id="bulk-count" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal('modal-bulk-lot')">Cancel</button>
+      <button class="btn btn-primary" id="bulk-save-btn" onclick="submitBulkLots()" disabled>Add Lots →</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-lot">
   <div class="modal">
     <h2>Add Lot</h2>
@@ -796,6 +875,7 @@ tr:hover td{background:#f9fafb}
   </div>
 </div>
 
+<script src="schedule-engine.js?v=1"></script>
 <script>
 // ── CONSTANTS ──
 const SUPABASE_FN = '/.netlify/functions/supabase';
@@ -1104,10 +1184,11 @@ function fmtDate(str) {
 function calcPlannedCompletion(startStr) {
   if (!startStr) return null;
   const p = startStr.split('-');
-  let d = new Date(+p[0], +p[1]-1, +p[2]);
-  let wd = 0;
-  while (wd < 99) { d.setDate(d.getDate()+1); if (d.getDay()!==0&&d.getDay()!==6) wd++; }
-  return d;
+  // 99 working days after start (a hardcoded template-length estimate — see
+  // KNOWN_ISSUES KI-2). Working-day math comes from the shared engine; addWD's
+  // offset 1 == the start date, so "99 WD after start" is offset 100. Preserves
+  // the previous inline weekend-walk output exactly.
+  return ScheduleEngine.addWD(new Date(+p[0], +p[1]-1, +p[2]), 100);
 }
 
 function isUpdatedRecently(ts) {
@@ -1154,11 +1235,10 @@ async function openStageModal(lotId){
     });
     if(latest){
       holdSince = latest;
+      // Working days from the earn-past-5.9 date to today, via the shared engine.
       const today = new Date(); today.setHours(0,0,0,0);
-      const cur = new Date(latest); cur.setHours(0,0,0,0);
-      let wd = 0;
-      while(cur < today){ cur.setDate(cur.getDate()+1); const w = cur.getDay(); if(w!==0 && w!==6) wd++; }
-      holdDays = wd;
+      const since = new Date(latest); since.setHours(0,0,0,0);
+      holdDays = ScheduleEngine.wdBetween(since, today);
     }
   }
 
@@ -1203,7 +1283,7 @@ function closeBadgeHtml(lot) {
       + '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>';
   }
   if (parseFloat(lot.reported_stage||0) >= 6) {
-    return '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">⚠️ Ready</span>';
+    return '<span class="badge" style="background:#fef9e7;color:#e67e22;font-weight:700">✅ Ready</span>';
   }
   return '<span style="color:var(--muted)">—</span>';
 }
@@ -1382,16 +1462,43 @@ function _phKeep(t){
   return true;
 }
 
-function _phDot(s){ return s==='finished'?'<span style=\"color:#1E8449\">●</span>':(s==='started'?'<span style=\"color:#d97706\">◐</span>':'<span style=\"color:#cbd5e1\">○</span>'); }
+function _phDot(s){ const st='font-size:16px;font-weight:900;vertical-align:middle'; return s==='finished'?'<span style=\"color:#1E8449;'+st+'\">●</span>':(s==='started'?'<span style=\"color:#d97706;'+st+'\">◐</span>':'<span style=\"color:#cbd5e1;'+st+'\">○</span>'); }
 function _phLbl(s){ return s==='finished'?'Finished':(s==='started'?'Started':'Not started'); }
+function _phFmtDate(d){
+  if(!d) return '';
+  const dt = new Date(d+'T00:00:00');
+  return (dt.getMonth()+1)+'/'+dt.getDate();
+}
+function _phDateChip(t){
+  // Finished/started -> real actual date (hard fact).
+  if(t.status==='finished' && t.actual_finish){
+    return '<span style=\"color:#15803d;font-weight:600\">✓ done '+_phFmtDate(t.actual_finish)+'</span>';
+  }
+  if(t.status==='started' && t.actual_start){
+    return '<span style=\"color:#0082A0;font-weight:600\">▶ started '+_phFmtDate(t.actual_start)+'</span>';
+  }
+  // Upcoming -> the projected date computed by the backend (same date the field app shows).
+  const d = t.projected_date || t.est_start_date;
+  if(!d) return '<span style=\"color:#cbd5e1\">—</span>';
+  // Confirmed = builder locked it via the field app (vendor_confirmed on an est_start_date override).
+  if(t.vendor_confirmed){
+    return '<span style=\"color:#15803d;font-weight:700\" title=\"Confirmed by the builder in the field — a committed date\">🔒 '+_phFmtDate(d)+' confirmed</span>';
+  }
+  // Overridden but not confirmed = someone set est_start_date but no confirm yet.
+  if(t.est_start_date){
+    return '<span style=\"color:#0082A0;font-weight:600\" title=\"Manually set start date (override), not yet confirmed\">✎ '+_phFmtDate(d)+' set</span>';
+  }
+  // Pure system projection.
+  return '<span style=\"color:#94a3b8\" title=\"System-projected date — computed from the schedule, not yet confirmed\">🕓 '+_phFmtDate(d)+' projected</span>';
+}
 function _phTaskRow(t){
-  const crit = t.is_critical ? '<span style=\"color:#0082A0\">◆</span> ' : '';
+  const crit = t.is_critical ? '<span style=\"color:#0082A0;font-size:15px;vertical-align:middle\">◆</span> ' : '';
   const isAction = (t.task_type||'work')==='action';
-  const mark = isAction ? '📋 ' : '';
+  const mark = isAction ? '<span style=\"font-size:15px;vertical-align:middle\">📋</span> ' : '';
   const trade = t.trade ? ' <span style=\"font-size:11px;color:#64748b\">· '+t.trade+'</span>' : '';
-  return '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px'+(isAction?';background:#fbfaff':'')+'\">'
-    +'<div>'+_phDot(t.status)+' '+crit+mark+'<strong>#'+t.num+'</strong> '+(t.name||'')+trade+'</div>'
-    +'<div class=\"flag-meta\" style=\"white-space:nowrap\">'+_phLbl(t.status)+'</div></div>';
+  return '<div class=\"flag-item\" style=\"display:flex;justify-content:space-between;gap:10px;align-items:center'+(isAction?';background:#fbfaff':'')+'\">'
+    +'<div style=\"font-size:14px\">'+_phDot(t.status)+' '+crit+mark+'<strong>#'+t.num+'</strong> '+(t.name||'')+trade+'</div>'
+    +'<div class=\"flag-meta\" style=\"white-space:nowrap;text-align:right;font-size:12.5px\">'+_phDateChip(t)+'</div></div>';
 }
 function togglePhaseSection(pid){
   const el=document.getElementById('phsec-'+pid); const ar=document.getElementById('phar-'+pid);
@@ -1457,6 +1564,138 @@ function openFlagsModal(lotId) {
       }).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No flags</p>';
   document.getElementById('modal-lot-flags').classList.add('open');
+}
+
+// ── BULK ADD LOTS ──
+let bulkBuilder = null;   // resolved builder for the chosen subdivision
+
+function openBulkLotModal(){
+  document.getElementById('bulk-subdivision').innerHTML =
+    '<option value="">Select subdivision…</option>'
+    + subdivisions.filter(s=>!s.is_archived).map(s =>
+        `<option value="${s.id}" data-code="${s.code}">${s.name} (${s.code})</option>`
+      ).join('');
+  document.getElementById('bulk-body').style.display = 'none';
+  document.getElementById('bulk-rows').innerHTML = '';
+  document.getElementById('bulk-save-btn').disabled = true;
+  document.getElementById('modal-bulk-lot').classList.add('open');
+}
+
+async function onBulkSubChange(){
+  const sel = document.getElementById('bulk-subdivision');
+  const opt = sel.options[sel.selectedIndex];
+  const subId = sel.value;
+  const subCode = opt ? opt.dataset.code : '';
+  const body = document.getElementById('bulk-body');
+
+  if(!subId){ body.style.display='none'; document.getElementById('bulk-save-btn').disabled=true; return; }
+
+  // Resolve builder from subdivision assignment — the system knows, user shouldn't pick per-lot.
+  const sub = subdivisions.find(s=>s.id===subId);
+  const subBuilders = sub ? builders.filter(b=>!b.is_admin && (b.subdivisions||[]).includes(sub.code)) : [];
+  const brow = document.getElementById('bulk-builder-row');
+
+  if(subBuilders.length === 0){
+    // Block: subdivision has no builder assigned
+    body.style.display = 'block';
+    brow.innerHTML = '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px;font-size:13px">'
+      + '⚠ No builder is assigned to this subdivision. Assign one in Settings → Subdivisions before adding lots.</div>';
+    document.getElementById('bulk-rows').innerHTML = '';
+    document.getElementById('bulk-save-btn').disabled = true;
+    bulkBuilder = null;
+    return;
+  } else if(subBuilders.length === 1){
+    bulkBuilder = subBuilders[0].name;
+    brow.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;border-radius:8px;padding:9px 11px;font-size:13px">'
+      + '✓ Builder: <strong>'+bulkBuilder+'</strong> (assigned to this subdivision)</div>';
+  } else {
+    // Multiple builders on this subdivision — one selector applies to all rows
+    bulkBuilder = subBuilders[0].name;
+    brow.innerHTML = '<div class="field" style="margin-bottom:0"><label>Builder <span style="color:var(--muted);font-weight:400">(applies to all rows)</span></label>'
+      + '<select id="bulk-builder-sel" onchange="bulkBuilder=this.value">'
+      + subBuilders.map(b=>`<option value="${b.name}">${b.name}</option>`).join('')
+      + '</select></div>';
+  }
+
+  // Template dropdown
+  document.getElementById('bulk-template').innerHTML = '<option value="">Select schedule…</option>'
+    + scheduleTemplates.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+
+  body.style.display = 'block';
+  document.getElementById('bulk-rows').innerHTML = '';
+  for(let i=0;i<5;i++) addBulkRow();
+  document.getElementById('bulk-save-btn').disabled = false;
+  updateBulkCount();
+}
+
+function addBulkRow(){
+  const tr = document.createElement('tr');
+  tr.style.borderTop = '1px solid #f1f5f9';
+  tr.innerHTML =
+     '<td style="padding:4px"><input type="text" class="bulk-num" placeholder="Lot 14" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px"><input type="text" class="bulk-addr" placeholder="Street address" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px"><input type="text" class="bulk-plan" placeholder="Magnolia 2100" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px"><input type="date" class="bulk-start" style="width:100%;border:1px solid var(--line);border-radius:5px;padding:7px 8px;font-size:13px;box-sizing:border-box"></td>'
+    +'<td style="padding:4px;text-align:center"><button onclick="this.closest(\'tr\').remove();updateBulkCount()" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:16px">×</button></td>';
+  document.getElementById('bulk-rows').appendChild(tr);
+  updateBulkCount();
+}
+
+function updateBulkCount(){
+  const rows = document.querySelectorAll('#bulk-rows tr').length;
+  const filled = Array.from(document.querySelectorAll('.bulk-num')).filter(i=>i.value.trim()).length;
+  document.getElementById('bulk-count').textContent = filled + ' of ' + rows + ' rows have a lot number';
+}
+
+async function submitBulkLots(){
+  const subSel = document.getElementById('bulk-subdivision');
+  const subOpt = subSel.options[subSel.selectedIndex];
+  const subCode = subOpt ? subOpt.dataset.code : '';
+  const template_id = document.getElementById('bulk-template').value;
+
+  if(!subCode){ alert('Select a subdivision.'); return; }
+  if(!template_id){ alert('Select a schedule type.'); return; }
+  if(!bulkBuilder){ alert('This subdivision has no builder assigned.'); return; }
+
+  // gather rows with a lot number
+  const rows = Array.from(document.querySelectorAll('#bulk-rows tr')).map(tr=>({
+    lot_number: tr.querySelector('.bulk-num').value.trim(),
+    address:    tr.querySelector('.bulk-addr').value.trim(),
+    plan_name:  tr.querySelector('.bulk-plan').value.trim(),
+    start_date: tr.querySelector('.bulk-start').value || null
+  })).filter(r=>r.lot_number);
+
+  if(!rows.length){ alert('Enter at least one lot number.'); return; }
+
+  // duplicate check within this community
+  const existing = new Set(scheduleLots.filter(l=>l.community===subCode).map(l=>(l.lot_number||'').toLowerCase()));
+  const dupes = rows.filter(r=>existing.has(r.lot_number.toLowerCase())).map(r=>r.lot_number);
+  if(dupes.length){ alert('These lot numbers already exist in '+subCode+':\n'+dupes.join(', ')+'\n\nRemove or rename them first.'); return; }
+
+  const btn = document.getElementById('bulk-save-btn');
+  btn.disabled = true;
+
+  let ok=0, fail=0;
+  for(let i=0;i<rows.length;i++){
+    const r = rows[i];
+    btn.textContent = 'Adding '+(i+1)+' of '+rows.length+'…';
+    const stamp = await sbCall('stampLot', {template_id, lot_number:r.lot_number, address:r.address||null, community:subCode});
+    if(stamp && stamp.success){
+      const updates = { builder_name: bulkBuilder };
+      if(r.start_date) updates.construction_start_date = r.start_date;
+      if(r.plan_name)  updates.plan_name = r.plan_name;
+      await sbCall('updateScheduleLot', {id: stamp.lot_id, ...updates});
+      ok++;
+    } else { fail++; }
+  }
+
+  btn.textContent = 'Add Lots →';
+  btn.disabled = false;
+  closeModal('modal-bulk-lot');
+  alert(ok+' lot'+(ok===1?'':'s')+' added to '+subCode+(fail?(' · '+fail+' failed'):'')+'.');
+  await reloadLots();
+  populateFilters();
+  renderSubdivisionsTable();
 }
 
 // ── ADD LOT ──
@@ -1796,7 +2035,7 @@ function renderSubdivisionsTable() {
         : '<span class="badge" style="background:#d5f5e3;color:#1E8449">✓ Current</span>';
 
     const closeBadge = ready>0
-      ? `<span class="badge" style="background:#fef9e7;color:#e67e22">⚠ ${ready} ready</span>`
+      ? `<span class="badge" style="background:#fef9e7;color:#e67e22">✅ ${ready} ready</span>`
       : '<span style="color:var(--muted)">—</span>';
 
     const archiveBadge = sub.is_archived ? '<span class="badge" style="background:#f3f4f6;color:var(--muted);margin-left:6px">Archived</span>' : '';
@@ -2478,6 +2717,10 @@ async function deleteTemplateUI(id, name){
   const r = await sbCall('deleteTemplate', { id });
   if(r && r.error){ alert(r.error); return; }
   await loadTemplatesView();
+}
+
+function openIconLegend(){
+  document.getElementById('modal-icon-legend').classList.add('open');
 }
 
 function showSettingsPane(name, el){
