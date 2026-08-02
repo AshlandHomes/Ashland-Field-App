@@ -48,6 +48,34 @@ async function supabaseRequest(method, path, body) {
   }
 }
 
+// ── actual-date entry guard ──────────────────────────────────────────────
+// Authoritative backstop for the rule ScheduleEngine.validateActual enforces:
+// actual_start/actual_finish must fall in [construction_start, today] and finish
+// must not precede start. Every write of an actual funnels through the two cases
+// below (updateScheduleLotTask, bulkUpdateLotTasks), so guarding them = no back
+// door. Uses server (UTC) date as the upper bound; the field-app UI uses the
+// builder's local date for the precise message. (UTC >= local for US zones, so
+// legitimate local-today entries always pass; the backend just refuses the
+// egregious future dates the UI would also refuse.)
+async function loadActualGuardCtx(taskIds) {
+  const ids = [...new Set((taskIds || []).filter(Boolean))];
+  if (!ids.length) return { taskById: {}, csByLot: {} };
+  const tr = await supabaseRequest('GET', `sched_lot_tasks?id=in.(${ids.join(',')})&select=id,lot_id,actual_start`);
+  const taskById = {}; (tr.data || []).forEach(t => { taskById[t.id] = t; });
+  const lotIds = [...new Set((tr.data || []).map(t => t.lot_id).filter(Boolean))];
+  const lr = lotIds.length ? await supabaseRequest('GET', `sched_lots?id=in.(${lotIds.join(',')})&select=id,construction_start_date`) : { data: [] };
+  const csByLot = {}; (lr.data || []).forEach(l => { csByLot[l.id] = l.construction_start_date || null; });
+  return { taskById, csByLot };
+}
+function checkActualEntry(u, ctx, today) {
+  if (!u || (u.actual_start === undefined && u.actual_finish === undefined)) return { ok: true };
+  if (!u.actual_start && !u.actual_finish) return { ok: true };  // clearing to null is allowed
+  const t = ctx.taskById[u.task_id];
+  const cs = t ? ctx.csByLot[t.lot_id] : null;
+  const startForCheck = (u.actual_start !== undefined) ? u.actual_start : (t ? t.actual_start : null);
+  return ScheduleEngine.validateActual({ actualStart: startForCheck, actualFinish: u.actual_finish, constructionStart: cs, today: today });
+}
+
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -840,9 +868,14 @@ exports.handler = async function(event) {
           return { statusCode: 400, body: JSON.stringify({ error: 'updates array is required' }) };
         }
         const stamp = new Date().toISOString();
+        const guardToday = stamp.slice(0, 10);
+        const guardCtx = await loadActualGuardCtx(updates.map(u => u && u.task_id));
         let done = 0; const failed = [];
         for (const u of updates) {
           if (!u || !u.task_id) { failed.push({ task_id: u && u.task_id, error: 'missing task_id' }); continue; }
+          // Hard gate: skip (and report) any impossible actual date; valid updates still write.
+          const gv = checkActualEntry(u, guardCtx, guardToday);
+          if (!gv.ok) { failed.push({ task_id: u.task_id, error: gv.message }); continue; }
           const upd = { updated_at: stamp };
           if (u.status !== undefined) upd.status = u.status;
           if (u.actual_start !== undefined) upd.actual_start = u.actual_start;
@@ -866,6 +899,12 @@ exports.handler = async function(event) {
         const { task_id, lot_id, status, actual_start, actual_finish, vendor_confirmed, est_start_date } = payload;
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
+        }
+        // Hard gate: reject impossible actual dates (before construction start / future / finish<start).
+        if (actual_start !== undefined || actual_finish !== undefined) {
+          const gctx = await loadActualGuardCtx([task_id]);
+          const gv = checkActualEntry({ task_id, actual_start, actual_finish }, gctx, new Date().toISOString().slice(0, 10));
+          if (!gv.ok) return { statusCode: 400, body: JSON.stringify({ error: gv.message, field: gv.field, reason: gv.reason }) };
         }
         const updates = { updated_at: new Date().toISOString() };
         if (status !== undefined) updates.status = status;

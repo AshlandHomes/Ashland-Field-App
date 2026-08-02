@@ -749,6 +749,8 @@ async function startTask(n){
   const defaultDate=t.est_start_date||todayYmd();
   const v=await openDatePicker('Start — #'+n+' '+t.name,defaultDate);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+  const av=ScheduleEngine.validateActual({actualStart:v,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
+  if(!av.ok){alert(av.message);return;}
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
 }
 async function finishTask(n){
@@ -762,6 +764,8 @@ async function finishTask(n){
   }
   const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+  const av=ScheduleEngine.validateActual({actualStart:(act[n]&&act[n].start)||null,actualFinish:v,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
+  if(!av.ok){alert(av.message);return;}
 
   // ── DELAY REASON CAPTURE (critical tasks finished late) ──
   // Planned finish comes from the engine's planned pass (_planned_ef offset).

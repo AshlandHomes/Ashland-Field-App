@@ -331,6 +331,38 @@
     return violations;
   }
 
+  // ── data-entry guard: actuals must be physically possible ────────────────
+  // A task's actual_start / actual_finish must fall in [constructionStart, today]
+  // and finish must not precede start. Blocks the two impossible classes at the
+  // source: dates before the job began (the gamed pre-construction dates) and
+  // future dates. Legitimate BACKDATING inside the window is allowed — a builder
+  // catching up enters the real past dates. Same rule + messages for the field
+  // app (entry UX) and the backend (authoritative gate).
+  //
+  // All dates are 'YYYY-MM-DD' strings; ISO dates compare correctly as strings,
+  // so there is no Date parsing or timezone ambiguity here.
+  // opts: { actualStart?, actualFinish?, constructionStart?, today? }
+  // returns { ok:true } | { ok:false, field, reason, message }
+  function validateActual(opts) {
+    opts = opts || {};
+    var cs = opts.constructionStart || null;
+    var today = opts.today || null;
+    var fields = [['actual_start', opts.actualStart], ['actual_finish', opts.actualFinish]];
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i][0], d = fields[i][1];
+      if (!d) continue;                                    // absent / cleared-to-null is allowed
+      if (cs && d < cs) return { ok: false, field: field, reason: 'before_start',
+        message: 'This date is before construction started (' + cs + '). Enter the real date.' };
+      if (today && d > today) return { ok: false, field: field, reason: 'future',
+        message: "This date is in the future. A task can't be completed on a date that hasn't happened yet." };
+    }
+    if (opts.actualStart && opts.actualFinish && opts.actualFinish < opts.actualStart) {
+      return { ok: false, field: 'actual_finish', reason: 'finish_before_start',
+        message: "Finish date can't be before the start date (" + opts.actualStart + ")." };
+    }
+    return { ok: true };
+  }
+
   // ── stage codes & gates (BUILD_SPEC §2.7) ─────────────────────────────────
   // stageMap: [{ code, label, order, is_manual, triggers:[bt_num] }]
   // finishedByNum: { [bt_num]: true } for finished tasks
@@ -373,6 +405,7 @@
     // core
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
+    validateActual: validateActual,
     computeStage: computeStage,
     // surface adapters
     computeFieldSchedule: computeFieldSchedule,
