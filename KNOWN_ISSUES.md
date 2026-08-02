@@ -88,3 +88,23 @@ Flagging those is a false positive. Only flag: (a) a started/finished task whose
 predecessor is not_started, and (b) out-of-sequence actuals on **non-negative-lag**
 tasks. The pre-cutover audit SQL intentionally did not encode this exemption (it
 erred toward over-reporting for a human to filter); the in-app warning should.
+
+## KI-5 — GitHub Pages published a broken second live surface — RESOLVED
+
+**Status:** resolved / actioned (2026-08-02). GitHub Pages disabled; Netlify is
+the sole live surface.
+**Surfaced:** Phase-4 live cutover — pushing `main` triggered a GitHub Pages
+build (GitHub's managed "pages build and deployment", no workflow file in-repo)
+*in addition to* the Netlify deploy.
+
+`main` was auto-publishing to two live surfaces: Netlify (`ashland-field-ops`,
+the real app) and GitHub Pages (`github.io`). The Pages copy served the static
+HTML, but its `/.netlify/functions/supabase` calls have no backend on the Pages
+domain — so it would **load but fail to fetch any data** (a broken shell) for
+anyone hitting the Pages URL. A second, broken production surface is a real
+liability and a future-confusion/drift risk.
+
+**Resolution:** GitHub Pages disabled (Settings → Pages → Source: None). Netlify
+(`ashland-field-ops`) is the single live surface going forward — consistent with
+the single-source-of-truth model (`DEPLOY.md`): one editable source, one live
+surface.
