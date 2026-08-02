@@ -2,7 +2,8 @@
 # Pull REAL dev-Supabase fixtures for the parity harness (BUILD_SPEC §7.3).
 # Reads dev_ tables only. Requires (read-only anon key is sufficient — dev_
 # tables GRANT ALL to anon per sql/dev_schema.sql):
-#   SUPABASE_URL   e.g. https://acodbcpmxridiwlufkez.supabase.co
+#   SUPABASE_URL   your dev project's REST URL, e.g. https://<project-ref>.supabase.co
+#                  (never hardcode the real value here — export it or use test/fixtures/.env)
 #   SUPABASE_KEY   anon key (sb_publishable_… or eyJ…)
 #   SLAB_TEMPLATE_ID   (default: the Slab template id from the spec)
 #   LOT_ID             (optional: a real dev lot to validate against)
