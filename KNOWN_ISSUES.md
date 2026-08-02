@@ -79,3 +79,12 @@ whose predecessor is not yet `started`/`finished` — as a data-integrity
 warning in the field app and/or admin, so dirty data surfaces instead of
 silently distorting the schedule. (The parity harness already has a version of
 this check; promote it into the app.)
+
+**Critical design note (from the Phase-0 live audit):** the warning MUST exempt
+**negative-lag (lead-time) tasks** from the "finished/started before predecessor"
+check. An "Order/Deliver X" task with negative lag legitimately completes before
+its predecessor ("Install X") — that is correct lead-time history, not an error.
+Flagging those is a false positive. Only flag: (a) a started/finished task whose
+predecessor is not_started, and (b) out-of-sequence actuals on **non-negative-lag**
+tasks. The pre-cutover audit SQL intentionally did not encode this exemption (it
+erred toward over-reporting for a human to filter); the in-app warning should.
