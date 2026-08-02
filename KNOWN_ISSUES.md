@@ -46,3 +46,36 @@ hardcoded 99 with the engine's computed per-lot end is a **behavior change** for
 a later step. Note: the per-task projected dates in the admin schedule view are
 already correct (backend `computeLotProjected`); this KI is only the lots-list
 summary column.
+
+## KI-3 — Backend recomputes CPM per request (perf)
+
+**Status:** open — do NOT optimize yet; let it settle, then profile first.
+**Surfaced:** Step 2 dev validation — schedule load/save feels slightly slower
+since the restructure.
+
+The backend now runs the shared CPM engine on every relevant request. In
+particular `getAllLotPhases` calls `computeLotProjected` for **every active lot
+on every call** (previously the same inline work, but worth confirming it's the
+hotspot). Likely-fine at current lot counts, but it scales with lot count × call
+frequency.
+
+**When we optimize (not now):** profile where the time actually goes before
+changing anything — is `getAllLotPhases` the hotspot? Candidate approaches once
+measured: compute per-lot only when that lot's tasks changed (cache the projected
+snapshot, invalidate on task write) instead of recomputing all lots every call;
+or compute lazily per opened lot. Measure first — do not pre-optimize.
+
+## KI-4 — No guard against "finished task with an unstarted predecessor"
+
+**Status:** open — future enhancement (not a bug in the engine).
+**Surfaced:** Step 2 dev validation — stale test data on Lot 1 had #84 marked
+finished (pinned to construction start) while its predecessor #79 sat unstarted.
+
+The engine correctly honors actuals over predecessor projection, so a
+fat-fingered "finished" with an actual date produces a real-but-nonsensical
+schedule (a task complete before the work that feeds it has begun). The app
+should detect and flag this impossible state — a task `finished`/`started`
+whose predecessor is not yet `started`/`finished` — as a data-integrity
+warning in the field app and/or admin, so dirty data surfaces instead of
+silently distorting the schedule. (The parity harness already has a version of
+this check; promote it into the app.)
