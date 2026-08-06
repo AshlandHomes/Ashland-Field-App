@@ -331,6 +331,54 @@
     return violations;
   }
 
+  // ── dependents / reverse map (BUILD_SPEC §3) ─────────────────────────────
+  // Successors are DERIVED from predecessors, never stored — one source of truth,
+  // always correct. describeLag turns a lag number into the relationship behavior
+  // so a human reads WHY each dependent hangs off this task without doing lag math.
+  function describeLag(lag) {
+    lag = lag || 0;
+    var n = Math.abs(lag), d = (n === 1 ? 'day' : 'days');
+    if (lag < 0) return 'Lead time · ' + n + ' ' + d + ' before this task starts';
+    if (lag === 0) return 'Right after this finishes';
+    return n + ' ' + d + ' after this finishes';
+  }
+
+  // computeSuccessors(tasks) -> { [num]: [{ num, name, predecessors, lag, lagLabel }] }
+  // Every task whose predecessors array contains a given task, keyed by that task.
+  function computeSuccessors(rawTasks) {
+    var tasks = (rawTasks || []).map(normalizeTask);
+    var succ = {};
+    tasks.forEach(function (s) {
+      (s.predecessors || []).forEach(function (p) {
+        (succ[p] = succ[p] || []).push({
+          num: s.num, name: s.name,
+          predecessors: (s.predecessors || []).slice(),
+          lag: s.lag, lagLabel: describeLag(s.lag)
+        });
+      });
+    });
+    return succ;
+  }
+
+  // findOrphanedSuccessors(tasks, affectedNum) -> the successors of affectedNum that
+  // would be left with NO valid predecessor if affectedNum were removed (their only
+  // remaining preds are affectedNum itself or tasks that don't exist). Powers the
+  // delete/renumber orphan warning.
+  function findOrphanedSuccessors(rawTasks, affectedNum) {
+    var tasks = (rawTasks || []).map(normalizeTask);
+    var exists = {}; tasks.forEach(function (t) { exists[t.num] = true; });
+    var orphans = [];
+    tasks.forEach(function (s) {
+      var preds = s.predecessors || [];
+      if (preds.indexOf(affectedNum) < 0) return;
+      var remaining = preds.filter(function (p) { return p !== affectedNum && exists[p]; });
+      if (remaining.length === 0) {
+        orphans.push({ num: s.num, name: s.name, predecessors: preds.slice(), lag: s.lag, lagLabel: describeLag(s.lag) });
+      }
+    });
+    return orphans;
+  }
+
   // ── data-entry guard: dates must be physically possible ──────────────────
   // Two DIFFERENT rules, by field type:
   //   • actual_start / actual_finish — a CLAIM ABOUT THE PAST. Must fall in the
@@ -420,6 +468,9 @@
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
     validateDateEntry: validateDateEntry,
+    computeSuccessors: computeSuccessors,
+    findOrphanedSuccessors: findOrphanedSuccessors,
+    describeLag: describeLag,
     computeStage: computeStage,
     // surface adapters
     computeFieldSchedule: computeFieldSchedule,
