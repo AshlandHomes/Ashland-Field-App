@@ -248,6 +248,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
       <div class="edit-label">Current Predecessors</div>
       <div class="pred-chips" id="edit-pred-chips"></div>
       <button class="edit-pred-btn" onclick="openPredPicker()">⟳ Change Predecessors</button>
+      <button id="edit-dep-btn" onclick="openDependentsModal(editTaskNum)" style="width:100%;font-family:inherit;font-size:13px;font-weight:600;padding:9px;margin-top:8px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer">▸ View dependents</button>
     </div>
 
     <div class="edit-row">
@@ -275,6 +276,18 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     <div class="edit-btns">
       <button onclick="closeEditTask()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:13px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
       <button id="edit-save-btn" onclick="saveEditTask()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:13px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dependents (successors) modal -->
+<div id="depmodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;width:100%;max-width:440px;max-height:82vh;overflow-y:auto;border-radius:14px;padding:18px 16px">
+    <div id="dep-title" style="font-size:15px;font-weight:700;margin-bottom:3px"></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tasks that depend on this one. Tap one to edit it.</div>
+    <div id="dep-list"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button onclick="document.getElementById('depmodal').style.display='none'" style="font-family:inherit;font-size:14px;font-weight:700;padding:11px 22px;border-radius:9px;border:none;background:var(--brand);color:#fff;cursor:pointer">Close</button>
     </div>
   </div>
 </div>
@@ -920,9 +933,28 @@ function openEditTask(n){
   estEl.dataset.prefill = prefill;   // remember what we pre-filled so we can detect a real change
   estEl.dataset.hadOverride = t.est_start_date ? '1' : '';
   renderEditPredChips();
+  const depCount=(ScheduleEngine.computeSuccessors(TASKS)[n]||[]).length;
+  document.getElementById('edit-dep-btn').textContent='▸ View dependents ('+depCount+')';
   document.getElementById('editmodal').classList.add('open');
 }
 function clearEstStart(){document.getElementById('edit-est-start').value='';}
+function openDependentsModal(taskNum){
+  const t=bn[taskNum];
+  const succ=ScheduleEngine.computeSuccessors(TASKS)[taskNum]||[];
+  document.getElementById('dep-title').textContent='Dependents of #'+taskNum+(t?' — '+t.name:'')+'  ('+succ.length+')';
+  const box=document.getElementById('dep-list');
+  if(!succ.length){box.innerHTML='<div style="color:var(--muted);padding:12px 2px;text-align:center">No tasks depend on this one.</div>';}
+  else{box.innerHTML=succ.map(s=>{
+    const col=s.lag<0?'#b45309':(s.lag>0?'#0369a1':'#475569');
+    return '<div onclick="depJumpTo('+s.num+')" style="cursor:pointer;border:1px solid #eef2f7;border-radius:10px;padding:10px 12px;margin-bottom:8px">'
+      +'<div style="font-weight:700;font-size:14px">#'+s.num+' '+s.name+'</div>'
+      +'<div style="font-size:12px;color:'+col+';font-weight:600;margin-top:3px">'+s.lagLabel+' <span style="color:var(--muted);font-weight:400">(lag '+(s.lag>=0?'+':'')+s.lag+')</span></div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:2px">predecessors: '+(s.predecessors.length?s.predecessors.map(p=>'#'+p).join(', '):'none')+'</div>'
+      +'</div>';
+  }).join('');}
+  document.getElementById('depmodal').style.display='flex';
+}
+function depJumpTo(n){document.getElementById('depmodal').style.display='none';if(bn[n])openEditTask(n);}
 
 function closeEditTask(){
   document.getElementById('editmodal').classList.remove('open');
@@ -988,6 +1020,11 @@ function togglePred(n,checked){
 async function saveEditTask(){
   if(editTaskNum===null)return;
   const t=bn[editTaskNum];
+  // Self-orphan warning: a task with no predecessor floats free and won't cascade
+  // (integrity rule). Only the project-start task should have none. Soft confirm.
+  if((!editPreds||editPreds.length===0)&&(t.preds&&t.preds.length>0)){
+    if(!confirm('⚠️ #'+editTaskNum+' '+t.name+' will have NO predecessor.\n\nEvery task except the project-start task must be chained, or it won\'t cascade correctly. Save with no predecessor anyway?'))return;
+  }
   const dur=parseInt(document.getElementById('edit-dur').value);
   const lagRaw=document.getElementById('edit-lag').value;const lag=lagRaw!==''?parseInt(lagRaw):0;
   const phaseEl=document.getElementById('edit-phase');

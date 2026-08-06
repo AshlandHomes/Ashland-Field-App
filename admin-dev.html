@@ -690,7 +690,8 @@ tr:hover td{background:#f9fafb}
       <input type="hidden" id="task-preds">
       <div id="task-preds-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
       <button type="button" class="btn btn-secondary btn-sm" onclick="openPredPicker()">＋ Choose predecessors</button>
-      <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Tasks that must finish before this one can start.</p>
+      <button type="button" id="task-dep-btn" class="btn btn-secondary btn-sm" onclick="openDependentsModal()">▸ View dependents</button>
+      <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Tasks that must finish before this one can start. "View dependents" shows what depends on THIS task.</p>
     </div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>Relative Start <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rs" type="number"></div>
@@ -876,6 +877,16 @@ tr:hover td{background:#f9fafb}
       <button class="btn btn-secondary" onclick="closeModal('modal-sub-detail')">Cancel</button>
       <button class="btn btn-primary" onclick="submitSubDetail()">Save All Changes →</button>
     </div>
+  </div>
+</div>
+
+<!-- Dependents (successors) modal -->
+<div class="modal-overlay" id="modal-dependents">
+  <div class="modal" style="max-width:470px">
+    <h2 id="dep-title" style="margin-bottom:2px">Dependents</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tasks that depend on this one. Click a row to edit it and re-attach.</div>
+    <div id="dep-list"></div>
+    <div class="modal-btns"><button class="btn btn-primary" onclick="closeModal('modal-dependents')">Close</button></div>
   </div>
 </div>
 
@@ -2562,6 +2573,7 @@ function openAddTaskModal(){
   document.getElementById('task-trade').value='';
   document.getElementById('task-force-critical').checked=false;
   _setCritStatus(null);
+  document.getElementById('task-dep-btn').style.display='none';   // new task has no dependents yet
   document.getElementById('modal-task').classList.add('open');
   setTimeout(function(){document.getElementById('task-name').focus();},50);
 }
@@ -2583,16 +2595,53 @@ function openEditTaskModal(id){
   document.getElementById('task-trade').value=t.trade||'';
   document.getElementById('task-force-critical').checked=!!t.force_critical;
   _setCritStatus(!!t.is_critical);
+  const _depN=(ScheduleEngine.computeSuccessors(tplEdit.tasks)[t.bt_num]||[]).length;
+  const _depBtn=document.getElementById('task-dep-btn');
+  _depBtn.textContent='▸ View dependents ('+_depN+')'; _depBtn.style.display='';
   document.getElementById('modal-task').classList.add('open');
 }
+function openDependentsModal(){
+  const bt=parseInt(document.getElementById('task-btnum').value);
+  const succ=isNaN(bt)?[]:(ScheduleEngine.computeSuccessors(tplEdit.tasks)[bt]||[]);
+  const t=tplEdit.tasks.find(x=>x.bt_num===bt);
+  document.getElementById('dep-title').textContent='Dependents of #'+bt+(t?' — '+t.name:'')+'  ('+succ.length+')';
+  const box=document.getElementById('dep-list');
+  if(!succ.length){box.innerHTML='<div style="color:var(--muted);padding:12px 2px">No tasks depend on this one.</div>';}
+  else{box.innerHTML=succ.map(s=>{
+    const col=s.lag<0?'#b45309':(s.lag>0?'#0369a1':'#475569');
+    const tid=(tplEdit.tasks.find(x=>x.bt_num===s.num)||{}).id||'';
+    return '<div onclick="depJumpTo(\''+tid+'\')" style="cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px">'
+      +'<div style="font-weight:700">#'+s.num+' '+s.name+'</div>'
+      +'<div style="font-size:12px;color:'+col+';font-weight:600;margin-top:3px">'+s.lagLabel+' <span style="color:var(--muted);font-weight:400">(lag '+(s.lag>=0?'+':'')+s.lag+')</span></div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:2px">predecessors: '+(s.predecessors.length?s.predecessors.map(p=>'#'+p).join(', '):'none')+'</div>'
+      +'</div>';
+  }).join('');}
+  document.getElementById('modal-dependents').classList.add('open');
+}
+function depJumpTo(id){closeModal('modal-dependents');if(id)openEditTaskModal(id);}
 async function submitTask(){
   const id=document.getElementById('task-id').value||null;
   const name=(document.getElementById('task-name').value||'').trim();
   if(!name){ alert('Enter a task name'); return; }
   const num=function(v){ const s=(document.getElementById(v).value||'').trim(); return s===''?null:parseInt(s); };
   const preds = _predSel.slice();
+  const newBt = num('task-btnum');
+  const orig = id ? tplEdit.tasks.find(t=>t.id===id) : null;
+  // Self-orphan warning: saving a non-start task with no predecessor breaks the cascade.
+  if(preds.length===0){
+    if(!confirm('⚠️ "#'+(newBt!=null?newBt:'')+' '+name+'" will have NO predecessor.\n\nEvery task except the project-start task must be chained, or it won\'t cascade correctly. Save with no predecessor anyway?')) return;
+  }
+  // Renumber warning: changing bt_num leaves existing successors pointing at the OLD number.
+  if(orig && newBt!=null && orig.bt_num!=null && newBt!==orig.bt_num){
+    const deps = (ScheduleEngine.computeSuccessors(tplEdit.tasks)[orig.bt_num]) || [];
+    if(deps.length){
+      if(!confirm('⚠️ Renumbering #'+orig.bt_num+' → #'+newBt+' will DANGLE '+deps.length+' successor(s) that still point at #'+orig.bt_num+':\n\n'
+        + deps.map(d=>'  #'+d.num+' '+d.name).join('\n')
+        + '\n\nTheir predecessor references won\'t follow the renumber — re-attach each after saving. Renumber anyway?')) return;
+    }
+  }
   const body = {
-    bt_num: num('task-btnum'), name,
+    bt_num: newBt, name,
     phase_id: document.getElementById('task-phase').value || null,
     duration: num('task-duration'), lag: num('task-lag'),
     relative_start: num('task-rs'), relative_finish: num('task-rf'),
@@ -2610,7 +2659,15 @@ async function submitTask(){
 }
 async function deleteTaskUI(id){
   const t = tplEdit.tasks.find(x=>x.id===id);
-  if(!confirm('Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?')) return;
+  // Orphan warning: which dependents would be left with NO valid predecessor?
+  const orphans = t ? ScheduleEngine.findOrphanedSuccessors(tplEdit.tasks, t.bt_num) : [];
+  let msg = 'Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?';
+  if(orphans.length){
+    msg = '⚠️ Deleting #'+t.bt_num+' '+t.name+' will ORPHAN '+orphans.length+' task(s):\n\n'
+      + orphans.map(o=>'  #'+o.num+' '+o.name).join('\n')
+      + '\n\nThey depend on #'+t.bt_num+' and will have NO predecessor — they won\'t cascade correctly. Re-attach each to a new predecessor after deleting.\n\nDelete anyway?';
+  }
+  if(!confirm(msg)) return;
   await sbCall('deleteTemplateTask', { id });
   await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
   await openTemplateEditor(tplEdit.id);
