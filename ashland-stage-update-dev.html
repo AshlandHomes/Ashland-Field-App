@@ -537,6 +537,47 @@ function computeStage(){
   return{reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
 }
 
+// ── STAGE LEGEND (read-only reference: which tasks drive each stage) ──
+// Pure display of the template stage-map already loaded into `stageMap`.
+// Driving-task NAMES are joined from `bn` (bt_num -> task) we already hold.
+function stageLegendHtml(){
+  const stages=(stageMap||[]).slice().sort((a,b)=>a.order-b.order);
+  if(!stages.length) return '';
+  const rows=stages.map((s,i)=>{
+    const trg=(s.triggers||[]).filter(x=>x!=null);
+    const tasks=trg.length
+      ? trg.map(bt=>'<div style="font-size:13px;padding:3px 0 3px 4px;color:#334155">#'+bt+' '+((bn[bt]&&bn[bt].name)||'(task not in this lot)')+'</div>').join('')
+      : '<div style="font-size:12px;color:var(--muted);padding:3px 0 3px 4px">'+(s.is_manual?'Manual stage — no driving tasks':'—')+'</div>';
+    return '<div style="border-top:1px solid #eef2f7">'
+      + '<button type="button" onclick="toggleStageRow(\'slrow-'+i+'\',this)" style="width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;padding:9px 4px;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;text-align:left">'
+      +   '<span class="slcaret" style="width:12px;color:var(--muted)">▸</span>'
+      +   '<span><strong>'+s.code+'</strong> · '+s.label+(s.is_manual?' <span style="font-size:11px;color:var(--muted);font-weight:400">(manual)</span>':'')+'</span>'
+      +   '<span style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">'+trg.length+' task'+(trg.length===1?'':'s')+'</span>'
+      + '</button>'
+      + '<div id="slrow-'+i+'" style="display:none;padding:0 4px 8px 24px">'+tasks+'</div>'
+      + '</div>';
+  }).join('');
+  return '<div style="background:#fff;border:1px solid #e5eaef;border-radius:12px;margin:0 2px 12px;overflow:hidden">'
+    + '<button type="button" onclick="toggleStageLegendMaster(this)" style="width:100%;display:flex;align-items:center;gap:8px;background:#f8fafc;border:none;padding:11px 12px;font-family:inherit;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;text-align:left">'
+    +   '📍 Stage legend — tasks that drive each stage'
+    +   '<span class="slmcaret" style="margin-left:auto;color:var(--muted)">▸</span>'
+    + '</button>'
+    + '<div class="slmbody" style="display:none;padding:0 8px 4px">'+rows+'</div>'
+    + '</div>';
+}
+function toggleStageLegendMaster(btn){
+  const body=btn.parentElement.querySelector('.slmbody');
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  btn.querySelector('.slmcaret').textContent=open?'▸':'▾';
+}
+function toggleStageRow(id,btn){
+  const body=document.getElementById(id);
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  btn.querySelector('.slcaret').textContent=open?'▸':'▾';
+}
+
 function openDatePicker(title,defaultDate){
   return new Promise(resolve=>{
     const ov=document.getElementById('dpick');
@@ -627,6 +668,7 @@ function renderSchedule(){
     lotGates.forEach(g=>{h+='<button class="gbtn'+(g.confirmed?' on':'')+'" data-gid="'+g.id+'" data-cf="'+(g.confirmed?1:0)+'">'+g.gate_name+(g.confirmed?' ✓':'')+'</button>';});
     h+='</div></div>';
   }
+  h+=stageLegendHtml();
   h+='<div id="sched"></div>';
   document.getElementById('sched-view').innerHTML=h;
   document.querySelectorAll('.gbtn').forEach(b=>{b.onclick=()=>toggleGate(b.dataset.gid,b.dataset.cf==='1');});

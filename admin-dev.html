@@ -1268,21 +1268,40 @@ async function openStageModal(lotId){
       + holdLine
       +'</div>';
   }
+  // bt_num -> task name, for the expandable driving-task lists (reuse the lot's tasks).
+  const btName = {}; ltasks.forEach(t=>{ btName[t.bt_num]=t.name; });
   const sorted = stages.slice().sort((a,b)=>a.order-b.order);
-  const ladder = sorted.map(s=>{
+  const ladder = sorted.map((s,i)=>{
     const isRep = s.code===rep;
     const isTrue = s.code===tru;
     const bg = isRep ? '#0369a1' : (isTrue ? '#e0f2fe' : '#dfe7ec');
     const fg = isRep ? '#fff' : '#334155';
     const tags = (isRep?' <span style="font-size:10px;background:#fff;color:#0369a1;padding:1px 5px;border-radius:3px">REPORTED</span>':'')
                + (isTrue&&!isRep?' <span style="font-size:10px;background:#0369a1;color:#fff;padding:1px 5px;border-radius:3px">TRUE</span>':'');
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 11px;border-radius:6px;margin-bottom:3px;background:'+bg+';color:'+fg+';font-weight:'+(isRep?700:400)+'">'
-      +'<div><strong>'+s.code+'</strong> · '+s.label+tags+'</div>'
-      +(s.is_manual?'<span style="font-size:11px;opacity:.7">manual</span>':'')+'</div>';
+    const trg = (s.triggers||[]).filter(x=>x!=null);
+    const bodyFg = isRep ? '#e0f2fe' : '#475569';
+    const tasksHtml = trg.length
+      ? trg.map(bt=>'<div style="font-size:13px;padding:2px 0;color:'+bodyFg+'">#'+bt+' '+(btName[bt]||'(task not in this lot)')+'</div>').join('')
+      : '<div style="font-size:12px;opacity:.75;padding:2px 0;color:'+bodyFg+'">'+(s.is_manual?'Manual stage — no driving tasks':'—')+'</div>';
+    return '<div style="border-radius:6px;margin-bottom:3px;background:'+bg+';color:'+fg+';overflow:hidden">'
+      +'<div onclick="toggleAdminStageRow(\'astg-'+i+'\',this)" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;font-weight:'+(isRep?700:400)+'">'
+      +  '<div><span class="astg-caret" style="display:inline-block;width:12px;opacity:.75">▸</span> <strong>'+s.code+'</strong> · '+s.label+tags+'</div>'
+      +  '<span style="font-size:11px;opacity:.75;white-space:nowrap">'+(s.is_manual?'manual · ':'')+trg.length+' task'+(trg.length===1?'':'s')+'</span>'
+      +'</div>'
+      +'<div id="astg-'+i+'" style="display:none;padding:2px 11px 9px 27px">'+tasksHtml+'</div>'
+      +'</div>';
   }).join('');
   box.innerHTML = gateHtml
     + (tru&&tru!==rep ? '<div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚡ This lot is actually at stage '+tru+' but reports 5.9 because utility gates are open.</div>' : '')
+    + (stages.length ? '<div style="font-size:11px;color:var(--muted);margin:2px 0 6px">Tap a stage to see the tasks that drive it.</div>' : '')
     + (ladder || '<p style="color:var(--muted);text-align:center;padding:20px">No stage map for this lot\'s template</p>');
+}
+// Expand/collapse a stage row to reveal its driving tasks (pure display).
+function toggleAdminStageRow(id,el){
+  const body=document.getElementById(id);
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  const c=el.querySelector('.astg-caret'); if(c) c.textContent=open?'▸':'▾';
 }
 
 function closeBadgeHtml(lot) {
