@@ -1,13 +1,22 @@
 -- ============================================================
 -- REMOVE force_critical — resolves KI-1 (field 36 vs backend 51 critical set)
 --
--- WHY: The Slab template carried 15 `force_critical=true` flags (a Buildtopia
--- import artifact — not set in the builder). Every one of the 15 has GENUINE
--- POSITIVE FLOAT (+10 to +19 working days), so they are not on the real
--- critical path; they only appeared "critical" because force_critical ADDs to
--- the computed set. Clearing them collapses backend `is_critical` (51) down to
--- the pure float-based critical path (36) — which is exactly what the field app
--- already computes for `_crit` (the red dot / delay trigger). One fix, KI-1 gone.
+-- WHY: The Slab template carries 42 `force_critical=true` flags; 15 of them are
+-- on tasks with GENUINE POSITIVE FLOAT (+10 to +19 working days), so those 15 are
+-- not on the real critical path — they only read as "critical" because
+-- force_critical ADDs to the computed set. Clearing all 42 collapses backend
+-- `is_critical` (51) down to the pure float-based critical path (36) — exactly
+-- what the field app already computes for `_crit` (the red dot / delay trigger).
+-- One fix, KI-1 gone.
+--
+-- ORIGIN of the flags (traced 2026-08-07, do not repeat earlier guesses): they
+-- PREDATE the schedule-engine restructure — CLAUDE_CODE_BUILD_SPEC.md documents
+-- "42 force_critical" as pre-existing baseline data. The ONLY code path that
+-- writes force_critical is the admin builder checkbox (admin-dev.html:2669 ->
+-- supabase.js:537). No seed/migration/clone/default/automated process sets it
+-- (cloneTemplate omits it; recalc writes only is_critical). So once cleared they
+-- do NOT come back on their own; the sole re-introduction vector is that admin
+-- checkbox, which should be removed.
 --
 -- SAFE: `force_critical` lives ONLY on template tasks (never copied to lots).
 -- Neither the red dot nor the delay trigger reads it — both use the field app's

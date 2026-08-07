@@ -8,9 +8,16 @@ the schedule-engine restructure, which must preserve behavior exactly).
 **Status:** RESOLVED (root-caused 2026-08-07) — fix in `sql/2026-08-07_remove_force_critical.sql`,
 applied to DEV first, LIVE section pending cutover.
 **Root cause / resolution:** The 15-task gap was entirely `force_critical` — 15
-flags (a Buildtopia import artifact, not builder-set) on tasks that all have
-genuine positive float (+10 to +19 WD), so they were never on the real critical
-path. Clearing `force_critical` collapses backend `is_critical` (51) to the pure
+of the template's 42 force flags sit on tasks that all have genuine positive
+float (+10 to +19 WD), so they were never on the real critical path. **Origin of
+the flags** (traced 2026-08-07; an earlier "Buildtopia import" guess was wrong
+and is retracted): they predate the schedule-engine restructure —
+`CLAUDE_CODE_BUILD_SPEC.md` records "42 force_critical" as pre-existing baseline
+data. The only code path that writes `force_critical` is the admin builder
+checkbox (`admin-dev.html:2669` → `supabase.js:537`); no seed, migration, clone,
+default, or automated process sets it (clone omits it; recalc writes only
+`is_critical`). So cleared flags do not silently return — the sole re-introduction
+vector is that admin checkbox, which should be removed. Clearing `force_critical` collapses backend `is_critical` (51) to the pure
 float-based set (36), matching the field app's `_crit` exactly (verified on the
 real Slab graph: after clearing, `is_critical` set === `_crit` set === 36,
 projectEnd unchanged at 94). The owner chose to remove `force_critical` entirely
