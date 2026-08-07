@@ -864,11 +864,15 @@ async function finishTask(n){
     return;
   }
 
-  // ── DELAY REASON — required IF AND ONLY IF actual finish > projected finish ──
-  // (regardless of branch: a past-due prompt with an on-or-before-projected date
-  // captures NO reason). Reuses the existing delay machinery + fail-safe.
+  // ── DELAY REASON — required IF AND ONLY IF the task is on the CRITICAL PATH
+  // AND actual finish > projected finish. A non-critical task has float, absorbs
+  // late finish into slack, and does NOT threaten completion — so no reason (no
+  // nagging). t._crit is the field engine's live-computed pure-CPM critical set
+  // (float ≤ 0) — the true computed critical path — NOT the DB is_critical column
+  // (float ≤ 0 OR force_critical; see KI-1). Projected finish (not the frozen
+  // baseline) stays the reference. Reuses the existing delay machinery + fail-safe.
   let delayPayload=null;
-  if(v > projYmd){
+  if(t._crit && v > projYmd){
     const daysLate=wdBetween(projYmd, v);
     // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
     // (tables not deployed, API error), let the finish go through without it.

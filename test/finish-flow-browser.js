@@ -33,12 +33,23 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
       return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
     const today = iso(0), cs = iso(-120);
 
-    // ── seed one started task (no predecessors → no pred warning) ──
+    // ── seed a real-shaped network (tasks HAVE predecessors, so the engine uses
+    // its CPM branch and computes _crit from pure FLOAT — exactly like production,
+    // where is_critical is ignored for the field _crit set; see KI-1).
+    //   #100 anchor (finished) -> #113 (task under test)
+    //   when o.sibling: #100 -> #200 long pole (20 WD) so #113 gains float and
+    //   the engine computes it NON-critical (_crit=false); without it #113 is on
+    //   the longest path -> critical (_crit=true). We assert the COMPUTED _crit.
     const P = 'Trim';
-    TASKS = [{ _id:'t113', num:113, name:'Low Voltage Trim', rs:1, dur:o.dur, lag:0, rf:o.dur,
-               preds:[], phase:1, phase_name:P, type:'work', order:1, est_start_date:null, is_crit:o.crit, note:'', flag:'none' }];
+    TASKS = [
+      { _id:'t100', num:100, name:'Anchor', rs:1, dur:1, lag:0, rf:1, preds:[], phase:1, phase_name:P, type:'work', order:1, est_start_date:null, is_crit:true, note:'', flag:'none' },
+      { _id:'t113', num:113, name:'Low Voltage Trim', rs:2, dur:o.dur, lag:0, rf:o.dur+1, preds:[100], phase:1, phase_name:P, type:'work', order:2, est_start_date:null, is_crit:true, note:'', flag:'none' },
+    ];
+    if (o.sibling) TASKS.push({ _id:'t200', num:200, name:'Long Pole', rs:2, dur:20, lag:0, rf:21, preds:[100], phase:1, phase_name:P, type:'work', order:3, est_start_date:null, is_crit:true, note:'', flag:'none' });
     bn = {}; TASKS.forEach(x => bn[x.num] = x);        // openLot normally builds this
-    act = { 113: { started:true, finished:false, start:o.aStart, finish:null, vendor_confirmed:false } };
+    // #100 finished (so #113's predecessor soft-warning never fires); #113 started.
+    act = { 100: { started:true, finished:true, start:cs, finish:cs, vendor_confirmed:false },
+            113: { started:true, finished:false, start:o.aStart, finish:null, vendor_confirmed:false } };
     startDate = new Date(cs + 'T00:00:00');
     curLot = { id:'lot-x', lot_number:'6', builder_name:'B', community:'RC', construction_start_date:cs,
                status:'active', template_id:null, completion_stamped_at:null, scheduled_close_date:null };
@@ -60,7 +71,7 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
 
     const finWrite = cap.sb.find(c => c.action === 'updateScheduleLotTask' && c.payload && c.payload.status === 'finished');
     const delayWrite = cap.sb.find(c => c.action === 'addTaskDelay');
-    return { today, projYmd, cap: { confirm:cap.confirm, alert:cap.alert, pickerCount:cap.picker.length, delayCalled:cap.delayCalled, delayArgs:cap.delayArgs },
+    return { today, projYmd, crit: t._crit === true, cap: { confirm:cap.confirm, alert:cap.alert, pickerCount:cap.picker.length, delayCalled:cap.delayCalled, delayArgs:cap.delayArgs },
              savedFinish: finWrite ? finWrite.payload.actual_finish : null,
              delayWrite: delayWrite ? delayWrite.payload : null };
   }, opts);
@@ -106,15 +117,27 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     check('late ≤ projected: NO delay reason (was not actually late)', r.cap.delayCalled === false && r.delayWrite === null);
   }
 
-  // 4) LATE, entered date AFTER projected (today) → reason REQUIRED.
+  // 4) CRITICAL, LATE, entered date AFTER projected (today) → reason REQUIRED.
   {
-    const r = await runScenario({ aStart: PAST, dur: 1, crit: true, pickerReturn: ON });  // entered = today > projected
-    console.log('\n[LATE > projected]  proj=' + r.projYmd + ' today=' + r.today + '  entered=' + r.today);
+    const r = await runScenario({ aStart: PAST, dur: 1, pickerReturn: ON });  // #113 alone → critical; entered=today > projected
+    console.log('\n[CRITICAL, LATE > projected]  crit=' + r.crit + ' proj=' + r.projYmd + ' today=' + r.today + '  entered=' + r.today);
     console.log('  delayCalled=' + r.cap.delayCalled + '  delayWrite=' + JSON.stringify(r.delayWrite) + '  saved=' + r.savedFinish);
-    check('late > projected: delay reason modal fired', r.cap.delayCalled === true);
-    check('late > projected: saved finish = entered date (today)', r.savedFinish === r.today);
-    check('late > projected: addTaskDelay expected_done === projected finish', r.delayWrite && r.delayWrite.expected_done === r.projYmd);
-    check('late > projected: addTaskDelay actual_finish === entered date', r.delayWrite && r.delayWrite.actual_finish === r.today);
+    check('critical-late: task is on the computed critical path (_crit=true)', r.crit === true);
+    check('critical-late: delay reason modal fired', r.cap.delayCalled === true);
+    check('critical-late: saved finish = entered date (today)', r.savedFinish === r.today);
+    check('critical-late: addTaskDelay expected_done === projected finish', r.delayWrite && r.delayWrite.expected_done === r.projYmd);
+    check('critical-late: addTaskDelay actual_finish === entered date', r.delayWrite && r.delayWrite.actual_finish === r.today);
+  }
+
+  // 4b) NON-CRITICAL, LATE past projected (today) → NO reason (has float).
+  {
+    const r = await runScenario({ aStart: PAST, dur: 1, sibling: true, pickerReturn: ON });  // long-pole sibling → #113 has float
+    console.log('\n[NON-CRITICAL, LATE > projected]  crit=' + r.crit + ' proj=' + r.projYmd + ' today=' + r.today + '  entered=' + r.today);
+    console.log('  delayCalled=' + r.cap.delayCalled + '  saved=' + r.savedFinish);
+    check('non-critical-late: task is NOT on the critical path (_crit=false)', r.crit === false);
+    check('non-critical-late: finished past projected finish', r.today > r.projYmd);
+    check('non-critical-late: NO delay reason (float absorbs it)', r.cap.delayCalled === false && r.delayWrite === null);
+    check('non-critical-late: still saved (finish = entered date)', r.savedFinish === r.today);
   }
 
   // 5) FUTURE attempt via the late picker → BLOCKED, nothing saved.
