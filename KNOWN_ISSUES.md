@@ -127,3 +127,47 @@ problem.
 already — it permits `construction_start ≤ date ≤ today` and blocks outside it, so
 the UI just needs to surface picking a past date within that window (and finish ≥
 start). No validation change required.
+
+## KI-7 — `addWD` has a 1-based OFFSET convention, and a second 0-based copy exists
+
+**Status:** open — do NOT change it (behavior is consistent and validated). TRACK
+it. This is the **first thing to audit if we ever see a one-day drift anywhere.**
+**Surfaced:** proving the started-task projected-finish display (FIX #1). A
+cross-check that used `addWD` directly disagreed with the rendered date by one
+working day — the render was right; the check misused the helper.
+
+**The quirk.** The shared engine's `addWD(start, off)` (schedule-engine.js:29) is
+**1-based / offset-based**: `off` is the working-day OFFSET where **`off === 1`
+returns the start date itself**. So `addWD(Fri, 1) = Fri` and `addWD(Fri, 2) =
+Mon`. It is NOT "add `off` working days." This is deliberate and internally
+consistent — it is the exact inverse of `offToDate`/`actOffset`, and the engine's
+elapsed-time offsets (`es`/`ef`) are 1-based (day 1 = construction start). Every
+in-engine use is offset-correct:
+- `offToDate(off) = addWD(startDate, off)` (schedule-engine.js:57)
+- projected date `addWD(startDate, es[num])` (schedule-engine.js:234)
+- admin planned-completion `addWD(date, 100)` = the 100th working day (admin-dev.html:1206)
+
+So a task spanning `duration` working days from an offset `o` finishes at offset
+`o + duration - 1`, and its date is `offToDate(o + duration - 1)`. Use the
+**offset math** (or `offToDate`) for finish dates — never `addWD(actual_start,
+duration - 1)`, which is off by one because of the 1-based convention.
+
+**The second copy (the real trap).** Despite the engine header's rule "never
+define a second `addWD`/`wdBetween` anywhere," the backend `getStaleCriticalTasks`
+defines a **local** `addWD` (netlify/functions/supabase.js:666) with a
+**different, 0-based** convention: `off === 0` returns the start date (`// off=0
+=> same day`), i.e. it genuinely adds `off` working days. It is used there as
+`addWD(eligible, dur + GRACE)` and is correct *for that 0-based helper*. But two
+same-named helpers with off-by-one-different conventions is a latent drift bug: if
+anyone ever "consolidates" the backend copy onto the shared engine's `addWD`
+without shifting the argument (`off` → `off + 1`, or `dur` → `dur - 1`), the stale-
+task threshold silently moves by a day.
+
+**Audit-first checklist if a one-day drift appears anywhere:**
+1. Which `addWD` is the call site using — engine (1-based, `off=1`→start) or the
+   backend local (0-based, `off=0`→start)?
+2. Is the argument an OFFSET (use engine `addWD`/`offToDate`) or a COUNT of days to
+   add (use the 0-based form)? Mismatch = one-day error.
+3. When we do unify (future cleanup): pick ONE convention, delete the backend
+   local copy, and shift every call site's argument to match. Add a test asserting
+   `addWD(anyWeekday, 1) === anyWeekday` so the convention can't silently flip.

@@ -832,32 +832,56 @@ async function finishTask(n){
     const ok=confirm('⚠️ Unfinished predecessors:\n\n'+names+'\n\nFinishing now may affect schedule accuracy. If these tasks are no longer required first, remove them in ⚙ Edit.\n\nFinish anyway?');
     if(!ok)return;
   }
-  const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
-  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
-  const av=ScheduleEngine.validateDateEntry({actualFinish:v,priorStart:(act[n]&&act[n].start)||null,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
-  if(!av.ok){alert(av.message);return;}
+  // ── FINISH-FLOW BRANCHES (#3) — driven by the PROJECTED finish vs today ──
+  // projected finish = engine's current forecast for this started task
+  // (= actual_start + duration in working days). All dates ISO → lexical compare.
+  const today=todayYmd();
+  const D=s=>fmt(new Date(s+'T00:00:00'));                 // pretty-print an ISO date
+  const projYmd=(t._projected_ef!=null)?ymd(offToDate(t._projected_ef)):today;
+  let v;
+  if(projYmd>today){
+    // EARLY — done today, ahead of the projected finish. Statement, not a question.
+    if(!confirm("You're completing #"+n+" "+t.name+" early, on "+D(today)+".\n\nProjected finish is "+D(projYmd)+". Tap OK to mark it finished today."))return;
+    v=today;
+  } else if(projYmd===today){
+    // ON TIME — projected finish is today. One-tap confirm.
+    if(!confirm("Finish #"+n+" "+t.name+" on its projected date ("+D(today)+")?"))return;
+    v=today;
+  } else {
+    // LATE — projected finish already passed. Ask for the real completion date.
+    alert("#"+n+" "+t.name+" is past its projected finish date of "+D(projYmd)+".\n\nEnter the actual date it was completed.");
+    v=await openDatePicker('Finish — #'+n+' '+t.name,today);
+    if(v===null)return;
+  }
+  if(!isValidDate(v)){alert('Invalid date.');return;}
 
-  // ── DELAY REASON CAPTURE (critical tasks finished late) ──
-  // Planned finish comes from the engine's planned pass (_planned_ef offset).
+  // ── Entry-block (REUSED, single path). Future = a rule, stated clearly. ──
+  const av=ScheduleEngine.validateDateEntry({actualFinish:v,priorStart:(act[n]&&act[n].start)||null,constructionStart:curLot.construction_start_date||null,today:today});
+  if(!av.ok){
+    alert(av.reason==='future'
+      ? "You're not allowed to complete a task on a future date. Finish it early today, or come back when it's done."
+      : av.message);
+    return;
+  }
+
+  // ── DELAY REASON — required IF AND ONLY IF actual finish > projected finish ──
+  // (regardless of branch: a past-due prompt with an on-or-before-projected date
+  // captures NO reason). Reuses the existing delay machinery + fail-safe.
   let delayPayload=null;
-  if(t.is_crit && t._planned_ef!=null){
-    const plannedDate=offToDate(t._planned_ef);
-    const plannedYmd=ymd(plannedDate);
-    if(v > plannedYmd){
-      const daysLate=wdBetween(plannedYmd, v);
-      // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
-      // (tables not deployed, API error), let the finish go through without it.
-      let reasonsOk=true;
-      try{
-        if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
-        if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
-      }catch(e){ reasonsOk=false; }
-      if(reasonsOk){
-        const picked=await openDelayReasonModal(n, t.name, plannedYmd, v, daysLate);
-        if(picked===null) return;            // cancelled -> abort the finish
-        delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
-                      days_late:daysLate, expected_done:plannedYmd, actual_finish:v};
-      }
+  if(v > projYmd){
+    const daysLate=wdBetween(projYmd, v);
+    // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
+    // (tables not deployed, API error), let the finish go through without it.
+    let reasonsOk=true;
+    try{
+      if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
+      if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
+    }catch(e){ reasonsOk=false; }
+    if(reasonsOk){
+      const picked=await openDelayReasonModal(n, t.name, projYmd, v, daysLate);
+      if(picked===null) return;              // cancelled -> abort the finish
+      delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
+                    days_late:daysLate, expected_done:projYmd, actual_finish:v};
     }
   }
 
@@ -884,14 +908,14 @@ function wdBetweenYmd(a,b){
 
 // ── DELAY REASON MODAL ──
 let _drResolve=null, _drReasons=null;
-async function openDelayReasonModal(btNum, taskName, plannedYmd, actualYmd, daysLate){
+async function openDelayReasonModal(btNum, taskName, projYmd, actualYmd, daysLate){
   if(!Array.isArray(_drReasons)) _drReasons = [];
   return new Promise(res=>{
     _drResolve=res;
     const opts=_drReasons.map(r=>'<button class="dr-opt" data-id="'+r.id+'" data-label="'+String(r.label).replace(/"/g,'&quot;')+'">'+r.label+'</button>').join('');
     const html='<div id="dr-overlay" class="dr-overlay"><div class="dr-modal">'
       +'<div class="dr-title">Why was this late?</div>'
-      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Planned '+plannedYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
+      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Projected finish '+projYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
       +'<div class="dr-opts">'+opts+'</div>'
       +'<textarea id="dr-note" class="dr-note" placeholder="Optional note (required if you choose Other)\u2026"></textarea>'
       +'<div id="dr-warn" style="display:none;color:#c0392b;font-size:12px;margin-top:6px">A note is required when choosing \u201cOther\u201d.</div>'
