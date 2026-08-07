@@ -193,3 +193,25 @@ task threshold silently moves by a day.
 3. When we do unify (future cleanup): pick ONE convention, delete the backend
    local copy, and shift every call site's argument to match. Add a test asserting
    `addWD(anyWeekday, 1) === anyWeekday` so the convention can't silently flip.
+
+## KI-8 — Inspections/milestones may deserve a deliberate "watch" indicator
+
+**Status:** open — future refinement, to be DESIGNED intentionally (not inherited
+from import flags).
+**Surfaced:** the `force_critical` removal (2026-08-07). The 15 cleared flags were
+disproportionately inspections/milestones (CO inspection #140, drywall/cabinet/
+trim/tile/paint finish milestones). The original import labeled them "critical"
+even though the CPM engine computes them with real float.
+
+Some of those tasks — inspections especially — have **external dependencies CPM
+doesn't model** (a third-party inspector's calendar, a utility's release, a permit
+office), so a builder may legitimately want them highlighted to "watch" even when
+the math says they have slack. That is a **separate, deliberate concept** from the
+computed critical path and the delay trigger — NOT a reason to keep stale
+`force_critical` flags.
+
+**When we build it (not now):** design an explicit, owner-controlled "watch /
+external-dependency" marker with its own semantics and its own visual (distinct
+from the float-critical red dot), decided task-by-task on purpose. Do NOT resurrect
+`force_critical`, and do NOT fold it into the delay trigger (which stays keyed to
+the float-based `_crit` — only completion-threatening lateness prompts a reason).
