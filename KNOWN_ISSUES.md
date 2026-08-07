@@ -5,6 +5,21 @@ the schedule-engine restructure, which must preserve behavior exactly).
 
 ## KI-1 — Field app and admin disagree on the CRITICAL SET (36 vs 51)
 
+**Status:** RESOLVED (root-caused 2026-08-07) — fix in `sql/2026-08-07_remove_force_critical.sql`,
+applied to DEV first, LIVE section pending cutover.
+**Root cause / resolution:** The 15-task gap was entirely `force_critical` — 15
+flags (a Buildtopia import artifact, not builder-set) on tasks that all have
+genuine positive float (+10 to +19 WD), so they were never on the real critical
+path. Clearing `force_critical` collapses backend `is_critical` (51) to the pure
+float-based set (36), matching the field app's `_crit` exactly (verified on the
+real Slab graph: after clearing, `is_critical` set === `_crit` set === 36,
+projectEnd unchanged at 94). The owner chose to remove `force_critical` entirely
+(no legitimate use; the predecessor graph already computes the true critical
+path). Follow-ups tracked separately: strip the admin `force_critical` checkbox
+so it can't be re-introduced; recompute `is_critical` on already-stamped lot
+tasks (they carry the old 51-set until re-stamped/recomputed).
+
+--- historical context (original filing) ---
 **Status:** open — reconcile after the engine restructure, with owner sign-off.
 **Surfaced:** during Step 2 (schedule-engine extraction), parity testing on
 Windermere Lot 1 / Slab template.
