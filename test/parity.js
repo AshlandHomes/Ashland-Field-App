@@ -6,12 +6,12 @@
  * engines VERBATIM from the live code:
  *
  *   OLD-A  field app  runEngine()          (ashland-stage-update-dev.html)  — SOURCE OF TRUTH
- *   OLD-B  backend    calcEF/calcLS         (supabase.js recomputeTemplateCritical) — 99d/51-crit writer
+ *   OLD-B  backend    calcEF/calcLS         (supabase.js recomputeTemplateCritical) — 99d/36-crit writer (was 51 pre force_critical removal)
  *   OLD-C  backend    computeProjected()    (supabase.js getAllLotPhases) — admin's projected dates (the divergent copy)
  *
  * and asserts:
  *   1. NEW module  ==  OLD-A   for es/ef on every task, every scenario  (clean extraction)
- *   2. NEW module  ==  OLD-B   for es/ef + critical set  (99 WD / 51 critical regression)
+ *   2. NEW module  ==  OLD-B   for es/ef + critical set  (94 WD / 36 critical regression, post force_critical removal)
  *   3. NEW module  vs OLD-C    — reports the DIFFS (negative lag + floor-at-1),
  *      i.e. the admin dates that are wrong today and get corrected to match the field app.
  *
@@ -111,7 +111,7 @@ let allPass = true;
   if (!pass) { console.log('  es diffs:', dEs.slice(0,20)); console.log('  ef diffs:', dEf.slice(0,20)); }
 }
 
-// ---- TEST 3: NEW module (planned) == OLD-B backend template : es/ef + critical (99d/51) ----
+// ---- TEST 3: NEW module (planned) == OLD-B backend template : es/ef + critical (94d/36) ----
 {
   const B = oldBackendTemplate(templateTasks);
   const N = Engine.computeSchedule(templateTasks, { startDate, mode:'planned' });
@@ -128,7 +128,7 @@ let allPass = true;
   console.log('  COMPUTED project end (CPM, working days): NEW=' + N.end + '  OLD-B=' + B.projectEnd);
   console.log('  RAW hand-authored end (max relative_finish): ' + rawEnd + (REAL ? '   <- the spec\'s "99" figure' : ''));
   if (REAL && N.end !== rawEnd) console.log('  NOTE: computed end (' + N.end + ') < raw end (' + rawEnd + ') by ' + (rawEnd - N.end) + ' WD — the predecessor network compresses the hand-authored dates (BUILD_SPEC §2.4). All three engines agree on ' + N.end + '.');
-  console.log('  critical count:             NEW=' + nCritCount + '  OLD-B=' + B.criticalCount + (REAL ? '   (spec regression target: 51)' : ''));
+  console.log('  critical count:             NEW=' + nCritCount + '  OLD-B=' + B.criticalCount + (REAL ? '   (spec regression target: 36 (pure float, force_critical removed))' : ''));
   if (!pass) { console.log('  es diffs:', dEs.slice(0,20)); console.log('  ef diffs:', dEf.slice(0,20)); console.log('  crit diffs on:', critDiffs.slice(0,20)); }
 }
 

@@ -22,9 +22,15 @@ float-based set (36), matching the field app's `_crit` exactly (verified on the
 real Slab graph: after clearing, `is_critical` set === `_crit` set === 36,
 projectEnd unchanged at 94). The owner chose to remove `force_critical` entirely
 (no legitimate use; the predecessor graph already computes the true critical
-path). Follow-ups tracked separately: strip the admin `force_critical` checkbox
-so it can't be re-introduced; recompute `is_critical` on already-stamped lot
-tasks (they carry the old 51-set until re-stamped/recomputed).
+path). **force_critical was then removed from the code entirely (2026-08-07):**
+the engine computes is_critical = pure float ≤ 0, the backend recalc lands on the
+same 36 on its own (proven inert in test/force-critical-removal.js — the flag
+can't force anything), and the admin "always treat as critical" checkbox + all
+reads/writes are gone. The DB column is left in place (dropping is riskier) but is
+no longer read or written. Remaining follow-up: recompute `is_critical` on
+already-stamped lot tasks (they carry the old 51-set until re-stamped/recomputed).
+The legitimate "watch inspections/milestones" need lives on as KI-8 (a separate,
+deliberate indicator — never a force_critical revival).
 
 --- historical context (original filing) ---
 **Status:** open — reconcile after the engine restructure, with owner sign-off.

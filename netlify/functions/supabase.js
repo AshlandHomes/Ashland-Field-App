@@ -441,19 +441,19 @@ exports.handler = async function(event) {
         // TRUE CPM. Forward pass -> earliest start/finish. Backward pass -> latest
         // start/finish. Float = LS - ES. Critical when float <= 0, i.e. any slip
         // pushes the completion date. This is CALCULATED, not hand-flagged —
-        // force_critical only ADDS tasks you always want treated as critical.
+        // force_critical was removed entirely (owner decision 2026-08-07).
         const { template_id } = payload;
         if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
 
         const tkRes = await supabaseRequest('GET',
-          `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num,duration,lag,relative_start,predecessors,force_critical&order=task_order`);
+          `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num,duration,lag,relative_start,predecessors&order=task_order`);
         const tasks = tkRes.data || [];
         if (!tasks.length) {
           return { statusCode: 200, body: JSON.stringify({ success: true, tasks: 0, critical: 0 }) };
         }
 
         // TRUE CPM via the single shared engine (schedule-engine.js): forward +
-        // backward pass, float = LS - ES, critical when float <= 0 OR force_critical.
+        // backward pass, float = LS - ES, critical when float <= 0 (pure CPM).
         const { updates, criticalCount, projectEnd } = ScheduleEngine.computeTemplateCritical(tasks);
 
         for (const u of updates) {
@@ -534,7 +534,6 @@ exports.handler = async function(event) {
         if (task_order !== undefined)      f.task_order = task_order;
         if (notification !== undefined)    f.notification = notification;
         if (payload.trade !== undefined)          f.trade = payload.trade;
-        if (payload.force_critical !== undefined) f.force_critical = payload.force_critical;
         let r;
         if (id) {
           r = await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${id}`, f);

@@ -121,7 +121,9 @@ function oldBackendTemplate(tasks) {
   }
   tasks.forEach(t => calcLS(t.bt_num, []));
   const isCrit = {}; let criticalCount = 0;
-  tasks.forEach(t => { const float = (LS[t.bt_num]||0) - (ES[t.bt_num]||0); const c = (float<=0)||!!t.force_critical; isCrit[t.bt_num]=c; if(c)criticalCount++; });
+  // Pure CPM float ≤ 0. force_critical was removed entirely (owner decision
+  // 2026-08-07); this snapshot tracks that so parity stays a meaningful guard.
+  tasks.forEach(t => { const float = (LS[t.bt_num]||0) - (ES[t.bt_num]||0); const c = (float<=0); isCrit[t.bt_num]=c; if(c)criticalCount++; });
   return { ES, EF, projectEnd, isCrit, criticalCount };
 }
 

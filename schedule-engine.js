@@ -11,10 +11,10 @@
  * date calc (see BUILD_SPEC §2.2, §6).
  *
  * The math is a faithful extraction of the proven field-app engine
- * (ashland-stage-update.html runEngine, the reference/source-of-truth) plus
- * the force_critical rule from the backend critical-path writer. It is a
- * WORKING-DAY engine: weekends excluded, offset 1 == the construction start
- * date itself.
+ * (ashland-stage-update.html runEngine, the reference/source-of-truth). The
+ * critical set is PURE CPM float ≤ 0 — force_critical was removed entirely
+ * (owner decision 2026-08-07). It is a WORKING-DAY engine: weekends excluded,
+ * offset 1 == the construction start date itself.
  * ---------------------------------------------------------------------------
  */
 (function (root, factory) {
@@ -84,7 +84,6 @@
       actualStart:   t.actualStart || t.actual_start || (t.act && t.act.start) || null,
       actualFinish:  t.actualFinish || t.actual_finish || (t.act && t.act.finish) || null,
       estStartDate:  t.estStartDate || t.est_start_date || null,
-      forceCritical: !!(t.forceCritical || t.force_critical),
       isCritical:    !!(t.isCritical || t.is_critical),
       taskOrder:     (t.taskOrder != null ? t.taskOrder
                        : (t.task_order != null ? t.task_order
@@ -192,7 +191,9 @@
 
     var end = TASKS.length ? Math.max.apply(null, TASKS.map(function (t) { return ef[t.num]; })) : 0;
 
-    // ── critical path (planned mode only, mirrors field app + force_critical) ──
+    // ── critical path (planned mode only) — PURE FLOAT ≤ 0, computed from the
+    // graph. No hand-flagging: force_critical was removed entirely (owner decision
+    // 2026-08-07) so the critical set is whatever the CPM math says, period. ──
     var floatByNum = {}, criticalByNum = {};
     if (mode === 'planned') {
       if (hasPreds) {
@@ -212,14 +213,14 @@
           var LS = LF - t.duration + 1;
           var fl = LS - es[t.num];
           floatByNum[t.num] = fl;
-          criticalByNum[t.num] = (fl <= 0) || t.forceCritical;  // force_critical ADDS, never removes
+          criticalByNum[t.num] = (fl <= 0);   // pure CPM critical
         });
       } else {
         TASKS.forEach(function (t) {
           var LS = end - t.duration + 1;
           var fl = LS - es[t.num];
           floatByNum[t.num] = fl;
-          criticalByNum[t.num] = (fl <= 0) || t.forceCritical || t.isCritical;
+          criticalByNum[t.num] = (fl <= 0) || t.isCritical;   // no-pred fallback keeps stored is_critical
         });
       }
     }
@@ -244,9 +245,7 @@
   // with actuals in a SEPARATE map act[num] = {started,finished,start,finish}.
   // This wrapper reshapes that into the canonical form, runs the one engine, and
   // returns { end, byNum } for the caller to write back onto its task objects.
-  // NOTE: force_critical is intentionally NOT sourced here — the field app never
-  // loaded it, so its critical set stays pure-CPM (behavior parity with the old
-  // inline runEngine). Do not add force_critical here without a behavior sign-off.
+  // The critical set is pure CPM float ≤ 0 (force_critical no longer exists).
   function computeFieldSchedule(TASKS, act, startDate, mode) {
     act = act || {};
     var tasks = (TASKS || []).map(function (t) {
@@ -265,9 +264,9 @@
 
   // ── surface adapter: BACKEND template critical writer ────────────────────
   // supabase.js recalcTemplateCriticalPath. tasks: sched_template_tasks rows
-  // {id, bt_num, duration, lag, relative_start, predecessors, force_critical}.
+  // {id, bt_num, duration, lag, relative_start, predecessors}.
   // Returns { updates:[{id,bt_num,is_critical,float}], criticalCount, projectEnd }.
-  // Planned mode, no start date — pure offsets; critical = float<=0 OR force_critical.
+  // Planned mode, no start date — pure offsets; critical = float ≤ 0 (pure CPM).
   function computeTemplateCritical(tasks) {
     var r = computeSchedule(tasks, { mode: 'planned' });
     var criticalCount = 0;

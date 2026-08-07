@@ -713,10 +713,7 @@ tr:hover td{background:#f9fafb}
         <label style="margin:0">Critical Path</label>
         <span id="task-crit-status" style="font-size:12px;font-weight:700"></span>
       </div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Calculated automatically from durations and predecessors — a task is critical when it has zero float, meaning any delay pushes the completion date.</p>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-        <input id="task-force-critical" type="checkbox" style="width:16px;height:16px"> Always treat as critical (override)
-      </label>
+      <p style="font-size:12px;color:var(--muted);margin:0">Calculated automatically from durations and predecessors — a task is critical when it has zero float, meaning any delay pushes the completion date. There is no manual override; the critical path is whatever the math computes.</p>
     </div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-task')">Cancel</button>
@@ -2525,7 +2522,7 @@ function _tplTaskRow(t){
   return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
     +'<div>'+(t.is_critical?'<span style="color:#0082A0">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
     +  '<strong>#'+(t.bt_num!=null?t.bt_num:'?')+'</strong> '+(t.name||'')
-    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+(t.force_critical?' · <span style="color:#0082A0">forced critical</span>':'')+'</div></div>'
+    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+'</div></div>'
     +'<div style="display:flex;gap:6px;white-space:nowrap">'
     +  '<button class="btn btn-secondary btn-sm" onclick="openEditTaskModal(\'' + t.id + '\')">Edit</button>'
     +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTaskUI(\'' + t.id + '\')">Delete</button>'
@@ -2590,7 +2587,6 @@ function openAddTaskModal(){
   document.getElementById('task-order').value=nextOrd;
   document.getElementById('task-type').value='work';
   document.getElementById('task-trade').value='';
-  document.getElementById('task-force-critical').checked=false;
   _setCritStatus(null);
   document.getElementById('task-dep-btn').style.display='none';   // new task has no dependents yet
   document.getElementById('modal-task').classList.add('open');
@@ -2612,7 +2608,6 @@ function openEditTaskModal(id){
   document.getElementById('task-order').value=t.task_order!=null?t.task_order:'';
   document.getElementById('task-type').value=t.task_type||'work';
   document.getElementById('task-trade').value=t.trade||'';
-  document.getElementById('task-force-critical').checked=!!t.force_critical;
   _setCritStatus(!!t.is_critical);
   const _depN=(ScheduleEngine.computeSuccessors(tplEdit.tasks)[t.bt_num]||[]).length;
   const _depBtn=document.getElementById('task-dep-btn');
@@ -2666,7 +2661,6 @@ async function submitTask(){
     relative_start: num('task-rs'), relative_finish: num('task-rf'),
     predecessors: preds,
     trade: (document.getElementById('task-trade').value||'').trim() || null,
-    force_critical: document.getElementById('task-force-critical').checked,
     task_type: document.getElementById('task-type').value,
     task_order: num('task-order')
   };
