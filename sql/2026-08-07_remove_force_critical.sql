@@ -1,6 +1,13 @@
 -- ============================================================
 -- REMOVE force_critical — resolves KI-1 (field 36 vs backend 51 critical set)
 --
+-- VERIFIED against a live dev_sched_template_tasks dump (2026-08-07): 129 tasks,
+-- is_critical=51, force_critical=42, no_pred=2; full graph (dur/lag/preds)
+-- matched the fixture with 0 structural diffs; pure float<=0 critical set = 36,
+-- projectEnd 94 WD. Owner confirmed the interior-chain float is real (carpet is
+-- intentionally staged behind landscaping/pressure-washing), so the 15 dropping
+-- out genuinely have float and are not on the critical path.
+--
 -- WHY: The Slab template carries 42 `force_critical=true` flags; 15 of them are
 -- on tasks with GENUINE POSITIVE FLOAT (+10 to +19 working days), so those 15 are
 -- not on the real critical path — they only read as "critical" because
