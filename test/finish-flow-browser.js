@@ -60,9 +60,18 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     const projYmd = ymd(offToDate(t._projected_ef));
 
     // ── capture + stubs ──
-    const cap = { confirm:[], alert:[], picker:[], delayArgs:null, delayCalled:false, sb:[] };
-    window.confirm = (m) => { cap.confirm.push(m); return o.confirmReturn !== false; };
+    // window.confirm/alert must NEVER be called (FIX 1: fully in-app). We record
+    // them to assert zero. appModal is the in-app modal — scripted per modal type.
+    const cap = { confirm:[], alert:[], modals:[], picker:[], blocked:null, delayArgs:null, delayCalled:false, sb:[] };
+    window.confirm = (m) => { cap.confirm.push(m); return true; };
     window.alert   = (m) => { cap.alert.push(m); };
+    appModal = async ({ title, sub, buttons }) => {
+      cap.modals.push({ title, values: (buttons||[]).map(b => b.value) });
+      if (/Unfinished predecessors/.test(title)) return (o.predChoice === undefined ? 'go' : o.predChoice);
+      if (/^Finish /.test(title)) return o.modalChoice;                 // 'today' | 'proj' | 'pick' | null
+      cap.blocked = { title, sub };                                     // future / invalid / not-allowed info modal (single OK)
+      return null;
+    };
     openDatePicker = async (title) => { cap.picker.push(title); return (o.pickerReturn === undefined ? null : o.pickerReturn); };
     openDelayReasonModal = async (bt, name, ref, actual, late) => { cap.delayCalled = true; cap.delayArgs = { ref, actual, late }; return { id:'r1', label:'Weather', note:'' }; };
     sbCall = async (action, payload) => { cap.sb.push({ action, payload }); if (action === 'getDelayReasons') return [{ id:'r1', label:'Weather' }]; return {}; };
@@ -71,82 +80,103 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
 
     const finWrite = cap.sb.find(c => c.action === 'updateScheduleLotTask' && c.payload && c.payload.status === 'finished');
     const delayWrite = cap.sb.find(c => c.action === 'addTaskDelay');
-    return { today, projYmd, crit: t._crit === true, cap: { confirm:cap.confirm, alert:cap.alert, pickerCount:cap.picker.length, delayCalled:cap.delayCalled, delayArgs:cap.delayArgs },
+    return { today, projYmd, crit: t._crit === true,
+             cap: { confirmCount:cap.confirm.length, alertCount:cap.alert.length, modals:cap.modals,
+                    pickerCount:cap.picker.length, blocked:cap.blocked, delayCalled:cap.delayCalled, delayArgs:cap.delayArgs },
              savedFinish: finWrite ? finWrite.payload.actual_finish : null,
              delayWrite: delayWrite ? delayWrite.payload : null };
   }, opts);
 
-  const join = a => a.join(' | ');
-  console.log('\n===== FINISH-FLOW BRANCHES (real finishTask, field app) =====');
+  const titles = r => r.cap.modals.map(m => m.title).join(' | ');
+  const noNativePopups = r => r.cap.confirmCount === 0 && r.cap.alertCount === 0;
+  console.log('\n===== FINISH-FLOW (real finishTask + in-app modals, field app) =====');
 
   const ON = await page.evaluate(() => { const d=new Date(); d.setHours(0,0,0,0); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); });
   // 1) ON-TIME — projected finish == today (weekday). dur 1, started today.
   {
-    const r = await runScenario({ aStart: ON, dur: 1, crit: true, confirmReturn: true });
-    console.log('\n[ON-TIME]  proj=' + r.projYmd + ' today=' + r.today);
-    console.log('  confirm: ' + join(r.cap.confirm) + '  | saved=' + r.savedFinish + '  delay=' + r.cap.delayCalled);
+    const r = await runScenario({ aStart: ON, dur: 1, modalChoice: 'today' });
+    console.log('\n[ON-TIME]  proj=' + r.projYmd + ' today=' + r.today + '  modal="' + titles(r) + '"  saved=' + r.savedFinish);
     check('on-time: projected finish equals today', r.projYmd === r.today);
-    check('on-time: a "projected date" confirm fired (no picker, no alert)', /projected date/i.test(join(r.cap.confirm)) && r.cap.pickerCount === 0 && r.cap.alert.length === 0);
+    check('on-time: in-app Finish modal shown, no picker', /^Finish /.test(titles(r)) && r.cap.pickerCount === 0);
+    check('on-time: NO browser confirm/alert', noNativePopups(r));
     check('on-time: saved finish = today', r.savedFinish === r.today);
     check('on-time: NO delay reason', r.cap.delayCalled === false && r.delayWrite === null);
   }
 
   // 2) EARLY — projected finish in the future. dur 10, started today.
   {
-    const r = await runScenario({ aStart: ON, dur: 10, crit: true, confirmReturn: true });
-    console.log('\n[EARLY]  proj=' + r.projYmd + ' today=' + r.today);
-    console.log('  confirm: ' + join(r.cap.confirm) + '  | saved=' + r.savedFinish + '  delay=' + r.cap.delayCalled);
+    const r = await runScenario({ aStart: ON, dur: 10, modalChoice: 'today' });
+    console.log('\n[EARLY]  proj=' + r.projYmd + ' today=' + r.today + '  modal="' + titles(r) + '"  saved=' + r.savedFinish);
     check('early: projected finish is in the future', r.projYmd > r.today);
-    check('early: an "early" statement confirm fired (no picker)', /early/i.test(join(r.cap.confirm)) && r.cap.pickerCount === 0);
+    check('early: in-app Finish modal shown, no picker', /^Finish /.test(titles(r)) && r.cap.pickerCount === 0);
+    check('early: NO browser confirm/alert', noNativePopups(r));
     check('early: saved finish = today', r.savedFinish === r.today);
     check('early: NO delay reason', r.cap.delayCalled === false && r.delayWrite === null);
   }
 
-  // Past start (15 days ago), dur 1 → projected finish in the past → LATE branch.
+  // Past start (15 days ago), dur 1 → projected finish in the past → LATE state.
   const PAST = await page.evaluate(() => { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-15); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); });
+  const projProbe = await runScenario({ aStart: PAST, dur: 1, modalChoice: null });   // read projYmd (cancel out)
+  const PROJ = projProbe.projYmd;
 
-  // 3) LATE, entered date ON/BEFORE projected → NO reason.
+  // 3) LATE → [Backdate to projected date] → finish = projected, NO reason (even though critical).
   {
-    const probe = await runScenario({ aStart: PAST, dur: 1, crit: true, pickerReturn: '__PROBE__' }); // first get projYmd
-    const r = await runScenario({ aStart: PAST, dur: 1, crit: true, pickerReturn: probe.projYmd });   // picker returns projected date itself
-    console.log('\n[LATE ≤ projected]  proj=' + r.projYmd + ' today=' + r.today + '  entered=' + r.projYmd);
-    console.log('  alert: ' + join(r.cap.alert) + '  | picker=' + r.cap.pickerCount + '  saved=' + r.savedFinish + '  delay=' + r.cap.delayCalled);
+    const r = await runScenario({ aStart: PAST, dur: 1, modalChoice: 'proj' });
+    console.log('\n[LATE → Backdate to projected]  crit=' + r.crit + ' proj=' + r.projYmd + ' today=' + r.today + '  saved=' + r.savedFinish);
     check('late: projected finish already passed', r.projYmd < r.today);
-    check('late: "past its projected finish" alert + date picker fired', /past its projected finish/i.test(join(r.cap.alert)) && r.cap.pickerCount === 1);
-    check('late ≤ projected: saved finish = entered date', r.savedFinish === r.projYmd);
-    check('late ≤ projected: NO delay reason (was not actually late)', r.cap.delayCalled === false && r.delayWrite === null);
+    check('late: 3-choice modal shown (proj/today/pick/cancel)', r.cap.modals.some(m => m.values.includes('proj') && m.values.includes('today') && m.values.includes('pick')));
+    check('backdate: NO picker opened (one tap)', r.cap.pickerCount === 0);
+    check('backdate: saved finish = projected date', r.savedFinish === r.projYmd);
+    check('backdate: NO delay reason (finished on time, just recorded late)', r.cap.delayCalled === false && r.delayWrite === null);
+    check('backdate: NO browser confirm/alert', noNativePopups(r));
   }
 
-  // 4) CRITICAL, LATE, entered date AFTER projected (today) → reason REQUIRED.
+  // 4) LATE → [Finished today], CRITICAL → reason REQUIRED.
   {
-    const r = await runScenario({ aStart: PAST, dur: 1, pickerReturn: ON });  // #113 alone → critical; entered=today > projected
-    console.log('\n[CRITICAL, LATE > projected]  crit=' + r.crit + ' proj=' + r.projYmd + ' today=' + r.today + '  entered=' + r.today);
-    console.log('  delayCalled=' + r.cap.delayCalled + '  delayWrite=' + JSON.stringify(r.delayWrite) + '  saved=' + r.savedFinish);
-    check('critical-late: task is on the computed critical path (_crit=true)', r.crit === true);
-    check('critical-late: delay reason modal fired', r.cap.delayCalled === true);
-    check('critical-late: saved finish = entered date (today)', r.savedFinish === r.today);
-    check('critical-late: addTaskDelay expected_done === projected finish', r.delayWrite && r.delayWrite.expected_done === r.projYmd);
-    check('critical-late: addTaskDelay actual_finish === entered date', r.delayWrite && r.delayWrite.actual_finish === r.today);
+    const r = await runScenario({ aStart: PAST, dur: 1, modalChoice: 'today' });   // #113 alone → critical
+    console.log('\n[LATE → Finished today, CRITICAL]  crit=' + r.crit + ' proj=' + r.projYmd + ' saved=' + r.savedFinish + '  delay=' + r.cap.delayCalled);
+    check('finished-today: task is on the computed critical path (_crit=true)', r.crit === true);
+    check('finished-today: NO picker opened (one tap)', r.cap.pickerCount === 0);
+    check('finished-today critical: delay reason modal fired', r.cap.delayCalled === true);
+    check('finished-today critical: saved finish = today', r.savedFinish === r.today);
+    check('finished-today critical: addTaskDelay expected_done === projected finish', r.delayWrite && r.delayWrite.expected_done === r.projYmd);
+    check('finished-today critical: addTaskDelay actual_finish === today', r.delayWrite && r.delayWrite.actual_finish === r.today);
   }
 
-  // 4b) NON-CRITICAL, LATE past projected (today) → NO reason (has float).
+  // 4b) LATE → [Finished today], NON-CRITICAL → NO reason (float absorbs it).
   {
-    const r = await runScenario({ aStart: PAST, dur: 1, sibling: true, pickerReturn: ON });  // long-pole sibling → #113 has float
-    console.log('\n[NON-CRITICAL, LATE > projected]  crit=' + r.crit + ' proj=' + r.projYmd + ' today=' + r.today + '  entered=' + r.today);
-    console.log('  delayCalled=' + r.cap.delayCalled + '  saved=' + r.savedFinish);
-    check('non-critical-late: task is NOT on the critical path (_crit=false)', r.crit === false);
-    check('non-critical-late: finished past projected finish', r.today > r.projYmd);
-    check('non-critical-late: NO delay reason (float absorbs it)', r.cap.delayCalled === false && r.delayWrite === null);
-    check('non-critical-late: still saved (finish = entered date)', r.savedFinish === r.today);
+    const r = await runScenario({ aStart: PAST, dur: 1, sibling: true, modalChoice: 'today' });   // long-pole sibling → float
+    console.log('\n[LATE → Finished today, NON-CRITICAL]  crit=' + r.crit + ' proj=' + r.projYmd + ' saved=' + r.savedFinish + '  delay=' + r.cap.delayCalled);
+    check('non-critical: NOT on the critical path (_crit=false)', r.crit === false);
+    check('non-critical: finished past projected finish', r.today > r.projYmd);
+    check('non-critical: NO delay reason (float absorbs it)', r.cap.delayCalled === false && r.delayWrite === null);
+    check('non-critical: still saved (finish = today)', r.savedFinish === r.today);
   }
 
-  // 5) FUTURE attempt via the late picker → BLOCKED, nothing saved.
+  // 5) LATE → [Different date…] → date AFTER projected (today) → reason REQUIRED.
+  {
+    const r = await runScenario({ aStart: PAST, dur: 1, modalChoice: 'pick', pickerReturn: ON });
+    console.log('\n[LATE → Different date > projected]  proj=' + r.projYmd + ' entered=' + r.today + '  picker=' + r.cap.pickerCount + ' delay=' + r.cap.delayCalled);
+    check('different-date: opened the date picker', r.cap.pickerCount === 1);
+    check('different-date > projected: delay reason captured', r.cap.delayCalled === true && r.delayWrite && r.delayWrite.actual_finish === r.today);
+    check('different-date > projected: saved finish = entered date', r.savedFinish === r.today);
+  }
+
+  // 5b) LATE → [Different date…] → date ON/BEFORE projected → NO reason.
+  {
+    const r = await runScenario({ aStart: PAST, dur: 1, modalChoice: 'pick', pickerReturn: PROJ });
+    console.log('\n[LATE → Different date ≤ projected]  proj=' + r.projYmd + ' entered=' + PROJ + '  delay=' + r.cap.delayCalled);
+    check('different-date ≤ projected: opened picker, saved entered date', r.cap.pickerCount === 1 && r.savedFinish === PROJ);
+    check('different-date ≤ projected: NO delay reason', r.cap.delayCalled === false && r.delayWrite === null);
+  }
+
+  // 6) FUTURE attempt via [Different date…] → BLOCKED in-app, nothing saved.
   {
     const FUT = await page.evaluate(() => { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+3); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); });
-    const r = await runScenario({ aStart: PAST, dur: 1, crit: true, pickerReturn: FUT });
-    console.log('\n[FUTURE attempt]  entered=' + FUT + '  today=' + r.today);
-    console.log('  alert: ' + join(r.cap.alert) + '  | saved=' + r.savedFinish);
-    check('future: blocked with the "not allowed ... future date" rule message', /not allowed to complete a task on a future date/i.test(join(r.cap.alert)));
+    const r = await runScenario({ aStart: PAST, dur: 1, modalChoice: 'pick', pickerReturn: FUT });
+    console.log('\n[FUTURE attempt]  entered=' + FUT + '  today=' + r.today + '  blocked=' + JSON.stringify(r.cap.blocked));
+    check('future: blocked by an IN-APP modal with the rule message', !!r.cap.blocked && /can't complete a task on a future date/i.test(r.cap.blocked.sub));
+    check('future: NO browser confirm/alert', noNativePopups(r));
     check('future: NOTHING saved (no finish write)', r.savedFinish === null);
     check('future: NO delay reason', r.cap.delayCalled === false);
   }

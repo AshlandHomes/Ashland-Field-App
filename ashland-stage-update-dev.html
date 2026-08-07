@@ -582,6 +582,30 @@ function toggleStageRow(id,btn){
   btn.querySelector('.slcaret').textContent=open?'▸':'▾';
 }
 
+// ── Generic in-app modal (replaces browser confirm/alert in the finish flow) ──
+// Reuses the existing .dr-* styling. Resolves with the chosen button's `value`
+// (backdrop tap → null). buttons: [{label, value, kind:'primary'|'secondary'|'danger'|'ghost'}]
+function appModal({title, sub, buttons}){
+  return new Promise(resolve=>{
+    const base='width:100%;text-align:center;padding:13px 14px;border-radius:9px;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;border:1px solid;box-sizing:border-box';
+    const styleFor=k=> k==='primary' ? base+';border-color:#27ae60;background:#27ae60;color:#fff'
+                     : k==='danger'  ? base+';border-color:#c0392b;background:#fff;color:#c0392b'
+                     : k==='ghost'   ? base+';border-color:#dfe4e7;background:#fff;color:#7f8c8d;font-weight:600'
+                     :                 base+';border-color:#dfe4e7;background:#fff;color:#2c3e50';   // secondary
+    const bhtml=(buttons||[]).map((b,i)=>'<button class="fm-btn" data-i="'+i+'" style="'+styleFor(b.kind)+'">'+b.label+'</button>').join('');
+    const html='<div id="fm-overlay" class="dr-overlay"><div class="dr-modal">'
+      +'<div class="dr-title">'+title+'</div>'
+      +(sub?'<div class="dr-sub">'+sub+'</div>':'')
+      +'<div style="display:flex;flex-direction:column;gap:8px">'+bhtml+'</div>'
+      +'</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    const ov=document.getElementById('fm-overlay');
+    const done=val=>{ ov.remove(); resolve(val); };
+    ov.querySelectorAll('.fm-btn').forEach(b=>{ b.onclick=()=>done(buttons[+b.dataset.i].value); });
+    ov.addEventListener('click', e=>{ if(e.target===ov) done(null); });   // backdrop = cancel
+  });
+}
+
 function openDatePicker(title,defaultDate){
   return new Promise(resolve=>{
     const ov=document.getElementById('dpick');
@@ -825,42 +849,75 @@ async function startTask(n){
 }
 async function finishTask(n){
   const t=bn[n];
-  // ── Item 2: Soft predecessor warning ──
-  const incompletePreds=(t.preds||[]).filter(p=>bn[p]&&!(act[p]&&act[p].finished));
-  if(incompletePreds.length){
-    const names=incompletePreds.map(p=>'#'+p+(bn[p]?' — '+bn[p].name:'')).join('\n');
-    const ok=confirm('⚠️ Unfinished predecessors:\n\n'+names+'\n\nFinishing now may affect schedule accuracy. If these tasks are no longer required first, remove them in ⚙ Edit.\n\nFinish anyway?');
-    if(!ok)return;
-  }
-  // ── FINISH-FLOW BRANCHES (#3) — driven by the PROJECTED finish vs today ──
-  // projected finish = engine's current forecast for this started task
-  // (= actual_start + duration in working days). All dates ISO → lexical compare.
   const today=todayYmd();
   const D=s=>fmt(new Date(s+'T00:00:00'));                 // pretty-print an ISO date
+  // projected finish = engine's current forecast for this started task
+  // (= actual_start + duration in working days). All dates ISO → lexical compare.
   const projYmd=(t._projected_ef!=null)?ymd(offToDate(t._projected_ef)):today;
+  const tlabel='#'+n+' '+t.name;
+
+  // ── Soft predecessor warning (in-app modal) ──
+  const incompletePreds=(t.preds||[]).filter(p=>bn[p]&&!(act[p]&&act[p].finished));
+  if(incompletePreds.length){
+    const names=incompletePreds.map(p=>'#'+p+(bn[p]?' — '+bn[p].name:'')).join('<br>');
+    const go=await appModal({
+      title:'⚠️ Unfinished predecessors',
+      sub:names+'<br><br>Finishing now may affect schedule accuracy. If these tasks are no longer required first, remove them in ⚙ Edit.',
+      buttons:[{label:'Finish anyway',value:'go',kind:'primary'},{label:'Cancel',value:null,kind:'ghost'}]
+    });
+    if(go!=='go')return;
+  }
+
+  // ── FINISH-FLOW STATES (#3) — one unified in-app modal, driven by projected vs today ──
   let v;
   if(projYmd>today){
-    // EARLY — done today, ahead of the projected finish. Statement, not a question.
-    if(!confirm("You're completing #"+n+" "+t.name+" early, on "+D(today)+".\n\nProjected finish is "+D(projYmd)+". Tap OK to mark it finished today."))return;
-    v=today;
+    // EARLY — done today, ahead of the projected finish. One tap.
+    const r=await appModal({
+      title:'Finish '+tlabel,
+      sub:"You're finishing this early, on <strong>"+D(today)+"</strong>. Projected finish is "+D(projYmd)+".",
+      buttons:[{label:'Confirm — finished today',value:'today',kind:'primary'},{label:'Cancel',value:null,kind:'ghost'}]
+    });
+    if(r!=='today')return; v=today;
   } else if(projYmd===today){
-    // ON TIME — projected finish is today. One-tap confirm.
-    if(!confirm("Finish #"+n+" "+t.name+" on its projected date ("+D(today)+")?"))return;
-    v=today;
+    // ON TIME — projected finish is today. One tap.
+    const r=await appModal({
+      title:'Finish '+tlabel,
+      sub:'Finish this task, completed today ('+D(today)+')?',
+      buttons:[{label:'Confirm',value:'today',kind:'primary'},{label:'Cancel',value:null,kind:'ghost'}]
+    });
+    if(r!=='today')return; v=today;
   } else {
-    // LATE — projected finish already passed. Ask for the real completion date.
-    alert("#"+n+" "+t.name+" is past its projected finish date of "+D(projYmd)+".\n\nEnter the actual date it was completed.");
-    v=await openDatePicker('Finish — #'+n+' '+t.name,today);
-    if(v===null)return;
+    // LATE — projected finish passed. Three explicit one-tap choices.
+    const r=await appModal({
+      title:'Finish '+tlabel,
+      sub:'This task is past its projected finish date of <strong>'+D(projYmd)+'</strong>. When was it actually completed?',
+      buttons:[
+        {label:'Backdate to projected date ('+D(projYmd)+')',value:'proj',kind:'secondary'},
+        {label:'Finished today ('+D(today)+')',value:'today',kind:'secondary'},
+        {label:'Different date…',value:'pick',kind:'secondary'},
+        {label:'Cancel',value:null,kind:'ghost'}
+      ]
+    });
+    if(r===null)return;
+    if(r==='proj') v=projYmd;                     // finished on time, just recording late → no reason
+    else if(r==='today') v=today;                 // it was late → reason (if critical)
+    else {                                        // 'pick' — real past date; reason only if > projected
+      v=await openDatePicker('Finish — '+tlabel,today);
+      if(v===null)return;
+    }
   }
-  if(!isValidDate(v)){alert('Invalid date.');return;}
+  if(!isValidDate(v)){ await appModal({title:'Invalid date',sub:'That date could not be read. Please try again.',buttons:[{label:'OK',value:null,kind:'primary'}]}); return; }
 
-  // ── Entry-block (REUSED, single path). Future = a rule, stated clearly. ──
+  // ── Entry-block (REUSED, single path). Future = a rule, stated in-app. ──
   const av=ScheduleEngine.validateDateEntry({actualFinish:v,priorStart:(act[n]&&act[n].start)||null,constructionStart:curLot.construction_start_date||null,today:today});
   if(!av.ok){
-    alert(av.reason==='future'
-      ? "You're not allowed to complete a task on a future date. Finish it early today, or come back when it's done."
-      : av.message);
+    await appModal({
+      title: av.reason==='future' ? "Can't finish in the future" : 'Date not allowed',
+      sub: av.reason==='future'
+        ? "You can't complete a task on a future date. Finish it early today, or come back when it's done."
+        : av.message,
+      buttons:[{label:'OK',value:null,kind:'primary'}]
+    });
     return;
   }
 
