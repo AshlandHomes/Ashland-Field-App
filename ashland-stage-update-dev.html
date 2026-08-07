@@ -63,6 +63,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tname{font-size:14px;font-weight:600}
 .tnum{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--line);padding:1px 5px;border-radius:4px;margin-right:3px}
 .tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
+.tdate .proj{font-style:italic;color:var(--muted)}
+.tstatus{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:5px;white-space:nowrap;align-self:center}
+.tstatus.started{background:var(--brand-light);color:var(--brand)}
+.tstatus.done{background:#e7f5ec;color:var(--green)}
 .tdate-edit{cursor:pointer;display:inline-block;color:var(--brand);text-decoration:underline;text-underline-offset:2px;text-decoration-style:dashed;border-radius:5px;padding:1px 5px;margin:-1px -5px;transition:background .1s}
 .tdate-edit:active{background:var(--brand-light)}
 .tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
@@ -750,17 +754,28 @@ function renderTasks(){
       const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
       const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
       const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
+      // FIX #4: explicit status tag (top-right of the name row). Not-started = none.
+      const statusTag=a.finished?'<span class="tstatus done">Finished</span>'
+                     :(a.started?'<span class="tstatus started">Started</span>':'');
       // Start and finish BOTH derive from the engine's _projected_es (which already
       // honors the est_start_date override as a floor). Do NOT show the override
       // literally for start while taking finish from the engine — that produced an
       // impossible "start after finish" when the two were computed separately.
       const dispFinish=offToDate(t._projected_es + (t.dur-1));
-      const startLabel=(!a.started&&!a.finished)
-        ?fmt(ps)+' → '+fmt(dispFinish)
-        :(a.started?fmt(ps)+' → '+(a.finish?fmt(new Date(a.finish+'T00:00:00')):'…'):fmt(ps)+' → '+fmt(dispFinish));
+      // FIX #1: a started-but-not-finished task shows a PROJECTED finish (actual_start
+      // + duration, via the engine's _projected_ef) — labeled, not a committed date —
+      // instead of "…". Finished shows the real finish; not-started keeps its range.
+      let startLabel;
+      if(a.finished){
+        startLabel=fmt(ps)+' → '+fmt(new Date(a.finish+'T00:00:00'));
+      } else if(a.started){
+        startLabel=fmt(ps)+' → <span class="proj">'+fmt(pf)+' (projected)</span>';
+      } else {
+        startLabel=fmt(ps)+' → '+fmt(dispFinish);
+      }
       h+='<div class="t '+cls+'">'
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
-        +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
+        +'<div class="ticons">'+statusTag+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+startLabel+'</div>'
         +'<div class="tacts">'+acts+'</div></div>';
     });
