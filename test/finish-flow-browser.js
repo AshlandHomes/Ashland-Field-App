@@ -91,7 +91,16 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
   const noNativePopups = r => r.cap.confirmCount === 0 && r.cap.alertCount === 0;
   console.log('\n===== FINISH-FLOW (real finishTask + in-app modals, field app) =====');
 
+  const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  // working-day-aware date helpers (avoid weekend landings that break finish>=start)
+  const wdBack = n => page.evaluate((n) => {
+    const p = s => s.getFullYear()+'-'+String(s.getMonth()+1).padStart(2,'0')+'-'+String(s.getDate()).padStart(2,'0');
+    let d = new Date(); d.setHours(0,0,0,0); let c = 0;
+    while (c < n) { d.setDate(d.getDate()-1); const w = d.getDay(); if (w!==0 && w!==6) c++; }
+    return p(d);
+  }, n);
   const ON = await page.evaluate(() => { const d=new Date(); d.setHours(0,0,0,0); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); });
+  const START2 = await wdBack(2), MID1 = await wdBack(1);   // 2 & 1 working days ago (weekdays)
   // 1) ON-TIME — projected finish == today (weekday). dur 1, started today.
   {
     const r = await runScenario({ aStart: ON, dur: 1, modalChoice: 'today' });
@@ -101,6 +110,19 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     check('on-time: NO browser confirm/alert', noNativePopups(r));
     check('on-time: saved finish = today', r.savedFinish === r.today);
     check('on-time: NO delay reason', r.cap.delayCalled === false && r.delayWrite === null);
+  }
+
+  // 1b) ON-TIME → [Different date…] → picker opens, saves the chosen date, no reason.
+  //     Task started 2 WD ago, dur 3 → projected finish = today (on-time), with a
+  //     real [start, today] window so a different date is valid. Pick 1 WD ago.
+  {
+    const r = await runScenario({ aStart: START2, dur: 3, modalChoice: 'pick', pickerReturn: MID1 });
+    console.log('\n[ON-TIME → Different date]  proj=' + r.projYmd + ' today=' + r.today + '  entered=' + MID1 + '  picker=' + r.cap.pickerCount + '  saved=' + r.savedFinish);
+    check('on-time + Different date: this is the on-time state (proj === today)', r.projYmd === r.today);
+    check('on-time + Different date: modal offered a "pick" option', r.cap.modals.some(m => /^Finish /.test(m.title) && m.values.includes('pick')));
+    check('on-time + Different date: picker opened', r.cap.pickerCount === 1);
+    check('on-time + Different date: saved the chosen date (not today)', r.savedFinish === MID1 && MID1 !== r.today);
+    check('on-time + Different date: NO delay reason (on/before projected)', r.cap.delayCalled === false);
   }
 
   // 2) EARLY — projected finish in the future. dur 10, started today.
@@ -114,8 +136,21 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     check('early: NO delay reason', r.cap.delayCalled === false && r.delayWrite === null);
   }
 
+  // 2b) EARLY → [Different date…] → picker opens, saves the chosen date, no reason.
+  //     Started 2 WD ago, dur 20 → projected finish far future (early), window
+  //     [start, today] valid. Pick 1 WD ago.
+  {
+    const r = await runScenario({ aStart: START2, dur: 20, modalChoice: 'pick', pickerReturn: MID1 });
+    console.log('\n[EARLY → Different date]  proj=' + r.projYmd + ' today=' + r.today + '  entered=' + MID1 + '  picker=' + r.cap.pickerCount + '  saved=' + r.savedFinish);
+    check('early + Different date: this is the early state (proj > today)', r.projYmd > r.today);
+    check('early + Different date: modal offered a "pick" option', r.cap.modals.some(m => /^Finish /.test(m.title) && m.values.includes('pick')));
+    check('early + Different date: picker opened', r.cap.pickerCount === 1);
+    check('early + Different date: saved the chosen date (not today)', r.savedFinish === MID1 && MID1 !== r.today);
+    check('early + Different date: NO delay reason (before projected)', r.cap.delayCalled === false);
+  }
+
   // Past start (15 days ago), dur 1 → projected finish in the past → LATE state.
-  const PAST = await page.evaluate(() => { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-15); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); });
+  const PAST = await wdBack(11);   // 11 working days ago (a weekday; avoids weekend-landing edge cases)
   const projProbe = await runScenario({ aStart: PAST, dur: 1, modalChoice: null });   // read projYmd (cancel out)
   const PROJ = projProbe.projYmd;
 

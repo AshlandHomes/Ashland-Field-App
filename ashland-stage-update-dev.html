@@ -869,23 +869,33 @@ async function finishTask(n){
   }
 
   // ── FINISH-FLOW STATES (#3) — one unified in-app modal, driven by projected vs today ──
+  // EVERY state offers a one-tap default AND "Different date…" (builders update
+  // 2-3x/week, so any task may have finished on a day other than today).
   let v;
   if(projYmd>today){
-    // EARLY — done today, ahead of the projected finish. One tap.
+    // EARLY — done today, ahead of the projected finish.
     const r=await appModal({
       title:'Finish '+tlabel,
       sub:"You're finishing this early, on <strong>"+D(today)+"</strong>. Projected finish is "+D(projYmd)+".",
-      buttons:[{label:'Confirm — finished today',value:'today',kind:'primary'},{label:'Cancel',value:null,kind:'ghost'}]
+      buttons:[
+        {label:'Confirm — finished today',value:'today',kind:'primary'},
+        {label:'Different date…',value:'pick',kind:'secondary'},
+        {label:'Cancel',value:null,kind:'ghost'}
+      ]
     });
-    if(r!=='today')return; v=today;
+    if(r===null)return; v=r;
   } else if(projYmd===today){
-    // ON TIME — projected finish is today. One tap.
+    // ON TIME — projected finish is today.
     const r=await appModal({
       title:'Finish '+tlabel,
       sub:'Finish this task, completed today ('+D(today)+')?',
-      buttons:[{label:'Confirm',value:'today',kind:'primary'},{label:'Cancel',value:null,kind:'ghost'}]
+      buttons:[
+        {label:'Confirm — finished today',value:'today',kind:'primary'},
+        {label:'Different date…',value:'pick',kind:'secondary'},
+        {label:'Cancel',value:null,kind:'ghost'}
+      ]
     });
-    if(r!=='today')return; v=today;
+    if(r===null)return; v=r;
   } else {
     // LATE — projected finish passed. Three explicit one-tap choices.
     const r=await appModal({
@@ -898,13 +908,15 @@ async function finishTask(n){
         {label:'Cancel',value:null,kind:'ghost'}
       ]
     });
-    if(r===null)return;
-    if(r==='proj') v=projYmd;                     // finished on time, just recording late → no reason
-    else if(r==='today') v=today;                 // it was late → reason (if critical)
-    else {                                        // 'pick' — real past date; reason only if > projected
-      v=await openDatePicker('Finish — '+tlabel,today);
-      if(v===null)return;
-    }
+    if(r===null)return; v=r;
+  }
+  // Resolve the button choice into a date. 'today'/'proj' are one-tap; 'pick'
+  // opens the constrained picker (construction_start ≤ date ≤ today) in EVERY state.
+  if(v==='today')      v=today;
+  else if(v==='proj')  v=projYmd;
+  else if(v==='pick'){
+    v=await openDatePicker('Finish — '+tlabel,today);
+    if(v===null)return;
   }
   if(!isValidDate(v)){ await appModal({title:'Invalid date',sub:'That date could not be read. Please try again.',buttons:[{label:'OK',value:null,kind:'primary'}]}); return; }
 
