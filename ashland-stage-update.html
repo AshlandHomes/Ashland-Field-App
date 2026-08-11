@@ -63,6 +63,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .tname{font-size:14px;font-weight:600}
 .tnum{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--line);padding:1px 5px;border-radius:4px;margin-right:3px}
 .tdate{font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);margin-top:4px}
+.tdate .proj{font-style:italic;color:var(--muted)}
+.tstatus{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:5px;white-space:nowrap;align-self:center}
+.tstatus.started{background:var(--brand-light);color:var(--brand)}
+.tstatus.done{background:#e7f5ec;color:var(--green)}
 .tdate-edit{cursor:pointer;display:inline-block;color:var(--brand);text-decoration:underline;text-underline-offset:2px;text-decoration-style:dashed;border-radius:5px;padding:1px 5px;margin:-1px -5px;transition:background .1s}
 .tdate-edit:active{background:var(--brand-light)}
 .tacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
@@ -247,6 +251,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
       <div class="edit-label">Current Predecessors</div>
       <div class="pred-chips" id="edit-pred-chips"></div>
       <button class="edit-pred-btn" onclick="openPredPicker()">⟳ Change Predecessors</button>
+      <button id="edit-dep-btn" onclick="openDependentsModal(editTaskNum)" style="width:100%;font-family:inherit;font-size:13px;font-weight:600;padding:9px;margin-top:8px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer">▸ View dependents</button>
     </div>
 
     <div class="edit-row">
@@ -274,6 +279,18 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
     <div class="edit-btns">
       <button onclick="closeEditTask()" style="flex:1;font-family:inherit;font-size:14px;font-weight:600;padding:13px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer">Cancel</button>
       <button id="edit-save-btn" onclick="saveEditTask()" style="flex:2;font-family:inherit;font-size:14px;font-weight:700;padding:13px;border-radius:10px;border:none;background:var(--brand);color:#fff;cursor:pointer">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dependents (successors) modal -->
+<div id="depmodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;width:100%;max-width:440px;max-height:82vh;overflow-y:auto;border-radius:14px;padding:18px 16px">
+    <div id="dep-title" style="font-size:15px;font-weight:700;margin-bottom:3px"></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tasks that depend on this one. Tap one to edit it.</div>
+    <div id="dep-list"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button onclick="document.getElementById('depmodal').style.display='none'" style="font-family:inherit;font-size:14px;font-weight:700;padding:11px 22px;border-radius:9px;border:none;background:var(--brand);color:#fff;cursor:pointer">Close</button>
     </div>
   </div>
 </div>
@@ -523,6 +540,71 @@ function computeStage(){
   return{reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
 }
 
+// ── STAGE LEGEND (read-only reference: which tasks drive each stage) ──
+// Pure display of the template stage-map already loaded into `stageMap`.
+// Driving-task NAMES are joined from `bn` (bt_num -> task) we already hold.
+function stageLegendHtml(){
+  const stages=(stageMap||[]).slice().sort((a,b)=>a.order-b.order);
+  if(!stages.length) return '';
+  const rows=stages.map((s,i)=>{
+    const trg=(s.triggers||[]).filter(x=>x!=null);
+    const tasks=trg.length
+      ? trg.map(bt=>'<div style="font-size:13px;padding:3px 0 3px 4px;color:#334155">#'+bt+' '+((bn[bt]&&bn[bt].name)||'(task not in this lot)')+'</div>').join('')
+      : '<div style="font-size:12px;color:var(--muted);padding:3px 0 3px 4px">'+(s.is_manual?'Manual stage — no driving tasks':'—')+'</div>';
+    return '<div style="border-top:1px solid #eef2f7">'
+      + '<button type="button" onclick="toggleStageRow(\'slrow-'+i+'\',this)" style="width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;padding:9px 4px;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;text-align:left">'
+      +   '<span class="slcaret" style="width:12px;color:var(--muted)">▸</span>'
+      +   '<span><strong>'+s.code+'</strong> · '+s.label+(s.is_manual?' <span style="font-size:11px;color:var(--muted);font-weight:400">(manual)</span>':'')+'</span>'
+      +   '<span style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">'+trg.length+' task'+(trg.length===1?'':'s')+'</span>'
+      + '</button>'
+      + '<div id="slrow-'+i+'" style="display:none;padding:0 4px 8px 24px">'+tasks+'</div>'
+      + '</div>';
+  }).join('');
+  return '<div style="background:#fff;border:1px solid #e5eaef;border-radius:12px;margin:0 2px 12px;overflow:hidden">'
+    + '<button type="button" onclick="toggleStageLegendMaster(this)" style="width:100%;display:flex;align-items:center;gap:8px;background:#f8fafc;border:none;padding:11px 12px;font-family:inherit;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;text-align:left">'
+    +   '📍 Stage legend — tasks that drive each stage'
+    +   '<span class="slmcaret" style="margin-left:auto;color:var(--muted)">▸</span>'
+    + '</button>'
+    + '<div class="slmbody" style="display:none;padding:0 8px 4px">'+rows+'</div>'
+    + '</div>';
+}
+function toggleStageLegendMaster(btn){
+  const body=btn.parentElement.querySelector('.slmbody');
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  btn.querySelector('.slmcaret').textContent=open?'▸':'▾';
+}
+function toggleStageRow(id,btn){
+  const body=document.getElementById(id);
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  btn.querySelector('.slcaret').textContent=open?'▸':'▾';
+}
+
+// ── Generic in-app modal (replaces browser confirm/alert in the finish flow) ──
+// Reuses the existing .dr-* styling. Resolves with the chosen button's `value`
+// (backdrop tap → null). buttons: [{label, value, kind:'primary'|'secondary'|'danger'|'ghost'}]
+function appModal({title, sub, buttons}){
+  return new Promise(resolve=>{
+    const base='width:100%;text-align:center;padding:13px 14px;border-radius:9px;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;border:1px solid;box-sizing:border-box';
+    const styleFor=k=> k==='primary' ? base+';border-color:#27ae60;background:#27ae60;color:#fff'
+                     : k==='danger'  ? base+';border-color:#c0392b;background:#fff;color:#c0392b'
+                     : k==='ghost'   ? base+';border-color:#dfe4e7;background:#fff;color:#7f8c8d;font-weight:600'
+                     :                 base+';border-color:#dfe4e7;background:#fff;color:#2c3e50';   // secondary
+    const bhtml=(buttons||[]).map((b,i)=>'<button class="fm-btn" data-i="'+i+'" style="'+styleFor(b.kind)+'">'+b.label+'</button>').join('');
+    const html='<div id="fm-overlay" class="dr-overlay"><div class="dr-modal">'
+      +'<div class="dr-title">'+title+'</div>'
+      +(sub?'<div class="dr-sub">'+sub+'</div>':'')
+      +'<div style="display:flex;flex-direction:column;gap:8px">'+bhtml+'</div>'
+      +'</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    const ov=document.getElementById('fm-overlay');
+    const done=val=>{ ov.remove(); resolve(val); };
+    ov.querySelectorAll('.fm-btn').forEach(b=>{ b.onclick=()=>done(buttons[+b.dataset.i].value); });
+    ov.addEventListener('click', e=>{ if(e.target===ov) done(null); });   // backdrop = cancel
+  });
+}
+
 function openDatePicker(title,defaultDate){
   return new Promise(resolve=>{
     const ov=document.getElementById('dpick');
@@ -613,6 +695,7 @@ function renderSchedule(){
     lotGates.forEach(g=>{h+='<button class="gbtn'+(g.confirmed?' on':'')+'" data-gid="'+g.id+'" data-cf="'+(g.confirmed?1:0)+'">'+g.gate_name+(g.confirmed?' ✓':'')+'</button>';});
     h+='</div></div>';
   }
+  h+=stageLegendHtml();
   h+='<div id="sched"></div>';
   document.getElementById('sched-view').innerHTML=h;
   document.querySelectorAll('.gbtn').forEach(b=>{b.onclick=()=>toggleGate(b.dataset.gid,b.dataset.cf==='1');});
@@ -694,17 +777,28 @@ function renderTasks(){
       const anyRed=tNotes.some(x=>x.flag==='red'),anyYellow=tNotes.some(x=>x.flag==='yellow');
       const flagIcon=anyRed?'<span class="flagi">🔴</span>':(anyYellow?'<span class="flagi">🟡</span>':'');
       const noteIcon=tNotes.length?'<span class="notei">📝<span class="notect">'+tNotes.length+'</span></span>':'';
+      // FIX #4: explicit status tag (top-right of the name row). Not-started = none.
+      const statusTag=a.finished?'<span class="tstatus done">Finished</span>'
+                     :(a.started?'<span class="tstatus started">Started</span>':'');
       // Start and finish BOTH derive from the engine's _projected_es (which already
       // honors the est_start_date override as a floor). Do NOT show the override
       // literally for start while taking finish from the engine — that produced an
       // impossible "start after finish" when the two were computed separately.
       const dispFinish=offToDate(t._projected_es + (t.dur-1));
-      const startLabel=(!a.started&&!a.finished)
-        ?fmt(ps)+' → '+fmt(dispFinish)
-        :(a.started?fmt(ps)+' → '+(a.finish?fmt(new Date(a.finish+'T00:00:00')):'…'):fmt(ps)+' → '+fmt(dispFinish));
+      // FIX #1: a started-but-not-finished task shows a PROJECTED finish (actual_start
+      // + duration, via the engine's _projected_ef) — labeled, not a committed date —
+      // instead of "…". Finished shows the real finish; not-started keeps its range.
+      let startLabel;
+      if(a.finished){
+        startLabel=fmt(ps)+' → '+fmt(new Date(a.finish+'T00:00:00'));
+      } else if(a.started){
+        startLabel=fmt(ps)+' → <span class="proj">'+fmt(pf)+' (projected)</span>';
+      } else {
+        startLabel=fmt(ps)+' → '+fmt(dispFinish);
+      }
       h+='<div class="t '+cls+'">'
         +'<div class="th"><div class="tname"><span class="tnum">#'+t.num+'</span>'+t.name+(t._crit?'<span class="critdot"></span>':'')+'</div>'
-        +'<div class="ticons">'+flagIcon+noteIcon+'</div></div>'
+        +'<div class="ticons">'+statusTag+flagIcon+noteIcon+'</div></div>'
         +'<div class="tdate">'+startLabel+'</div>'
         +'<div class="tacts">'+acts+'</div></div>';
     });
@@ -748,41 +842,119 @@ async function startTask(n){
   const defaultDate=t.est_start_date||todayYmd();
   const v=await openDatePicker('Start — #'+n+' '+t.name,defaultDate);
   if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
+  const av=ScheduleEngine.validateDateEntry({actualStart:v,constructionStart:curLot.construction_start_date||null,today:todayYmd()});
+  if(!av.ok){alert(av.message);return;}
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
 }
 async function finishTask(n){
   const t=bn[n];
-  // ── Item 2: Soft predecessor warning ──
+  const today=todayYmd();
+  const D=s=>fmt(new Date(s+'T00:00:00'));                 // pretty-print an ISO date
+  // projected finish = engine's current forecast for this started task
+  // (= actual_start + duration in working days). All dates ISO → lexical compare.
+  const projYmd=(t._projected_ef!=null)?ymd(offToDate(t._projected_ef)):today;
+  const tlabel='#'+n+' '+t.name;
+
+  // ── Soft predecessor warning (in-app modal) ──
   const incompletePreds=(t.preds||[]).filter(p=>bn[p]&&!(act[p]&&act[p].finished));
   if(incompletePreds.length){
-    const names=incompletePreds.map(p=>'#'+p+(bn[p]?' — '+bn[p].name:'')).join('\n');
-    const ok=confirm('⚠️ Unfinished predecessors:\n\n'+names+'\n\nFinishing now may affect schedule accuracy. If these tasks are no longer required first, remove them in ⚙ Edit.\n\nFinish anyway?');
-    if(!ok)return;
+    const names=incompletePreds.map(p=>'#'+p+(bn[p]?' — '+bn[p].name:'')).join('<br>');
+    const go=await appModal({
+      title:'⚠️ Unfinished predecessors',
+      sub:names+'<br><br>Finishing now may affect schedule accuracy. If these tasks are no longer required first, remove them in ⚙ Edit.',
+      buttons:[{label:'Finish anyway',value:'go',kind:'primary'},{label:'Cancel',value:null,kind:'ghost'}]
+    });
+    if(go!=='go')return;
   }
-  const v=await openDatePicker('Finish — #'+n+' '+t.name,todayYmd());
-  if(v===null)return;if(!isValidDate(v)){alert('Invalid date.');return;}
 
-  // ── DELAY REASON CAPTURE (critical tasks finished late) ──
-  // Planned finish comes from the engine's planned pass (_planned_ef offset).
+  // ── FINISH-FLOW STATES (#3) — one unified in-app modal, driven by projected vs today ──
+  // EVERY state offers a one-tap default AND "Different date…" (builders update
+  // 2-3x/week, so any task may have finished on a day other than today).
+  let v;
+  if(projYmd>today){
+    // EARLY — done today, ahead of the projected finish.
+    const r=await appModal({
+      title:'Finish '+tlabel,
+      sub:"You're finishing this early, on <strong>"+D(today)+"</strong>. Projected finish is "+D(projYmd)+".",
+      buttons:[
+        {label:'Confirm — finished today',value:'today',kind:'primary'},
+        {label:'Different date…',value:'pick',kind:'secondary'},
+        {label:'Cancel',value:null,kind:'ghost'}
+      ]
+    });
+    if(r===null)return; v=r;
+  } else if(projYmd===today){
+    // ON TIME — projected finish is today.
+    const r=await appModal({
+      title:'Finish '+tlabel,
+      sub:'Finish this task, completed today ('+D(today)+')?',
+      buttons:[
+        {label:'Confirm — finished today',value:'today',kind:'primary'},
+        {label:'Different date…',value:'pick',kind:'secondary'},
+        {label:'Cancel',value:null,kind:'ghost'}
+      ]
+    });
+    if(r===null)return; v=r;
+  } else {
+    // LATE — projected finish passed. Three explicit one-tap choices.
+    const r=await appModal({
+      title:'Finish '+tlabel,
+      sub:'This task is past its projected finish date of <strong>'+D(projYmd)+'</strong>. When was it actually completed?',
+      buttons:[
+        {label:'Backdate to projected date ('+D(projYmd)+')',value:'proj',kind:'secondary'},
+        {label:'Finished today ('+D(today)+')',value:'today',kind:'secondary'},
+        {label:'Different date…',value:'pick',kind:'secondary'},
+        {label:'Cancel',value:null,kind:'ghost'}
+      ]
+    });
+    if(r===null)return; v=r;
+  }
+  // Resolve the button choice into a date. 'today'/'proj' are one-tap; 'pick'
+  // opens the constrained picker (construction_start ≤ date ≤ today) in EVERY state.
+  if(v==='today')      v=today;
+  else if(v==='proj')  v=projYmd;
+  else if(v==='pick'){
+    v=await openDatePicker('Finish — '+tlabel,today);
+    if(v===null)return;
+  }
+  if(!isValidDate(v)){ await appModal({title:'Invalid date',sub:'That date could not be read. Please try again.',buttons:[{label:'OK',value:null,kind:'primary'}]}); return; }
+
+  // ── Entry-block (REUSED, single path). Future = a rule, stated in-app. ──
+  const av=ScheduleEngine.validateDateEntry({actualFinish:v,priorStart:(act[n]&&act[n].start)||null,constructionStart:curLot.construction_start_date||null,today:today});
+  if(!av.ok){
+    await appModal({
+      title: av.reason==='future' ? "Can't finish in the future" : 'Date not allowed',
+      sub: av.reason==='future'
+        ? "You can't complete a task on a future date. Finish it early today, or come back when it's done."
+        : av.message,
+      buttons:[{label:'OK',value:null,kind:'primary'}]
+    });
+    return;
+  }
+
+  // ── DELAY REASON — required IF AND ONLY IF the task is on the CRITICAL PATH
+  // AND actual finish > projected finish. A non-critical task has float, absorbs
+  // late finish into slack, and does NOT threaten completion — so no reason (no
+  // nagging). t._crit is the field engine's live-computed pure-CPM critical set
+  // (float ≤ 0) — the true computed critical path. Since force_critical was removed
+  // (2026-08-07) is_critical now equals this same pure-float set on both surfaces.
+  // Projected finish (not the frozen baseline) stays the reference. Reuses the
+  // existing delay machinery + fail-safe.
   let delayPayload=null;
-  if(t.is_crit && t._planned_ef!=null){
-    const plannedDate=offToDate(t._planned_ef);
-    const plannedYmd=ymd(plannedDate);
-    if(v > plannedYmd){
-      const daysLate=wdBetween(plannedYmd, v);
-      // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
-      // (tables not deployed, API error), let the finish go through without it.
-      let reasonsOk=true;
-      try{
-        if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
-        if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
-      }catch(e){ reasonsOk=false; }
-      if(reasonsOk){
-        const picked=await openDelayReasonModal(n, t.name, plannedYmd, v, daysLate);
-        if(picked===null) return;            // cancelled -> abort the finish
-        delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
-                      days_late:daysLate, expected_done:plannedYmd, actual_finish:v};
-      }
+  if(t._crit && v > projYmd){
+    const daysLate=wdBetween(projYmd, v);
+    // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
+    // (tables not deployed, API error), let the finish go through without it.
+    let reasonsOk=true;
+    try{
+      if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
+      if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
+    }catch(e){ reasonsOk=false; }
+    if(reasonsOk){
+      const picked=await openDelayReasonModal(n, t.name, projYmd, v, daysLate);
+      if(picked===null) return;              // cancelled -> abort the finish
+      delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
+                    days_late:daysLate, expected_done:projYmd, actual_finish:v};
     }
   }
 
@@ -809,14 +981,14 @@ function wdBetweenYmd(a,b){
 
 // ── DELAY REASON MODAL ──
 let _drResolve=null, _drReasons=null;
-async function openDelayReasonModal(btNum, taskName, plannedYmd, actualYmd, daysLate){
+async function openDelayReasonModal(btNum, taskName, projYmd, actualYmd, daysLate){
   if(!Array.isArray(_drReasons)) _drReasons = [];
   return new Promise(res=>{
     _drResolve=res;
     const opts=_drReasons.map(r=>'<button class="dr-opt" data-id="'+r.id+'" data-label="'+String(r.label).replace(/"/g,'&quot;')+'">'+r.label+'</button>').join('');
     const html='<div id="dr-overlay" class="dr-overlay"><div class="dr-modal">'
       +'<div class="dr-title">Why was this late?</div>'
-      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Planned '+plannedYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
+      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Projected finish '+projYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
       +'<div class="dr-opts">'+opts+'</div>'
       +'<textarea id="dr-note" class="dr-note" placeholder="Optional note (required if you choose Other)\u2026"></textarea>'
       +'<div id="dr-warn" style="display:none;color:#c0392b;font-size:12px;margin-top:6px">A note is required when choosing \u201cOther\u201d.</div>'
@@ -915,9 +1087,28 @@ function openEditTask(n){
   estEl.dataset.prefill = prefill;   // remember what we pre-filled so we can detect a real change
   estEl.dataset.hadOverride = t.est_start_date ? '1' : '';
   renderEditPredChips();
+  const depCount=(ScheduleEngine.computeSuccessors(TASKS)[n]||[]).length;
+  document.getElementById('edit-dep-btn').textContent='▸ View dependents ('+depCount+')';
   document.getElementById('editmodal').classList.add('open');
 }
 function clearEstStart(){document.getElementById('edit-est-start').value='';}
+function openDependentsModal(taskNum){
+  const t=bn[taskNum];
+  const succ=ScheduleEngine.computeSuccessors(TASKS)[taskNum]||[];
+  document.getElementById('dep-title').textContent='Dependents of #'+taskNum+(t?' — '+t.name:'')+'  ('+succ.length+')';
+  const box=document.getElementById('dep-list');
+  if(!succ.length){box.innerHTML='<div style="color:var(--muted);padding:12px 2px;text-align:center">No tasks depend on this one.</div>';}
+  else{box.innerHTML=succ.map(s=>{
+    const col=s.lag<0?'#b45309':(s.lag>0?'#0369a1':'#475569');
+    return '<div onclick="depJumpTo('+s.num+')" style="cursor:pointer;border:1px solid #eef2f7;border-radius:10px;padding:10px 12px;margin-bottom:8px">'
+      +'<div style="font-weight:700;font-size:14px">#'+s.num+' '+s.name+'</div>'
+      +'<div style="font-size:12px;color:'+col+';font-weight:600;margin-top:3px">'+s.lagLabel+' <span style="color:var(--muted);font-weight:400">(lag '+(s.lag>=0?'+':'')+s.lag+')</span></div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:2px">predecessors: '+(s.predecessors.length?s.predecessors.map(p=>'#'+p).join(', '):'none')+'</div>'
+      +'</div>';
+  }).join('');}
+  document.getElementById('depmodal').style.display='flex';
+}
+function depJumpTo(n){document.getElementById('depmodal').style.display='none';if(bn[n])openEditTask(n);}
 
 function closeEditTask(){
   document.getElementById('editmodal').classList.remove('open');
@@ -983,6 +1174,11 @@ function togglePred(n,checked){
 async function saveEditTask(){
   if(editTaskNum===null)return;
   const t=bn[editTaskNum];
+  // Self-orphan warning: a task with no predecessor floats free and won't cascade
+  // (integrity rule). Only the project-start task should have none. Soft confirm.
+  if((!editPreds||editPreds.length===0)&&(t.preds&&t.preds.length>0)){
+    if(!confirm('⚠️ #'+editTaskNum+' '+t.name+' will have NO predecessor.\n\nEvery task except the project-start task must be chained, or it won\'t cascade correctly. Save with no predecessor anyway?'))return;
+  }
   const dur=parseInt(document.getElementById('edit-dur').value);
   const lagRaw=document.getElementById('edit-lag').value;const lag=lagRaw!==''?parseInt(lagRaw):0;
   const phaseEl=document.getElementById('edit-phase');
@@ -999,6 +1195,9 @@ async function saveEditTask(){
   if(newEstStart && newEstStart === prefilled && !hadOverride){
     newEstStart = null;
   }
+  // Guard the override: construction-start floor only (FUTURE overrides are allowed — no today ceiling).
+  const ev=ScheduleEngine.validateDateEntry({estStartDate:newEstStart,constructionStart:curLot.construction_start_date||null});
+  if(!ev.ok){alert(ev.message);return;}
 
   if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
 
