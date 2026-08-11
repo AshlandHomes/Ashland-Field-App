@@ -48,6 +48,43 @@ async function supabaseRequest(method, path, body) {
   }
 }
 
+// ── actual-date entry guard ──────────────────────────────────────────────
+// Authoritative backstop for the rule ScheduleEngine.validateDateEntry enforces:
+// actual_start/actual_finish must fall in [construction_start, today] and finish
+// must not precede start. Every write of an actual funnels through the two cases
+// below (updateScheduleLotTask, bulkUpdateLotTasks), so guarding them = no back
+// door. Uses server (UTC) date as the upper bound; the field-app UI uses the
+// builder's local date for the precise message. (UTC >= local for US zones, so
+// legitimate local-today entries always pass; the backend just refuses the
+// egregious future dates the UI would also refuse.)
+async function loadDateGuardCtx(taskIds) {
+  const ids = [...new Set((taskIds || []).filter(Boolean))];
+  if (!ids.length) return { taskById: {}, csByLot: {} };
+  const tr = await supabaseRequest('GET', `sched_lot_tasks?id=in.(${ids.join(',')})&select=id,lot_id,actual_start`);
+  const taskById = {}; (tr.data || []).forEach(t => { taskById[t.id] = t; });
+  const lotIds = [...new Set((tr.data || []).map(t => t.lot_id).filter(Boolean))];
+  const lr = lotIds.length ? await supabaseRequest('GET', `sched_lots?id=in.(${lotIds.join(',')})&select=id,construction_start_date`) : { data: [] };
+  const csByLot = {}; (lr.data || []).forEach(l => { csByLot[l.id] = l.construction_start_date || null; });
+  return { taskById, csByLot };
+}
+// Validates only the fields being SET; actuals get the full [cs, today] window,
+// est_start_date gets the construction-start floor only (future overrides allowed).
+// The task's existing actual_start is passed as priorStart (finish>=start reference,
+// not re-validated — so legacy bad start data can't block a legitimate write).
+function checkDateEntry(u, ctx, today) {
+  if (!u) return { ok: true };
+  const setting = {};
+  if (u.actual_start   !== undefined) setting.actualStart  = u.actual_start;
+  if (u.actual_finish  !== undefined) setting.actualFinish = u.actual_finish;
+  if (u.est_start_date !== undefined) setting.estStartDate = u.est_start_date;
+  if (setting.actualStart === undefined && setting.actualFinish === undefined && setting.estStartDate === undefined) return { ok: true };
+  const t = ctx.taskById[u.task_id];
+  setting.priorStart = t ? t.actual_start : null;
+  setting.constructionStart = t ? ctx.csByLot[t.lot_id] : null;
+  setting.today = today;
+  return ScheduleEngine.validateDateEntry(setting);
+}
+
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -404,19 +441,19 @@ exports.handler = async function(event) {
         // TRUE CPM. Forward pass -> earliest start/finish. Backward pass -> latest
         // start/finish. Float = LS - ES. Critical when float <= 0, i.e. any slip
         // pushes the completion date. This is CALCULATED, not hand-flagged —
-        // force_critical only ADDS tasks you always want treated as critical.
+        // force_critical was removed entirely (owner decision 2026-08-07).
         const { template_id } = payload;
         if (!template_id) return { statusCode: 400, body: JSON.stringify({ error: 'template_id required' }) };
 
         const tkRes = await supabaseRequest('GET',
-          `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num,duration,lag,relative_start,predecessors,force_critical&order=task_order`);
+          `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num,duration,lag,relative_start,predecessors&order=task_order`);
         const tasks = tkRes.data || [];
         if (!tasks.length) {
           return { statusCode: 200, body: JSON.stringify({ success: true, tasks: 0, critical: 0 }) };
         }
 
         // TRUE CPM via the single shared engine (schedule-engine.js): forward +
-        // backward pass, float = LS - ES, critical when float <= 0 OR force_critical.
+        // backward pass, float = LS - ES, critical when float <= 0 (pure CPM).
         const { updates, criticalCount, projectEnd } = ScheduleEngine.computeTemplateCritical(tasks);
 
         for (const u of updates) {
@@ -497,7 +534,6 @@ exports.handler = async function(event) {
         if (task_order !== undefined)      f.task_order = task_order;
         if (notification !== undefined)    f.notification = notification;
         if (payload.trade !== undefined)          f.trade = payload.trade;
-        if (payload.force_critical !== undefined) f.force_critical = payload.force_critical;
         let r;
         if (id) {
           r = await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${id}`, f);
@@ -840,9 +876,14 @@ exports.handler = async function(event) {
           return { statusCode: 400, body: JSON.stringify({ error: 'updates array is required' }) };
         }
         const stamp = new Date().toISOString();
+        const guardToday = stamp.slice(0, 10);
+        const guardCtx = await loadDateGuardCtx(updates.map(u => u && u.task_id));
         let done = 0; const failed = [];
         for (const u of updates) {
           if (!u || !u.task_id) { failed.push({ task_id: u && u.task_id, error: 'missing task_id' }); continue; }
+          // Hard gate: skip (and report) any impossible date; valid updates still write.
+          const gv = checkDateEntry(u, guardCtx, guardToday);
+          if (!gv.ok) { failed.push({ task_id: u.task_id, error: gv.message }); continue; }
           const upd = { updated_at: stamp };
           if (u.status !== undefined) upd.status = u.status;
           if (u.actual_start !== undefined) upd.actual_start = u.actual_start;
@@ -866,6 +907,13 @@ exports.handler = async function(event) {
         const { task_id, lot_id, status, actual_start, actual_finish, vendor_confirmed, est_start_date } = payload;
         if (!task_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'task_id is required' }) };
+        }
+        // Hard gate: reject impossible dates. Actuals -> [construction_start, today];
+        // est_start_date -> construction-start floor only (future overrides allowed).
+        if (actual_start !== undefined || actual_finish !== undefined || est_start_date !== undefined) {
+          const gctx = await loadDateGuardCtx([task_id]);
+          const gv = checkDateEntry({ task_id, actual_start, actual_finish, est_start_date }, gctx, new Date().toISOString().slice(0, 10));
+          if (!gv.ok) return { statusCode: 400, body: JSON.stringify({ error: gv.message, field: gv.field, reason: gv.reason }) };
         }
         const updates = { updated_at: new Date().toISOString() };
         if (status !== undefined) updates.status = status;

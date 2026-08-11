@@ -686,7 +686,8 @@ tr:hover td{background:#f9fafb}
       <input type="hidden" id="task-preds">
       <div id="task-preds-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
       <button type="button" class="btn btn-secondary btn-sm" onclick="openPredPicker()">＋ Choose predecessors</button>
-      <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Tasks that must finish before this one can start.</p>
+      <button type="button" id="task-dep-btn" class="btn btn-secondary btn-sm" onclick="openDependentsModal()">▸ View dependents</button>
+      <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Tasks that must finish before this one can start. "View dependents" shows what depends on THIS task.</p>
     </div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>Relative Start <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="task-rs" type="number"></div>
@@ -708,10 +709,7 @@ tr:hover td{background:#f9fafb}
         <label style="margin:0">Critical Path</label>
         <span id="task-crit-status" style="font-size:12px;font-weight:700"></span>
       </div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Calculated automatically from durations and predecessors — a task is critical when it has zero float, meaning any delay pushes the completion date.</p>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-        <input id="task-force-critical" type="checkbox" style="width:16px;height:16px"> Always treat as critical (override)
-      </label>
+      <p style="font-size:12px;color:var(--muted);margin:0">Calculated automatically from durations and predecessors — a task is critical when it has zero float, meaning any delay pushes the completion date. There is no manual override; the critical path is whatever the math computes.</p>
     </div>
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeModal('modal-task')">Cancel</button>
@@ -872,6 +870,16 @@ tr:hover td{background:#f9fafb}
       <button class="btn btn-secondary" onclick="closeModal('modal-sub-detail')">Cancel</button>
       <button class="btn btn-primary" onclick="submitSubDetail()">Save All Changes →</button>
     </div>
+  </div>
+</div>
+
+<!-- Dependents (successors) modal -->
+<div class="modal-overlay" id="modal-dependents">
+  <div class="modal" style="max-width:470px">
+    <h2 id="dep-title" style="margin-bottom:2px">Dependents</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tasks that depend on this one. Click a row to edit it and re-attach.</div>
+    <div id="dep-list"></div>
+    <div class="modal-btns"><button class="btn btn-primary" onclick="closeModal('modal-dependents')">Close</button></div>
   </div>
 </div>
 
@@ -1253,21 +1261,40 @@ async function openStageModal(lotId){
       + holdLine
       +'</div>';
   }
+  // bt_num -> task name, for the expandable driving-task lists (reuse the lot's tasks).
+  const btName = {}; ltasks.forEach(t=>{ btName[t.bt_num]=t.name; });
   const sorted = stages.slice().sort((a,b)=>a.order-b.order);
-  const ladder = sorted.map(s=>{
+  const ladder = sorted.map((s,i)=>{
     const isRep = s.code===rep;
     const isTrue = s.code===tru;
     const bg = isRep ? '#0369a1' : (isTrue ? '#e0f2fe' : '#dfe7ec');
     const fg = isRep ? '#fff' : '#334155';
     const tags = (isRep?' <span style="font-size:10px;background:#fff;color:#0369a1;padding:1px 5px;border-radius:3px">REPORTED</span>':'')
                + (isTrue&&!isRep?' <span style="font-size:10px;background:#0369a1;color:#fff;padding:1px 5px;border-radius:3px">TRUE</span>':'');
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 11px;border-radius:6px;margin-bottom:3px;background:'+bg+';color:'+fg+';font-weight:'+(isRep?700:400)+'">'
-      +'<div><strong>'+s.code+'</strong> · '+s.label+tags+'</div>'
-      +(s.is_manual?'<span style="font-size:11px;opacity:.7">manual</span>':'')+'</div>';
+    const trg = (s.triggers||[]).filter(x=>x!=null);
+    const bodyFg = isRep ? '#e0f2fe' : '#475569';
+    const tasksHtml = trg.length
+      ? trg.map(bt=>'<div style="font-size:13px;padding:2px 0;color:'+bodyFg+'">#'+bt+' '+(btName[bt]||'(task not in this lot)')+'</div>').join('')
+      : '<div style="font-size:12px;opacity:.75;padding:2px 0;color:'+bodyFg+'">'+(s.is_manual?'Manual stage — no driving tasks':'—')+'</div>';
+    return '<div style="border-radius:6px;margin-bottom:3px;background:'+bg+';color:'+fg+';overflow:hidden">'
+      +'<div onclick="toggleAdminStageRow(\'astg-'+i+'\',this)" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;font-weight:'+(isRep?700:400)+'">'
+      +  '<div><span class="astg-caret" style="display:inline-block;width:12px;opacity:.75">▸</span> <strong>'+s.code+'</strong> · '+s.label+tags+'</div>'
+      +  '<span style="font-size:11px;opacity:.75;white-space:nowrap">'+(s.is_manual?'manual · ':'')+trg.length+' task'+(trg.length===1?'':'s')+'</span>'
+      +'</div>'
+      +'<div id="astg-'+i+'" style="display:none;padding:2px 11px 9px 27px">'+tasksHtml+'</div>'
+      +'</div>';
   }).join('');
   box.innerHTML = gateHtml
     + (tru&&tru!==rep ? '<div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚡ This lot is actually at stage '+tru+' but reports 5.9 because utility gates are open.</div>' : '')
+    + (stages.length ? '<div style="font-size:11px;color:var(--muted);margin:2px 0 6px">Tap a stage to see the tasks that drive it.</div>' : '')
     + (ladder || '<p style="color:var(--muted);text-align:center;padding:20px">No stage map for this lot\'s template</p>');
+}
+// Expand/collapse a stage row to reveal its driving tasks (pure display).
+function toggleAdminStageRow(id,el){
+  const body=document.getElementById(id);
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  const c=el.querySelector('.astg-caret'); if(c) c.textContent=open?'▸':'▾';
 }
 
 function closeBadgeHtml(lot) {
@@ -2491,7 +2518,7 @@ function _tplTaskRow(t){
   return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
     +'<div>'+(t.is_critical?'<span style="color:#0082A0">◆</span> ':'<span style="color:#cbd5e1">○</span> ')
     +  '<strong>#'+(t.bt_num!=null?t.bt_num:'?')+'</strong> '+(t.name||'')
-    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+(t.force_critical?' · <span style="color:#0082A0">forced critical</span>':'')+'</div></div>'
+    +  '<div class="flag-meta">dur '+(t.duration!=null?t.duration:'—')+' · lag '+(t.lag!=null?t.lag:0)+' · preds '+preds+' · '+(t.task_type||'work')+(t.trade?' · '+t.trade:'')+'</div></div>'
     +'<div style="display:flex;gap:6px;white-space:nowrap">'
     +  '<button class="btn btn-secondary btn-sm" onclick="openEditTaskModal(\'' + t.id + '\')">Edit</button>'
     +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteTaskUI(\'' + t.id + '\')">Delete</button>'
@@ -2556,8 +2583,8 @@ function openAddTaskModal(){
   document.getElementById('task-order').value=nextOrd;
   document.getElementById('task-type').value='work';
   document.getElementById('task-trade').value='';
-  document.getElementById('task-force-critical').checked=false;
   _setCritStatus(null);
+  document.getElementById('task-dep-btn').style.display='none';   // new task has no dependents yet
   document.getElementById('modal-task').classList.add('open');
   setTimeout(function(){document.getElementById('task-name').focus();},50);
 }
@@ -2577,24 +2604,59 @@ function openEditTaskModal(id){
   document.getElementById('task-order').value=t.task_order!=null?t.task_order:'';
   document.getElementById('task-type').value=t.task_type||'work';
   document.getElementById('task-trade').value=t.trade||'';
-  document.getElementById('task-force-critical').checked=!!t.force_critical;
   _setCritStatus(!!t.is_critical);
+  const _depN=(ScheduleEngine.computeSuccessors(tplEdit.tasks)[t.bt_num]||[]).length;
+  const _depBtn=document.getElementById('task-dep-btn');
+  _depBtn.textContent='▸ View dependents ('+_depN+')'; _depBtn.style.display='';
   document.getElementById('modal-task').classList.add('open');
 }
+function openDependentsModal(){
+  const bt=parseInt(document.getElementById('task-btnum').value);
+  const succ=isNaN(bt)?[]:(ScheduleEngine.computeSuccessors(tplEdit.tasks)[bt]||[]);
+  const t=tplEdit.tasks.find(x=>x.bt_num===bt);
+  document.getElementById('dep-title').textContent='Dependents of #'+bt+(t?' — '+t.name:'')+'  ('+succ.length+')';
+  const box=document.getElementById('dep-list');
+  if(!succ.length){box.innerHTML='<div style="color:var(--muted);padding:12px 2px">No tasks depend on this one.</div>';}
+  else{box.innerHTML=succ.map(s=>{
+    const col=s.lag<0?'#b45309':(s.lag>0?'#0369a1':'#475569');
+    const tid=(tplEdit.tasks.find(x=>x.bt_num===s.num)||{}).id||'';
+    return '<div onclick="depJumpTo(\''+tid+'\')" style="cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px">'
+      +'<div style="font-weight:700">#'+s.num+' '+s.name+'</div>'
+      +'<div style="font-size:12px;color:'+col+';font-weight:600;margin-top:3px">'+s.lagLabel+' <span style="color:var(--muted);font-weight:400">(lag '+(s.lag>=0?'+':'')+s.lag+')</span></div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:2px">predecessors: '+(s.predecessors.length?s.predecessors.map(p=>'#'+p).join(', '):'none')+'</div>'
+      +'</div>';
+  }).join('');}
+  document.getElementById('modal-dependents').classList.add('open');
+}
+function depJumpTo(id){closeModal('modal-dependents');if(id)openEditTaskModal(id);}
 async function submitTask(){
   const id=document.getElementById('task-id').value||null;
   const name=(document.getElementById('task-name').value||'').trim();
   if(!name){ alert('Enter a task name'); return; }
   const num=function(v){ const s=(document.getElementById(v).value||'').trim(); return s===''?null:parseInt(s); };
   const preds = _predSel.slice();
+  const newBt = num('task-btnum');
+  const orig = id ? tplEdit.tasks.find(t=>t.id===id) : null;
+  // Self-orphan warning: saving a non-start task with no predecessor breaks the cascade.
+  if(preds.length===0){
+    if(!confirm('⚠️ "#'+(newBt!=null?newBt:'')+' '+name+'" will have NO predecessor.\n\nEvery task except the project-start task must be chained, or it won\'t cascade correctly. Save with no predecessor anyway?')) return;
+  }
+  // Renumber warning: changing bt_num leaves existing successors pointing at the OLD number.
+  if(orig && newBt!=null && orig.bt_num!=null && newBt!==orig.bt_num){
+    const deps = (ScheduleEngine.computeSuccessors(tplEdit.tasks)[orig.bt_num]) || [];
+    if(deps.length){
+      if(!confirm('⚠️ Renumbering #'+orig.bt_num+' → #'+newBt+' will DANGLE '+deps.length+' successor(s) that still point at #'+orig.bt_num+':\n\n'
+        + deps.map(d=>'  #'+d.num+' '+d.name).join('\n')
+        + '\n\nTheir predecessor references won\'t follow the renumber — re-attach each after saving. Renumber anyway?')) return;
+    }
+  }
   const body = {
-    bt_num: num('task-btnum'), name,
+    bt_num: newBt, name,
     phase_id: document.getElementById('task-phase').value || null,
     duration: num('task-duration'), lag: num('task-lag'),
     relative_start: num('task-rs'), relative_finish: num('task-rf'),
     predecessors: preds,
     trade: (document.getElementById('task-trade').value||'').trim() || null,
-    force_critical: document.getElementById('task-force-critical').checked,
     task_type: document.getElementById('task-type').value,
     task_order: num('task-order')
   };
@@ -2606,7 +2668,15 @@ async function submitTask(){
 }
 async function deleteTaskUI(id){
   const t = tplEdit.tasks.find(x=>x.id===id);
-  if(!confirm('Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?')) return;
+  // Orphan warning: which dependents would be left with NO valid predecessor?
+  const orphans = t ? ScheduleEngine.findOrphanedSuccessors(tplEdit.tasks, t.bt_num) : [];
+  let msg = 'Delete task "#'+(t?t.bt_num:'')+' '+(t?t.name:'')+'"?';
+  if(orphans.length){
+    msg = '⚠️ Deleting #'+t.bt_num+' '+t.name+' will ORPHAN '+orphans.length+' task(s):\n\n'
+      + orphans.map(o=>'  #'+o.num+' '+o.name).join('\n')
+      + '\n\nThey depend on #'+t.bt_num+' and will have NO predecessor — they won\'t cascade correctly. Re-attach each to a new predecessor after deleting.\n\nDelete anyway?';
+  }
+  if(!confirm(msg)) return;
   await sbCall('deleteTemplateTask', { id });
   await sbCall('recalcTemplateCriticalPath', { template_id: tplEdit.id });
   await openTemplateEditor(tplEdit.id);

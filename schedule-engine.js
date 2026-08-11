@@ -11,10 +11,10 @@
  * date calc (see BUILD_SPEC §2.2, §6).
  *
  * The math is a faithful extraction of the proven field-app engine
- * (ashland-stage-update.html runEngine, the reference/source-of-truth) plus
- * the force_critical rule from the backend critical-path writer. It is a
- * WORKING-DAY engine: weekends excluded, offset 1 == the construction start
- * date itself.
+ * (ashland-stage-update.html runEngine, the reference/source-of-truth). The
+ * critical set is PURE CPM float ≤ 0 — force_critical was removed entirely
+ * (owner decision 2026-08-07). It is a WORKING-DAY engine: weekends excluded,
+ * offset 1 == the construction start date itself.
  * ---------------------------------------------------------------------------
  */
 (function (root, factory) {
@@ -84,7 +84,6 @@
       actualStart:   t.actualStart || t.actual_start || (t.act && t.act.start) || null,
       actualFinish:  t.actualFinish || t.actual_finish || (t.act && t.act.finish) || null,
       estStartDate:  t.estStartDate || t.est_start_date || null,
-      forceCritical: !!(t.forceCritical || t.force_critical),
       isCritical:    !!(t.isCritical || t.is_critical),
       taskOrder:     (t.taskOrder != null ? t.taskOrder
                        : (t.task_order != null ? t.task_order
@@ -192,7 +191,9 @@
 
     var end = TASKS.length ? Math.max.apply(null, TASKS.map(function (t) { return ef[t.num]; })) : 0;
 
-    // ── critical path (planned mode only, mirrors field app + force_critical) ──
+    // ── critical path (planned mode only) — PURE FLOAT ≤ 0, computed from the
+    // graph. No hand-flagging: force_critical was removed entirely (owner decision
+    // 2026-08-07) so the critical set is whatever the CPM math says, period. ──
     var floatByNum = {}, criticalByNum = {};
     if (mode === 'planned') {
       if (hasPreds) {
@@ -212,14 +213,14 @@
           var LS = LF - t.duration + 1;
           var fl = LS - es[t.num];
           floatByNum[t.num] = fl;
-          criticalByNum[t.num] = (fl <= 0) || t.forceCritical;  // force_critical ADDS, never removes
+          criticalByNum[t.num] = (fl <= 0);   // pure CPM critical
         });
       } else {
         TASKS.forEach(function (t) {
           var LS = end - t.duration + 1;
           var fl = LS - es[t.num];
           floatByNum[t.num] = fl;
-          criticalByNum[t.num] = (fl <= 0) || t.forceCritical || t.isCritical;
+          criticalByNum[t.num] = (fl <= 0) || t.isCritical;   // no-pred fallback keeps stored is_critical
         });
       }
     }
@@ -244,9 +245,7 @@
   // with actuals in a SEPARATE map act[num] = {started,finished,start,finish}.
   // This wrapper reshapes that into the canonical form, runs the one engine, and
   // returns { end, byNum } for the caller to write back onto its task objects.
-  // NOTE: force_critical is intentionally NOT sourced here — the field app never
-  // loaded it, so its critical set stays pure-CPM (behavior parity with the old
-  // inline runEngine). Do not add force_critical here without a behavior sign-off.
+  // The critical set is pure CPM float ≤ 0 (force_critical no longer exists).
   function computeFieldSchedule(TASKS, act, startDate, mode) {
     act = act || {};
     var tasks = (TASKS || []).map(function (t) {
@@ -265,9 +264,9 @@
 
   // ── surface adapter: BACKEND template critical writer ────────────────────
   // supabase.js recalcTemplateCriticalPath. tasks: sched_template_tasks rows
-  // {id, bt_num, duration, lag, relative_start, predecessors, force_critical}.
+  // {id, bt_num, duration, lag, relative_start, predecessors}.
   // Returns { updates:[{id,bt_num,is_critical,float}], criticalCount, projectEnd }.
-  // Planned mode, no start date — pure offsets; critical = float<=0 OR force_critical.
+  // Planned mode, no start date — pure offsets; critical = float ≤ 0 (pure CPM).
   function computeTemplateCritical(tasks) {
     var r = computeSchedule(tasks, { mode: 'planned' });
     var criticalCount = 0;
@@ -331,6 +330,100 @@
     return violations;
   }
 
+  // ── dependents / reverse map (BUILD_SPEC §3) ─────────────────────────────
+  // Successors are DERIVED from predecessors, never stored — one source of truth,
+  // always correct. describeLag turns a lag number into the relationship behavior
+  // so a human reads WHY each dependent hangs off this task without doing lag math.
+  function describeLag(lag) {
+    lag = lag || 0;
+    var n = Math.abs(lag), d = (n === 1 ? 'day' : 'days');
+    if (lag < 0) return 'Lead time · ' + n + ' ' + d + ' before this task starts';
+    if (lag === 0) return 'Right after this finishes';
+    return n + ' ' + d + ' after this finishes';
+  }
+
+  // computeSuccessors(tasks) -> { [num]: [{ num, name, predecessors, lag, lagLabel }] }
+  // Every task whose predecessors array contains a given task, keyed by that task.
+  function computeSuccessors(rawTasks) {
+    var tasks = (rawTasks || []).map(normalizeTask);
+    var succ = {};
+    tasks.forEach(function (s) {
+      (s.predecessors || []).forEach(function (p) {
+        (succ[p] = succ[p] || []).push({
+          num: s.num, name: s.name,
+          predecessors: (s.predecessors || []).slice(),
+          lag: s.lag, lagLabel: describeLag(s.lag)
+        });
+      });
+    });
+    return succ;
+  }
+
+  // findOrphanedSuccessors(tasks, affectedNum) -> the successors of affectedNum that
+  // would be left with NO valid predecessor if affectedNum were removed (their only
+  // remaining preds are affectedNum itself or tasks that don't exist). Powers the
+  // delete/renumber orphan warning.
+  function findOrphanedSuccessors(rawTasks, affectedNum) {
+    var tasks = (rawTasks || []).map(normalizeTask);
+    var exists = {}; tasks.forEach(function (t) { exists[t.num] = true; });
+    var orphans = [];
+    tasks.forEach(function (s) {
+      var preds = s.predecessors || [];
+      if (preds.indexOf(affectedNum) < 0) return;
+      var remaining = preds.filter(function (p) { return p !== affectedNum && exists[p]; });
+      if (remaining.length === 0) {
+        orphans.push({ num: s.num, name: s.name, predecessors: preds.slice(), lag: s.lag, lagLabel: describeLag(s.lag) });
+      }
+    });
+    return orphans;
+  }
+
+  // ── data-entry guard: dates must be physically possible ──────────────────
+  // Two DIFFERENT rules, by field type:
+  //   • actual_start / actual_finish — a CLAIM ABOUT THE PAST. Must fall in the
+  //     full window [constructionStart, today]: can't have happened before the
+  //     job began (the gamed pre-construction dates) and can't be in the future.
+  //     Also finish must not precede start. Legitimate BACKDATING inside the
+  //     window is allowed — a builder catching up enters the real past dates.
+  //   • est_start_date — a PROJECTION / OVERRIDE, legitimately set in the FUTURE
+  //     ("this task will start next month"). Construction-start floor ONLY; the
+  //     "not after today" ceiling does NOT apply to it.
+  // Same rules + messages for the field app (entry UX) and backend (the gate).
+  //
+  // All dates are 'YYYY-MM-DD'; ISO dates compare correctly as strings, so there
+  // is no Date parsing or timezone ambiguity.
+  // opts: { actualStart?, actualFinish?, priorStart?, estStartDate?, constructionStart?, today? }
+  // returns { ok:true } | { ok:false, field, reason, message }
+  function validateDateEntry(opts) {
+    opts = opts || {};
+    var cs = opts.constructionStart || null;
+    var today = opts.today || null;
+    // ACTUALS — full window.
+    var actuals = [['actual_start', opts.actualStart], ['actual_finish', opts.actualFinish]];
+    for (var i = 0; i < actuals.length; i++) {
+      var field = actuals[i][0], d = actuals[i][1];
+      if (!d) continue;                                    // absent / cleared-to-null is allowed
+      if (cs && d < cs) return { ok: false, field: field, reason: 'before_start',
+        message: 'This date is before construction started (' + cs + '). Enter the real date.' };
+      if (today && d > today) return { ok: false, field: field, reason: 'future',
+        message: "This date is in the future. A task can't be completed on a date that hasn't happened yet." };
+    }
+    // finish >= start. The reference start is the one being SET (actualStart) if
+    // present, else priorStart (the task's existing start) — priorStart is NOT
+    // window-validated, so a task with legacy bad start data can still be finished.
+    var effStart = (opts.actualStart != null) ? opts.actualStart : (opts.priorStart || null);
+    if (effStart && opts.actualFinish && opts.actualFinish < effStart) {
+      return { ok: false, field: 'actual_finish', reason: 'finish_before_start',
+        message: "Finish date can't be before the start date (" + effStart + ")." };
+    }
+    // est_start_date OVERRIDE — construction-start floor only; future is allowed.
+    if (opts.estStartDate && cs && opts.estStartDate < cs) {
+      return { ok: false, field: 'est_start_date', reason: 'before_start',
+        message: 'This override is before construction started (' + cs + '). Enter a date on or after it.' };
+    }
+    return { ok: true };
+  }
+
   // ── stage codes & gates (BUILD_SPEC §2.7) ─────────────────────────────────
   // stageMap: [{ code, label, order, is_manual, triggers:[bt_num] }]
   // finishedByNum: { [bt_num]: true } for finished tasks
@@ -373,6 +466,10 @@
     // core
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
+    validateDateEntry: validateDateEntry,
+    computeSuccessors: computeSuccessors,
+    findOrphanedSuccessors: findOrphanedSuccessors,
+    describeLag: describeLag,
     computeStage: computeStage,
     // surface adapters
     computeFieldSchedule: computeFieldSchedule,
