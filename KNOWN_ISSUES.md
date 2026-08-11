@@ -221,3 +221,57 @@ external-dependency" marker with its own semantics and its own visual (distinct
 from the float-critical red dot), decided task-by-task on purpose. Do NOT resurrect
 `force_critical`, and do NOT fold it into the delay trigger (which stays keyed to
 the float-based `_crit` — only completion-threatening lateness prompts a reason).
+
+## KI-9 — Today-floor for not-started tasks + manual-override (est_start_date) flag
+
+**Status:** logged — build together in a focused Dev session (owner: "not tonight").
+Same code area (`schedule-engine.js` projected-mode start + the field app's est
+handling), so they ship as one piece of work.
+**Surfaced:** WI Lot 1 "9 days behind" diagnosis (2026-08-11).
+
+### Part A — today-floor (was "Task 2")
+[VERIFIED from code] the engine has NO today-floor: a not-started task projects at
+its predecessor/relative/est position, never floored to today (`todayOff` is
+computed only for the "weeks out" stat, never fed to the engine). So a lot where
+nothing has started reports **On track** when it is really weeks behind.
+
+**Build:** in `computeSchedule` **projected mode only**, add an opt-in `today`
+param. For a **not-started** task, after the predecessor/relative + est floors,
+apply `start = max(start, actOffset(today, startDate))`. Stacks as
+`max(predecessor, estFloor, todayFloor)`: an est in the PAST is subsumed by today,
+an est in the FUTURE still wins. Started/finished tasks untouched (actuals are
+truth). Field app passes `today` into `runEngine('projected')` ONLY — planned mode
+never gets it, so `planEnd` (the baseline) and the health delta stay meaningful.
+
+### Part B — manual-override flag
+[CODE — verified] the override marker already exists: **`est_start_date IS NOT
+NULL`**. NULL = calculated; non-null = a human deliberately overrode. The edit
+modal DISPLAYS the calculated projected start as a prefill (so the field is never
+blank), but the save-guard (`ashland-stage-update-dev.html:1190-1198`) writes NULL
+unless the user changed it away from that prefill. There is NO separate override
+flag; `vendor_confirmed` is a *second* layer ("builder locked this override"),
+not the detection. Detection = `est_start_date IS NOT NULL`. **Gate before relying
+on it fleet-wide:** confirm the column is sparse (no bulk op wrote calculated
+dates) — run the non-null-count check across `sched_lot_tasks`.
+
+**Build:** flag every task with a non-null `est_start_date` (past OR future).
+Per the icon rule, hover/click explains: "Manual start override: [date].
+Calculated start: [date]." Distinguish **ACTIVE** overrides (the est floor
+actually raises the projected start / moves a downstream date — detect by
+comparing projected-with-est vs projected-without-est) from **INERT** ones (set
+but no effect, e.g. a task with no dependents like #3 on WI Lot 1) — show both,
+mark which actually move dates. Add a lot-level indicator ("N manual overrides on
+this lot") so a surprising number has an obvious place to look. `vendor_confirmed`
+may change how the flag renders (locked vs unconfirmed), but is not the detection.
+
+### Verified anchor (WI Lot 1, id b84172bc-…, 2026-08-11)
+Not stamped. Nothing started. `est_start_date` set on exactly 2 tasks
+(`have_est=2/129`). **#2 Silt Fence est=2026-07-27** floors the schedule root from
+offset 1 (Jul 14) → offset 10 (Jul 27) = **+9 WD**, cascading the whole critical
+path → planEnd 94 vs projEnd 103 → **"9 days behind"** [VERIFIED by recompute on
+the pasted data — reproduced exactly]. With the today-floor (today = offset 21),
+#2 would floor to today → **~20 behind** (the correct number for a lot with
+nothing started in 21 working days). The second est (bt_num > 75) is inert.
+
+**NOT bundled:** KI-4 (out-of-sequence actuals) is a separate concern about bad
+actuals, not not-started projection or overrides. Do not fold it into this work.
