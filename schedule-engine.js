@@ -378,6 +378,41 @@
     return orphans;
   }
 
+  // ── earliestStart(task, computed) -> { offset, bindingPred } | null ──────
+  // The earliest WORKING-DAY OFFSET a task can legitimately start given where its
+  // predecessors land, plus which predecessor binds it. `computed` is a
+  // { [num]: { es, ef } } map of already-computed offsets (from computeSchedule /
+  // computeFieldSchedule, planned or projected — the CALLER decides which reality).
+  //
+  // Honors lag sign EXACTLY like computeSchedule's own driver:
+  //   • lag >= 0 : forward from predecessor FINISH -> max(ef + 1 + lag)
+  //   • lag <  0 : lead time, backward from predecessor START -> min(es + lag)
+  // so a negative-lag procurement task is NOT forced to predecessor-finish + 1.
+  // Floors at offset 1 (construction start). Returns null when no predecessor
+  // present in `computed` constrains the start.
+  //
+  // Shared primitive: the today-floor, the active/inert override flag, and the
+  // delay rule all reuse this. Reads only predecessors' offsets — never the
+  // task's own est/actual — so it answers "where COULD this start" independent of
+  // any override on the task itself.
+  function earliestStart(task, computed) {
+    if (!task || !computed) return null;
+    var preds = task.predecessors || task.preds || [];
+    var lag = (task.lag != null ? task.lag : 0);
+    var driver = null, bindingPred = null;
+    for (var i = 0; i < preds.length; i++) {
+      var p = preds[i], c = computed[p];
+      if (!c || c.es == null || c.ef == null) continue;
+      var cand = (lag < 0) ? (c.es + lag) : (c.ef + 1 + lag);
+      if (driver === null || (lag < 0 ? cand < driver : cand > driver)) {
+        driver = cand; bindingPred = p;
+      }
+    }
+    if (driver === null) return null;
+    if (driver < 1) driver = 1;
+    return { offset: driver, bindingPred: bindingPred };
+  }
+
   // ── data-entry guard: dates must be physically possible ──────────────────
   // Two DIFFERENT rules, by field type:
   //   • actual_start / actual_finish — a CLAIM ABOUT THE PAST. Must fall in the
@@ -469,6 +504,7 @@
     validateDateEntry: validateDateEntry,
     computeSuccessors: computeSuccessors,
     findOrphanedSuccessors: findOrphanedSuccessors,
+    earliestStart: earliestStart,
     describeLag: describeLag,
     computeStage: computeStage,
     // surface adapters
