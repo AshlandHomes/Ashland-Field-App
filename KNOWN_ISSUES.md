@@ -224,10 +224,37 @@ the float-based `_crit` — only completion-threatening lateness prompts a reaso
 
 ## KI-9 — Today-floor for not-started tasks + manual-override (est_start_date) flag
 
-**Status:** logged — build together in a focused Dev session (owner: "not tonight").
-Same code area (`schedule-engine.js` projected-mode start + the field app's est
-handling), so they ship as one piece of work.
+**Status:** IN PROGRESS — this is one "earliest-start story," built incrementally.
+Same code area (`schedule-engine.js` + the field app's est handling), so the pieces
+share a foundation and ship across promotes.
 **Surfaced:** WI Lot 1 "9 days behind" diagnosis (2026-08-11).
+
+### Shared foundation — `earliestStart(task, computed)` [DONE, Dev, 2026-08-20]
+`schedule-engine.js` now exports `earliestStart(task, computed) -> {offset,
+bindingPred} | null`: the earliest working-day offset a task can start given its
+predecessors, plus which predecessor binds it. Honors lag sign EXACTLY like
+`computeSchedule`'s driver (lag≥0 → `max(ef+1+lag)` from predecessor FINISH; lag<0 →
+`min(es+lag)` lead time from predecessor START), floored at offset 1, null when no
+predecessor constrains. `computed` is a `{num:{es,ef}}` map the CALLER supplies —
+so the *earliest-start logic* is single-source, the *reality it's measured against*
+(planned vs projected) is the caller's choice, same pattern as `computeSchedule(mode)`.
+Proven by `test/earliest-start.js`: `earliestStart.offset === planned engine es`
+for all 127 predecessor tasks + neg-lag #69 (lag −9 → es[71]−9) + binding-pred + no-pred.
+
+**ARCHITECTURAL RULE (owner-confirmed):** the today-floor, active/inert flag, and
+delay rule below MUST all call `earliestStart` — ONE earliest-start computation
+feeding all readers, same discipline as the single schedule engine. They differ
+only in what they COMPARE against it (today / the override / the actual start).
+If any of them grows its own predecessor loop, that is the bug.
+
+### Earliest-start story — where we are
+- **DONE (Dev):** block impossible-early est override in `saveEditTask` — an est
+  earlier than `earliestStart` is blocked (not silent-floored) with a modal naming
+  the binding predecessor + the engine's real earliest date, neg-lag-aware wording,
+  and an unlink path. Proof: `test/est-block-browser.js`. Rides to live with the
+  rest of KI-9 in a future promote (not shipped live standalone).
+- **REMAINING (all reuse `earliestStart`):** Part A today-floor · Part B active/inert
+  override flag · the delay rule (`actualStart > earliestStart` ⇒ started late).
 
 ### Part A — today-floor (was "Task 2")
 [VERIFIED from code] the engine has NO today-floor: a not-started task projects at
