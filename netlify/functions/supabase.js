@@ -819,9 +819,14 @@ exports.handler = async function(event) {
           // PROJECTED-DATE ENGINE now lives in the single shared engine (schedule-engine.js).
           // See ScheduleEngine.computeLotProjected — invoked per lot below.
 
-          // run the shared engine per lot before building the snapshot
+          // run the shared engine per lot before building the snapshot.
+          // computeLotSchedule writes per-task _projected_date AND returns the
+          // lot's baseline+projected completion (KI-2: admin now reads these
+          // engine dates instead of the deleted flat-99 calcPlannedCompletion).
+          const endsByLot = {};
           Object.keys(byLot).forEach(lotId => {
-            ScheduleEngine.computeLotProjected(byLot[lotId], startById[lotId]);
+            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId]);
+            endsByLot[lotId] = { planEndDate: s.planEndDate, projEndDate: s.projEndDate };
           });
 
           Object.keys(byLot).forEach(lotId => {
@@ -850,7 +855,9 @@ exports.handler = async function(event) {
             const behind = ts.filter(r =>
               r.is_critical && r.status !== 'finished' && r.phase_order < activePhase
             ).map(r => ({ num: r.bt_num, name: r.name, status: r.status || 'not_started', phase_order: r.phase_order, phase_name: r.phase_name }));
-            out[lotId] = { activePhase, activePhaseName, phases, behind };
+            const ends = endsByLot[lotId] || {};
+            out[lotId] = { activePhase, activePhaseName, phases, behind,
+              planEndDate: ends.planEndDate || null, projEndDate: ends.projEndDate || null };
           });
         }
         return { statusCode: 200, body: JSON.stringify(out) };

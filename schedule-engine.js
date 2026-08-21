@@ -292,6 +292,33 @@
     return tasks;
   }
 
+  // ── surface adapter: BACKEND lot completion ends (baseline + projected) ───
+  // supabase.js getAllLotPhases. Runs the ONE engine over the lot's OWN stamped
+  // tasks in BOTH modes so the admin console and the field app share a single
+  // calculation — no flat-99 shortcut, no separate formula (KI-2):
+  //   planned   = baseline CPM (ignores actuals/est)          -> planEnd
+  //   projected = current reality (honors actuals + est floor) -> projEnd  (== field app)
+  // Also mutates each task writing _es/_projected_date, exactly like
+  // computeLotProjected, so the per-task admin dates are unchanged. Returns
+  // { tasks, planEnd, projEnd, planEndDate, projEndDate }: *End are working-day
+  // OFFSETS; *EndDate are YYYY-MM-DD completion dates (null when startDate null).
+  function computeLotSchedule(tasks, startDate) {
+    var sd = startDate ? (startDate instanceof Date ? startDate : new Date(startDate + 'T00:00:00')) : null;
+    var proj = computeSchedule(tasks, { startDate: sd, mode: 'projected' });
+    var plan = computeSchedule(tasks, { startDate: sd, mode: 'planned' });
+    (tasks || []).forEach(function (t) {
+      var x = proj.byNum[t.bt_num];
+      if (x) { t._es = x.es; t._projected_date = x.projectedDate; }
+      else { t._es = null; t._projected_date = null; }
+    });
+    var toYmd = function (off) { return (off == null || !sd) ? null : ymd(offToDate(off, sd)); };
+    return {
+      tasks: tasks,
+      planEnd: plan.end, projEnd: proj.end,
+      planEndDate: toYmd(plan.end), projEndDate: toYmd(proj.end)
+    };
+  }
+
   // ── integrity rules (BUILD_SPEC §3) — used by template builder + runtime ──
   // Returns [{ num, rule, message }]. Does not throw; the UI decides how to
   // surface / block on these.
@@ -502,6 +529,7 @@
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
     validateDateEntry: validateDateEntry,
+    computeLotSchedule: computeLotSchedule,
     computeSuccessors: computeSuccessors,
     findOrphanedSuccessors: findOrphanedSuccessors,
     earliestStart: earliestStart,

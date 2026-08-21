@@ -58,22 +58,33 @@ highlighting is expected to include force_critical tasks.
 
 ## KI-2 — Admin lots-list "planned completion" is a hardcoded 99-WD estimate
 
-**Status:** open — reconcile after the restructure, with owner sign-off.
-**Surfaced:** Step 2 (admin wiring).
+**Status:** RESOLVED (Dev, 2026-08-21) — option C, single-source completion.
+**Surfaced:** Step 2 (admin wiring). **Fix:** whole-system date audit (all dates
+trace to the stamped schedule via the one engine; the flat-99 was the only
+headline rogue — see KI-10 for the second, low-severity one).
 
-`calcPlannedCompletion()` in `admin-dev.html` (lots list) shows
-`construction_start + 99 working days` — a hardcoded constant that ignores the
-lot's actual schedule. The real engine computes the Slab critical path at **94**
-working days (planned), and each lot's projected end varies with actuals /
-overrides. So the admin lots-list completion estimate can differ from the real
-projected completion the field app shows.
+The rogue `calcPlannedCompletion()` = `construction_start + 99 WD` ignored the
+lot's schedule entirely (only the start date), so it never moved with est /
+predecessor edits and disagreed with the field app's real completion.
 
-The restructure only centralized the working-day math (the inline weekend-walk
-now calls `ScheduleEngine.addWD`, output unchanged — still 99). Replacing the
-hardcoded 99 with the engine's computed per-lot end is a **behavior change** for
-a later step. Note: the per-task projected dates in the admin schedule view are
-already correct (backend `computeLotProjected`); this KI is only the lots-list
-summary column.
+**What changed:**
+- `schedule-engine.js`: new `computeLotSchedule(tasks, startDate)` runs the ONE
+  engine over the lot's stamped tasks in BOTH modes and returns
+  `{planEnd, projEnd, planEndDate, projEndDate}` (projected == field app; planned
+  == CPM baseline).
+- `supabase.js` `getAllLotPhases`: calls it per lot, returns `planEndDate` +
+  `projEndDate` in the snapshot.
+- `admin-dev.html`: lots-table completion column + CSV export now read those
+  engine dates (projected primary, baseline secondary); `calcPlannedCompletion`
+  **deleted** (both call sites). `reloadLots()` now refetches `lotPhases` so the
+  completion refreshes after edits (was the re-freeze trap).
+- Non-active lots (no `getAllLotPhases` entry) show "—" (their date is the Close
+  column), not a fabricated projection.
+
+**Proof:** `test/admin-completion-parity.js` (admin projEnd === field app projEnd
+and planned baseline; est push MOVES projected 11/20→12/04, baseline unchanged;
+old flat-99 11/30 ≠ real 11/20) + `test/admin-completion-render-browser.js` (real
+`renderLotsTable` shows the engine dates and re-renders live). Full suite green.
 
 ## KI-3 — Backend recomputes CPM per request (perf)
 
@@ -302,3 +313,29 @@ nothing started in 21 working days). The second est (bt_num > 75) is inert.
 
 **NOT bundled:** KI-4 (out-of-sequence actuals) is a separate concern about bad
 actuals, not not-started projection or overrides. Do not fold it into this work.
+
+## KI-10 — Stale-task "was due" date is computed outside the one engine
+
+**Status:** logged — decide (i) vs (ii) when building the today-floor (KI-9).
+**Severity:** LOW — a diagnostic label on the admin "Stale" indicator, not a
+headline schedule date. **Surfaced:** whole-system date audit (2026-08-21), the
+second rogue found alongside the flat-99 (KI-2).
+
+`getStaleCriticalTasks` (`supabase.js`) computes
+`expected_done = addWD(eligible_predecessor_actual_finish, duration + GRACE)` and
+the admin shows it as "was due [date]" (`admin-dev.html`, stale modal). That
+derived date does **not** route through `computeSchedule` over the stamped
+schedule, so by the one-calculation rule it is rogue. Unlike the flat-99 it isn't
+masquerading as the schedule — it's a staleness heuristic ("should this have been
+done by now?") with a deliberate 3-WD grace window, anchored on when the task
+*actually* became unblocked.
+
+**Two fixes (owner to pick when the today-floor lands):**
+- **(i)** Redefine staleness as **engine projected-finish-in-past**: task's
+  projected `ef` < today and not finished. Fully single-source; drops the grace
+  window; depends on the KI-9 today-floor to be meaningful.
+- **(ii)** Keep the grace heuristic but **stop displaying the "was due [date]"** —
+  show only "N working days overdue". No rogue *date* is shown; diagnostic
+  survives. Cheap, no KI-9 dependency.
+
+Decide (i) vs (ii) in the KI-9 / today-floor session, since (i) needs it.
