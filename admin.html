@@ -1177,7 +1177,10 @@ function dismissClosingRow(id) {
 }
 
 async function reloadLots() {
-  await Promise.all([loadScheduleData(), loadFlaggedNotes()]);
+  // loadLotPhases MUST be included: the completion column reads engine-computed
+  // dates from lotPhases (KI-2 fix). Without refetching it here, an edit would
+  // re-render against a stale snapshot and the completion would appear frozen.
+  await Promise.all([loadScheduleData(), loadFlaggedNotes(), loadLotPhases()]);
   renderStats();
   renderLotsTable();
 }
@@ -1187,16 +1190,6 @@ function fmtDate(str) {
   if (!str) return '—';
   const d = new Date(str + 'T12:00:00');
   return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
-}
-
-function calcPlannedCompletion(startStr) {
-  if (!startStr) return null;
-  const p = startStr.split('-');
-  // 99 working days after start (a hardcoded template-length estimate — see
-  // KNOWN_ISSUES KI-2). Working-day math comes from the shared engine; addWD's
-  // offset 1 == the start date, so "99 WD after start" is offset 100. Preserves
-  // the previous inline weekend-walk output exactly.
-  return ScheduleEngine.addWD(new Date(+p[0], +p[1]-1, +p[2]), 100);
 }
 
 function isUpdatedRecently(ts) {
@@ -1401,12 +1394,21 @@ function renderLotsTable() {
     return;
   }
 
+  const todayIso = new Date().toISOString().split('T')[0];
   const rows = list.map(lot => {
-    const planned = calcPlannedCompletion(lot.construction_start_date);
-    let planHtml = '—';
-    if (planned) {
-      const overdue = planned < new Date() && lot.status==='active' && !lot.completion_stamped_at;
-      planHtml = `<span style="color:${overdue?'var(--red)':'inherit'};font-weight:${overdue?700:400}">${planned.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>`;
+    // Completion comes from the ONE engine over the lot's stamped schedule
+    // (KI-2 fix): projected == the field app's number, planned == CPM baseline.
+    // Both arrive per-lot in lotPhases (getAllLotPhases). Active lots only —
+    // closed/canceled lots aren't projected, so they show "—" (their real date
+    // is the Close column).
+    const lp = lotPhases[lot.id] || {};
+    const projDate = lp.projEndDate || null;
+    const planDate = lp.planEndDate || null;
+    let planHtml = '<span style="color:var(--muted)">—</span>';
+    if (projDate || planDate) {
+      const overdue = projDate && projDate < todayIso && lot.status==='active' && !lot.completion_stamped_at;
+      planHtml = `<div style="font-weight:${overdue?700:600};color:${overdue?'var(--red)':'inherit'}">${projDate?fmtDate(projDate):'—'}<span style="font-size:10px;color:var(--muted);font-weight:400"> proj</span></div>`
+        + `<div style="font-size:11px;color:var(--muted)">${planDate?fmtDate(planDate):'—'}<span style="font-size:10px"> base</span></div>`;
     }
     const updBadge = lot.status==='closed'||lot.status==='canceled' ? '' :
       isUpdatedRecently(lot.last_task_update)
@@ -1440,7 +1442,7 @@ function renderLotsTable() {
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
-      <th>Start</th><th>Planned Completion</th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
+      <th>Start</th><th>Completion<div style="font-size:10px;font-weight:400;color:var(--muted)">proj / baseline</div></th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -2831,15 +2833,16 @@ function exportCSV() {
   // ISO helper: spreadsheets read YYYY-MM-DD as a real date (no more "2-OCT-26").
   const iso = d => d ? (typeof d==='string' ? d.slice(0,10)
     : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))) : '';
-  const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Planned Completion','Close Status','Scheduled Close'];
+  const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Projected Completion','Baseline Completion','Close Status','Scheduled Close'];
   const rows = data.map(l => {
-    const planned = calcPlannedCompletion(l.construction_start_date);
-    const planStr = iso(planned);
+    // Engine-computed completion from lotPhases (KI-2 fix) — same source as the
+    // on-screen table and the field app. Blank for non-active lots (not projected).
+    const lp = lotPhases[l.id] || {};
     const closeStatus = l.scheduled_close_date && l.scheduled_close_date<today ? 'Past Due'
       : l.scheduled_close_date ? 'Scheduled'
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
       : 'Not Yet';
-    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),planStr,closeStatus,iso(l.scheduled_close_date)];
+    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date)];
   });
   const csv = [hdrs,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
   // filename reflects the active company filter when one is set
