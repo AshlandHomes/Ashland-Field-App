@@ -1295,7 +1295,8 @@ function toggleAdminStageRow(id,el){
 }
 
 function closeBadgeHtml(lot) {
-  if (lot.status==='closed') return '<span class="badge" style="background:#4C4C4C;color:#fff">🏠 Closed</span>';
+  if (lot.status==='closed') return '<span class="badge" style="background:#4C4C4C;color:#fff">🏠 Closed</span>'
+    + (lot.scheduled_close_date ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>' : '');
   if (lot.status==='canceled') return '<span class="badge" style="background:#fee2e2;color:#dc2626">❌ Canceled</span>';
   const today = new Date().toISOString().split('T')[0];
   if (lot.scheduled_close_date && lot.scheduled_close_date < today) {

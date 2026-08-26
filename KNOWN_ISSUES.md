@@ -339,3 +339,22 @@ done by now?") with a deliberate 3-WD grace window, anchored on when the task
   survives. Cheap, no KI-9 dependency.
 
 Decide (i) vs (ii) in the KI-9 / today-floor session, since (i) needs it.
+
+## KI-11 — No distinct "actual closed-on" date (scheduled_close_date is overloaded)
+
+**Status:** logged — small future follow-up, NOT needed now.
+**Surfaced:** admin Close-column date display (2026-08-21).
+**Severity:** LOW — the current display is correct for the normal close flow.
+
+`scheduled_close_date` is a single overloaded field: the TARGET close date while a
+lot is active, and the close date once closed (both close paths — `closingMarkClosed`
+and `toggleLotClosed` — write it, defaulting to today if none). The admin Close
+column now shows it under the "🏠 Closed" badge. This is correct when the operator
+closes on/at the date they entered. **Edge:** a *quick-close* from the list reuses
+whatever target was set, so if that target was stale, the displayed close date would
+be that stale target, not the true day it closed.
+
+**Follow-up (when wanted):** capture a genuine actual close date distinct from the
+target — either a new `closed_at` / `actual_close_date` column, or always stamp
+today on close. Then the Close column shows the real closed-on date regardless of a
+stale target. Not urgent; the normal close flow is accurate today.
