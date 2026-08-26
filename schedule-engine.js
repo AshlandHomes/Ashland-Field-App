@@ -292,6 +292,33 @@
     return tasks;
   }
 
+  // ── surface adapter: BACKEND lot completion ends (baseline + projected) ───
+  // supabase.js getAllLotPhases. Runs the ONE engine over the lot's OWN stamped
+  // tasks in BOTH modes so the admin console and the field app share a single
+  // calculation — no flat-99 shortcut, no separate formula (KI-2):
+  //   planned   = baseline CPM (ignores actuals/est)          -> planEnd
+  //   projected = current reality (honors actuals + est floor) -> projEnd  (== field app)
+  // Also mutates each task writing _es/_projected_date, exactly like
+  // computeLotProjected, so the per-task admin dates are unchanged. Returns
+  // { tasks, planEnd, projEnd, planEndDate, projEndDate }: *End are working-day
+  // OFFSETS; *EndDate are YYYY-MM-DD completion dates (null when startDate null).
+  function computeLotSchedule(tasks, startDate) {
+    var sd = startDate ? (startDate instanceof Date ? startDate : new Date(startDate + 'T00:00:00')) : null;
+    var proj = computeSchedule(tasks, { startDate: sd, mode: 'projected' });
+    var plan = computeSchedule(tasks, { startDate: sd, mode: 'planned' });
+    (tasks || []).forEach(function (t) {
+      var x = proj.byNum[t.bt_num];
+      if (x) { t._es = x.es; t._projected_date = x.projectedDate; }
+      else { t._es = null; t._projected_date = null; }
+    });
+    var toYmd = function (off) { return (off == null || !sd) ? null : ymd(offToDate(off, sd)); };
+    return {
+      tasks: tasks,
+      planEnd: plan.end, projEnd: proj.end,
+      planEndDate: toYmd(plan.end), projEndDate: toYmd(proj.end)
+    };
+  }
+
   // ── integrity rules (BUILD_SPEC §3) — used by template builder + runtime ──
   // Returns [{ num, rule, message }]. Does not throw; the UI decides how to
   // surface / block on these.
@@ -376,6 +403,41 @@
       }
     });
     return orphans;
+  }
+
+  // ── earliestStart(task, computed) -> { offset, bindingPred } | null ──────
+  // The earliest WORKING-DAY OFFSET a task can legitimately start given where its
+  // predecessors land, plus which predecessor binds it. `computed` is a
+  // { [num]: { es, ef } } map of already-computed offsets (from computeSchedule /
+  // computeFieldSchedule, planned or projected — the CALLER decides which reality).
+  //
+  // Honors lag sign EXACTLY like computeSchedule's own driver:
+  //   • lag >= 0 : forward from predecessor FINISH -> max(ef + 1 + lag)
+  //   • lag <  0 : lead time, backward from predecessor START -> min(es + lag)
+  // so a negative-lag procurement task is NOT forced to predecessor-finish + 1.
+  // Floors at offset 1 (construction start). Returns null when no predecessor
+  // present in `computed` constrains the start.
+  //
+  // Shared primitive: the today-floor, the active/inert override flag, and the
+  // delay rule all reuse this. Reads only predecessors' offsets — never the
+  // task's own est/actual — so it answers "where COULD this start" independent of
+  // any override on the task itself.
+  function earliestStart(task, computed) {
+    if (!task || !computed) return null;
+    var preds = task.predecessors || task.preds || [];
+    var lag = (task.lag != null ? task.lag : 0);
+    var driver = null, bindingPred = null;
+    for (var i = 0; i < preds.length; i++) {
+      var p = preds[i], c = computed[p];
+      if (!c || c.es == null || c.ef == null) continue;
+      var cand = (lag < 0) ? (c.es + lag) : (c.ef + 1 + lag);
+      if (driver === null || (lag < 0 ? cand < driver : cand > driver)) {
+        driver = cand; bindingPred = p;
+      }
+    }
+    if (driver === null) return null;
+    if (driver < 1) driver = 1;
+    return { offset: driver, bindingPred: bindingPred };
   }
 
   // ── data-entry guard: dates must be physically possible ──────────────────
@@ -467,8 +529,10 @@
     computeSchedule: computeSchedule,
     validateSchedule: validateSchedule,
     validateDateEntry: validateDateEntry,
+    computeLotSchedule: computeLotSchedule,
     computeSuccessors: computeSuccessors,
     findOrphanedSuccessors: findOrphanedSuccessors,
+    earliestStart: earliestStart,
     describeLag: describeLag,
     computeStage: computeStage,
     // surface adapters
