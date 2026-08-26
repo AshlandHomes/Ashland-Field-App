@@ -1415,10 +1415,16 @@ function renderLotsTable() {
       planHtml = `<div style="font-weight:${overdue?700:600};color:${overdue?'var(--red)':'inherit'}">${projDate?fmtDate(projDate):'—'}<span style="font-size:10px;color:var(--muted);font-weight:400"> proj</span></div>`
         + `<div style="font-size:11px;color:var(--muted)">${planDate?fmtDate(planDate):'—'}<span style="font-size:10px"> base</span></div>`;
     }
+    // last_task_update is an ISO timestamp (builder's most recent task update);
+    // format its date directly — fmtDate only handles date-only strings.
+    const lastUpd = lot.last_task_update
+      ? new Date(lot.last_task_update).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+      : null;
+    const updTitle = lastUpd ? 'Last update: ' + lastUpd : 'No updates yet';
     const updBadge = lot.status==='closed'||lot.status==='canceled' ? '' :
       isUpdatedRecently(lot.last_task_update)
-        ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">✓</span>'
-        : '<span class="badge" style="background:#fee2e2;color:var(--red)">⚠</span>';
+        ? '<span class="badge" title="'+updTitle+'" style="background:#d5f5e3;color:#1E8449">✓</span>'
+        : '<span class="badge" title="'+updTitle+'" style="background:#fee2e2;color:var(--red)">⚠</span>';
     const flags = flaggedNotesByLot[lot.id] || [];
     const flagCell = flags.length
       ? `<button class="flag-btn" onclick="openFlagsModal('${lot.id}')" title="View ${flags.length} flag(s)">🚩 ${flags.length}</button>`
