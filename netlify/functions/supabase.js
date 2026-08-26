@@ -1057,7 +1057,9 @@ exports.handler = async function(event) {
       }
 
       case 'getFlaggedNotes': {
-        const notes = await supabaseRequest('GET', `sched_lot_task_notes?flag=in.(red,yellow)&select=*&order=created_at.desc`);
+        // RED ONLY — the admin flag view is management escalations (🔴 Mgmt). Yellow
+        // (🟡 Remind) is the builder's own reminder and must NOT surface here.
+        const notes = await supabaseRequest('GET', `sched_lot_task_notes?flag=eq.red&select=*&order=created_at.desc`);
         const rows = notes.data || [];
         const lotIds = [...new Set(rows.map(n => n.lot_id).filter(Boolean))];
         let lotMap = {};
