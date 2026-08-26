@@ -1395,6 +1395,15 @@ function getFilteredLots() {
 let closedExpanded = false;
 function toggleClosedGroup() { closedExpanded = !closedExpanded; renderLotsTable(); }
 
+// Active lots group by community — each collapsible, DEFAULT EXPANDED. This set
+// holds the community codes the user has FOLDED (empty = all expanded). Persists
+// across filter/search re-renders within the session, like closedExpanded.
+let communityCollapsed = new Set();
+function toggleCommunityGroup(code) {
+  if (communityCollapsed.has(code)) communityCollapsed.delete(code); else communityCollapsed.add(code);
+  renderLotsTable();
+}
+
 function renderLotsTable() {
   const list = getFilteredLots();
 
@@ -1466,7 +1475,29 @@ function renderLotsTable() {
   // never hidden behind a collapsed header.
   const closedLots = list.filter(l => l.status === 'closed');
   const activeLots = list.filter(l => l.status !== 'closed');
-  const activeRows = activeLots.map(buildRow).join('');
+
+  // Active lots grouped by community — each a collapsible group, DEFAULT EXPANDED.
+  // DISPLAY-ONLY (same guarantees as the closed group): list is already sorted
+  // community -> lot_number, so grouping preserves lot_number order within each
+  // community and the community order. A text SEARCH force-expands every group so
+  // a match in a folded community is never hidden (dropdown filters leave the
+  // user's manual collapse state alone — browsing, not finding).
+  const searchActive = (document.getElementById('lot-search').value || '').trim() !== '';
+  const commGroups = []; const byCode = {};
+  activeLots.forEach(lot => {
+    const code = lot.community || '—';
+    if (!byCode[code]) { byCode[code] = { code: code, lots: [] }; commGroups.push(byCode[code]); }
+    byCode[code].lots.push(lot);
+  });
+  const activeRows = commGroups.map(g => {
+    const expanded = searchActive || !communityCollapsed.has(g.code);
+    const name = (typeof SUB_NAMES !== 'undefined' && SUB_NAMES[g.code]) ? ' · ' + SUB_NAMES[g.code] : '';
+    const hdr = '<tr onclick="toggleCommunityGroup(\'' + String(g.code).replace(/'/g, "\\'") + '\')" style="cursor:pointer;background:#eef2f7">'
+      + '<td colspan="12" style="padding:8px 12px;font-weight:700;color:#334155;border-top:1px solid #e5e7eb">'
+      + (expanded ? '▾' : '▸') + ' ' + g.code + name + ' (' + g.lots.length + ')</td></tr>';
+    return hdr + (expanded ? g.lots.map(buildRow).join('') : '');
+  }).join('');
+
   const expandClosed = closedExpanded || activeLots.length === 0;
   let closedBlock = '';
   if (closedLots.length) {

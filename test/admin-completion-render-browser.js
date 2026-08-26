@@ -43,7 +43,10 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     flaggedNotesByLot = {};
 
     const cellText = () => {
-      const row = document.querySelector('#lots-table-body tbody tr');
+      // first DATA row (skip the community group-header rows, which are single
+      // colspan cells with a toggle onclick)
+      const row = Array.from(document.querySelectorAll('#lots-table-body tbody tr'))
+        .find(tr => !tr.getAttribute('onclick'));
       // completion is the 7th column (Sub,Lot,Builder,Stage,Phase,Start,Completion)
       return row ? row.children[6].innerText.replace(/\s+/g, ' ').trim() : null;
     };
