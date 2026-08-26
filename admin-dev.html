@@ -888,6 +888,7 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <script src="schedule-engine.js?v=1"></script>
+<script src="note-resolution.js?v=1"></script>
 <script>
 // ── CONSTANTS ──
 const SUPABASE_FN = '/.netlify/functions/supabase';
@@ -1644,7 +1645,12 @@ function openPhaseModal(lotId){
 }
 
 // ── FLAGS MODAL ──
+// Canned resolution prompts (index-referenced so onclick avoids quote-escaping).
+const RES_PROMPTS = ['Has this been resolved?', "Please update — what's the current status?"];
+let currentFlagsLotId = null;
+
 function openFlagsModal(lotId) {
+  currentFlagsLotId = lotId;
   const lot = scheduleLots.find(l=>l.id===lotId);
   const flags = flaggedNotesByLot[lotId] || [];
   document.getElementById('flags-modal-lot-label').textContent =
@@ -1654,13 +1660,39 @@ function openFlagsModal(lotId) {
         const icon = f.flag==='red' ? '🔴' : '🟡';
         const note = (f.note||'').replace(/</g,'&lt;').replace(/\n/g,'<br>');
         const when = new Date(f.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+        // Resolution UI — RED flags only (yellow flags carry no resolution ask).
+        // State is derived from the ONE shared module, never a separate calc.
+        let resHtml = '';
+        if (f.flag === 'red') {
+          const state = NoteResolution.deriveState(f);
+          const label = NoteResolution.stateLabel(f);
+          const stateColor = state==='confirmed_open' ? '#b91c1c' : (state==='asked' ? '#b45309' : 'var(--muted)');
+          const stateLine = label
+            ? `<div style="font-size:11px;font-weight:600;color:${stateColor};margin-top:6px">${label}${state==='asked'?' — "'+(f.resolution_prompt||'')+'"':''}</div>`
+            : '';
+          const btnLabel = state==='open' ? 'Ask builder:' : 'Ask again:';
+          resHtml = stateLine
+            + `<div style="margin-top:6px;font-size:11px;color:var(--muted)">${btnLabel}</div>`
+            + `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">`
+            + RES_PROMPTS.map((p,i)=>`<button class="btn btn-secondary btn-sm" onclick="sendResolutionRequest('${f.id}',${i})">${p}</button>`).join('')
+            + `</div>`;
+        }
         return `<div class="flag-item">
           <div>${icon} ${note}</div>
           <div class="flag-meta">Task #${f.bt_num!=null?f.bt_num:'—'} · ${f.builder_name||f.author||'Unknown'} · ${when}</div>
+          ${resHtml}
         </div>`;
       }).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No flags</p>';
   document.getElementById('modal-lot-flags').classList.add('open');
+}
+
+async function sendResolutionRequest(noteId, promptIdx) {
+  const prompt = RES_PROMPTS[promptIdx];
+  await sbCall('requestNoteResolution', { id: noteId, prompt });
+  await loadFlaggedNotes();               // refresh the flag data (now carries the request)
+  renderLotsTable();                      // update the 🚩 column
+  if (currentFlagsLotId) openFlagsModal(currentFlagsLotId);  // re-render modal with new state
 }
 
 // ── BULK ADD LOTS ──
