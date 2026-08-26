@@ -364,6 +364,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 </div>
 
 <script src="schedule-engine.js?v=2"></script>
+<script src="note-resolution.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
@@ -456,7 +457,35 @@ async function setPinKey(k){
 const SUB_NAMES={RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
 let curSub=null;
 
-function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots();}
+function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>checkPendingResolutions());}
+
+// ── RED-FLAG RESOLUTION (builder side) ──
+// On app open, if the admin has asked about any of this builder's red flags, pop
+// a modal FIRST — one question at a time (queue). Yes clears the flag (note kept),
+// No confirms it's still open, "Not sure yet" leaves it pending for next open.
+async function checkPendingResolutions(){
+  let pending;
+  try { pending = await sbCall('getPendingResolutions',{builder:currentBuilder}); }
+  catch(e){ return; }              // never block app entry on a fetch error
+  if(!Array.isArray(pending)||!pending.length) return;
+  for(const p of pending){
+    const ans = await appModal({
+      title:'Flag check — Lot '+(p.lot_number||'')+(p.community?' ('+p.community+')':''),
+      sub:'<b>Task #'+(p.bt_num!=null?p.bt_num:'—')+'</b><br>'
+         +'<span style="color:#e74c3c">🔴</span> "'+escapeHtml(p.note||'')+'"<br><br>'
+         +'<b>'+escapeHtml(p.resolution_prompt||'Has this been resolved?')+'</b>',
+      buttons:[
+        {label:'✓ Yes, resolved', value:'resolved',   kind:'primary'},
+        {label:'✗ No, still open', value:'still_open', kind:'danger'},
+        {label:'Not sure yet',     value:'skip',       kind:'ghost'},
+      ]
+    });
+    // 'skip' or backdrop-cancel (null) → leave pending, re-ask next open.
+    if(ans==='resolved'||ans==='still_open'){
+      try { await sbCall('respondNoteResolution',{id:p.id,response:ans}); } catch(e){}
+    }
+  }
+}
 function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
 async function refreshView(){
   const active=document.querySelector('.screen.active');if(!active)return;
