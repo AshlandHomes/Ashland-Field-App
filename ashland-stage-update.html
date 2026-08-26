@@ -362,7 +362,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
   </div>
 </div>
 
-<script src="schedule-engine.js?v=1"></script>
+<script src="schedule-engine.js?v=2"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
@@ -1198,6 +1198,37 @@ async function saveEditTask(){
   // Guard the override: construction-start floor only (FUTURE overrides are allowed — no today ceiling).
   const ev=ScheduleEngine.validateDateEntry({estStartDate:newEstStart,constructionStart:curLot.construction_start_date||null});
   if(!ev.ok){alert(ev.message);return;}
+
+  // Guard: an est override can't be earlier than the task's predecessor-driven earliest
+  // start. The shared engine's earliestStart honors negative lag (lead time) — it binds
+  // the predecessor's START (not FINISH) when lag<0. Predecessor projected offsets are
+  // stable under this edit (they're upstream of this task), so read them from the last
+  // projected run rather than recomputing. Block (not silent-floor) so the user sees why.
+  if(newEstStart && editPreds && editPreds.length){
+    const computed={};
+    TASKS.forEach(x=>{if(x._projected_es!=null&&x._projected_ef!=null)computed[x.num]={es:x._projected_es,ef:x._projected_ef};});
+    const es=ScheduleEngine.earliestStart({num:editTaskNum,predecessors:editPreds,lag:lag},computed);
+    if(es&&es.offset!=null){
+      const wantOff=ScheduleEngine.actOffset(newEstStart,startDate);
+      if(wantOff!=null&&wantOff<es.offset){
+        const bp=bn[es.bindingPred],bpName=bp?bp.name:'the predecessor';
+        const c=computed[es.bindingPred];
+        const earliestDate=fmt(offToDate(es.offset));
+        const wantDate=fmt(new Date(newEstStart+'T00:00:00'));
+        const why = lag<0
+          ? 'its predecessor <strong>#'+es.bindingPred+' '+bpName+'</strong> doesn\'t start until '+fmt(offToDate(c.es))+', and this task leads it by '+(-lag)+' working day'+((-lag)===1?'':'s')
+          : 'its predecessor <strong>#'+es.bindingPred+' '+bpName+'</strong> doesn\'t finish until '+fmt(offToDate(c.ef));
+        await appModal({
+          title:'Start date is too early',
+          sub:'This task can\'t start '+wantDate+' — '+why+', so the earliest it can start is <strong>'+earliestDate+'</strong>.<br><br>'
+             +'&bull; Enter a date on or after '+earliestDate+', <strong>OR</strong><br>'
+             +'&bull; If this task doesn\'t actually depend on #'+es.bindingPred+' '+bpName+', edit the task and unlink #'+es.bindingPred+' from its predecessors, then set your earlier date.',
+          buttons:[{label:'Got it',value:true,kind:'secondary'}]
+        });
+        return;
+      }
+    }
+  }
 
   if(!dur||dur<1){alert('Duration must be at least 1 day.');return;}
 
