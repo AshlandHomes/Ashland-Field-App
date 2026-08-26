@@ -1645,8 +1645,10 @@ function openPhaseModal(lotId){
 }
 
 // ── FLAGS MODAL ──
-// Canned resolution prompts (index-referenced so onclick avoids quote-escaping).
-const RES_PROMPTS = ['Has this been resolved?', "Please update — what's the current status?"];
+// Canned resolution prompt(s), index-referenced so onclick avoids quote-escaping.
+// ONE structured question — flags answer "is it handled?" (yes/no/not-sure);
+// detailed status belongs in a NOTE, not a second canned question.
+const RES_PROMPTS = ['Has this been resolved?'];
 let currentFlagsLotId = null;
 
 function openFlagsModal(lotId) {

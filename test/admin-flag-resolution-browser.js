@@ -64,13 +64,13 @@ const T2 = '2026-08-27T15:00:00.000Z';   // responded
   const yellow= out.items.find(i => /order trim/.test(i.text));
 
   check('no render errors ('+errors.length+')', errors.length === 0);
-  check('OPEN red flag: "Ask builder:" + 2 canned buttons, no state label',
-    open && /Ask builder:/.test(open.text) && open.buttons.length===2
-    && open.buttons[0]==='Has this been resolved?' && /current status/.test(open.buttons[1]));
+  check('OPEN red flag: "Ask builder:" + the SINGLE canned button, no state label',
+    open && /Ask builder:/.test(open.text) && open.buttons.length===1
+    && open.buttons[0]==='Has this been resolved?');
   check('ASKED red flag: shows "Resolution requested" + the sent prompt + "Ask again:"',
-    asked && /Resolution requested/i.test(asked.text) && /Has this been resolved\?/.test(asked.text) && /Ask again:/.test(asked.text) && asked.buttons.length===2);
+    asked && /Resolution requested/i.test(asked.text) && /Has this been resolved\?/.test(asked.text) && /Ask again:/.test(asked.text) && asked.buttons.length===1);
   check('CONFIRMED-OPEN red flag: shows "Builder confirmed still open"',
-    conf && /Builder confirmed still open/i.test(conf.text) && conf.buttons.length===2);
+    conf && /Builder confirmed still open/i.test(conf.text) && conf.buttons.length===1);
   check('YELLOW flag: NO resolution UI (no buttons)',
     yellow && yellow.buttons.length===0 && !/Ask builder/.test(yellow.text));
 
