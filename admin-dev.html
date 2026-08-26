@@ -1391,6 +1391,10 @@ function getFilteredLots() {
   return list;
 }
 
+// Closed-lots group: collapsed by default; persists across filter/search re-renders.
+let closedExpanded = false;
+function toggleClosedGroup() { closedExpanded = !closedExpanded; renderLotsTable(); }
+
 function renderLotsTable() {
   const list = getFilteredLots();
 
@@ -1400,7 +1404,7 @@ function renderLotsTable() {
   }
 
   const todayIso = new Date().toISOString().split('T')[0];
-  const rows = list.map(lot => {
+  const buildRow = (lot) => {
     // Completion comes from the ONE engine over the lot's stamped schedule
     // (KI-2 fix): projected == the field app's number, planned == CPM baseline.
     // Both arrive per-lot in lotPhases (getAllLotPhases). Active lots only —
@@ -1448,14 +1452,32 @@ function renderLotsTable() {
           style="background:#fee2e2;color:#dc2626;margin-left:4px">Del</button>
       </td>
     </tr>`;
-  }).join('');
+  };
+
+  // Collapse closed lots into a bottom group (default collapsed). DISPLAY-ONLY:
+  // getFilteredLots (filters/search, and the CSV export that reuses it) and
+  // renderStats (the "N CLOSED" count, computed from raw scheduleLots) are all
+  // untouched. Auto-expand when the current filter/search leaves NO active lots,
+  // so closed results (e.g. the "Closed" filter, or searching a closed lot) are
+  // never hidden behind a collapsed header.
+  const closedLots = list.filter(l => l.status === 'closed');
+  const activeLots = list.filter(l => l.status !== 'closed');
+  const activeRows = activeLots.map(buildRow).join('');
+  const expandClosed = closedExpanded || activeLots.length === 0;
+  let closedBlock = '';
+  if (closedLots.length) {
+    const hdr = '<tr onclick="toggleClosedGroup()" style="cursor:pointer;background:#f3f4f6">'
+      + '<td colspan="12" style="padding:9px 12px;font-weight:700;color:#4C4C4C;border-top:2px solid #e5e7eb">'
+      + (expandClosed ? '▾' : '▸') + ' 🏠 Closed (' + closedLots.length + ')</td></tr>';
+    closedBlock = hdr + (expandClosed ? closedLots.map(buildRow).join('') : '');
+  }
 
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
       <th>Start</th><th>Completion<div style="font-size:10px;font-weight:400;color:var(--muted)">proj / baseline</div></th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
     </tr></thead>
-    <tbody>${rows}</tbody>
+    <tbody>${activeRows}${closedBlock}</tbody>
   </table>`;
 }
 

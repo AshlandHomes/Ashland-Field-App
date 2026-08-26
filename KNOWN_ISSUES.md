@@ -358,3 +358,14 @@ be that stale target, not the true day it closed.
 target — either a new `closed_at` / `actual_close_date` column, or always stamp
 today on close. Then the Close column shows the real closed-on date regardless of a
 stale target. Not urgent; the normal close flow is accurate today.
+
+## KI-12 — (trivial future option) fold canceled lots into the bottom group too
+
+**Status:** logged — trivial, do only if wanted.
+**Surfaced:** admin closed-lots collapse group (2026-08-21).
+
+The lots table now collapses `status==='closed'` lots into a bottom "🏠 Closed (N)"
+group (`renderLotsTable`, display-only). Canceled lots stay interleaved — canceled
+is rare and semantically different from closed. If ever wanted, generalize the
+group to all-inactive (`status !== 'active'`) with a relabel (e.g. "Closed /
+Canceled"), or a second group. One-line filter change; no data impact.
