@@ -77,8 +77,8 @@ th{padding:10px 14px;text-align:left;font-size:11px;font-family:'DM Mono',monosp
 td{padding:11px 14px;font-size:13px;border-bottom:1px solid var(--rule);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:#f9fafb}
-.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'DM Mono',monospace;font-weight:600}
-.badge-sub{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;font-family:'DM Mono',monospace}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'DM Mono',monospace;font-weight:600;cursor:default}
+.badge-sub{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;font-family:'DM Mono',monospace;cursor:help}
 .sub-RC{background:#D6E4F7;color:#1A5276}.sub-CO{background:#D5F5E3;color:#1E8449}
 .sub-TB{background:#FEF9E7;color:#7D6608}.sub-CT{background:#F5EEF8;color:#6C3483}
 .sub-TE{background:#FDEDEC;color:#922B21}.sub-CW{background:#EBF5FB;color:#1A5276}
@@ -884,6 +884,7 @@ tr:hover td{background:#f9fafb}
 </div>
 
 <script src="schedule-engine.js?v=1"></script>
+<script src="note-resolution.js?v=1"></script>
 <script>
 // ── CONSTANTS ──
 const SUPABASE_FN = '/.netlify/functions/supabase';
@@ -1291,7 +1292,8 @@ function toggleAdminStageRow(id,el){
 }
 
 function closeBadgeHtml(lot) {
-  if (lot.status==='closed') return '<span class="badge" style="background:#4C4C4C;color:#fff">🏠 Closed</span>';
+  if (lot.status==='closed') return '<span class="badge" style="background:#4C4C4C;color:#fff">🏠 Closed</span>'
+    + (lot.scheduled_close_date ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + fmtDate(lot.scheduled_close_date) + '</div>' : '');
   if (lot.status==='canceled') return '<span class="badge" style="background:#fee2e2;color:#dc2626">❌ Canceled</span>';
   const today = new Date().toISOString().split('T')[0];
   if (lot.scheduled_close_date && lot.scheduled_close_date < today) {
@@ -1386,6 +1388,19 @@ function getFilteredLots() {
   return list;
 }
 
+// Closed-lots group: collapsed by default; persists across filter/search re-renders.
+let closedExpanded = false;
+function toggleClosedGroup() { closedExpanded = !closedExpanded; renderLotsTable(); }
+
+// Active lots group by community — each collapsible, DEFAULT EXPANDED. This set
+// holds the community codes the user has FOLDED (empty = all expanded). Persists
+// across filter/search re-renders within the session, like closedExpanded.
+let communityCollapsed = new Set();
+function toggleCommunityGroup(code) {
+  if (communityCollapsed.has(code)) communityCollapsed.delete(code); else communityCollapsed.add(code);
+  renderLotsTable();
+}
+
 function renderLotsTable() {
   const list = getFilteredLots();
 
@@ -1395,7 +1410,7 @@ function renderLotsTable() {
   }
 
   const todayIso = new Date().toISOString().split('T')[0];
-  const rows = list.map(lot => {
+  const buildRow = (lot) => {
     // Completion comes from the ONE engine over the lot's stamped schedule
     // (KI-2 fix): projected == the field app's number, planned == CPM baseline.
     // Both arrive per-lot in lotPhases (getAllLotPhases). Active lots only —
@@ -1410,10 +1425,20 @@ function renderLotsTable() {
       planHtml = `<div style="font-weight:${overdue?700:600};color:${overdue?'var(--red)':'inherit'}">${projDate?fmtDate(projDate):'—'}<span style="font-size:10px;color:var(--muted);font-weight:400"> proj</span></div>`
         + `<div style="font-size:11px;color:var(--muted)">${planDate?fmtDate(planDate):'—'}<span style="font-size:10px"> base</span></div>`;
     }
+    // last_task_update is an ISO timestamp (builder's most recent task update);
+    // format its date directly — fmtDate only handles date-only strings.
+    const lastUpd = lot.last_task_update
+      ? new Date(lot.last_task_update).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+      : null;
+    // Badge on top, last-update date inline beneath — mirrors the Close column
+    // (badge + date). Pure display (no tooltip): scannable at a glance across the
+    // whole column. Graceful "No updates yet" when the lot has never been touched.
+    const updDateLine = '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + (lastUpd || 'No updates yet') + '</div>';
     const updBadge = lot.status==='closed'||lot.status==='canceled' ? '' :
-      isUpdatedRecently(lot.last_task_update)
+      (isUpdatedRecently(lot.last_task_update)
         ? '<span class="badge" style="background:#d5f5e3;color:#1E8449">✓</span>'
-        : '<span class="badge" style="background:#fee2e2;color:var(--red)">⚠</span>';
+        : '<span class="badge" style="background:#fee2e2;color:var(--red)">⚠</span>')
+      + updDateLine;
     const flags = flaggedNotesByLot[lot.id] || [];
     const flagCell = flags.length
       ? `<button class="flag-btn" onclick="openFlagsModal('${lot.id}')" title="View ${flags.length} flag(s)">🚩 ${flags.length}</button>`
@@ -1437,14 +1462,54 @@ function renderLotsTable() {
           style="background:#fee2e2;color:#dc2626;margin-left:4px">Del</button>
       </td>
     </tr>`;
+  };
+
+  // Collapse closed lots into a bottom group (default collapsed). DISPLAY-ONLY:
+  // getFilteredLots (filters/search, and the CSV export that reuses it) and
+  // renderStats (the "N CLOSED" count, computed from raw scheduleLots) are all
+  // untouched. Auto-expand when the current filter/search leaves NO active lots,
+  // so closed results (e.g. the "Closed" filter, or searching a closed lot) are
+  // never hidden behind a collapsed header.
+  const closedLots = list.filter(l => l.status === 'closed');
+  const activeLots = list.filter(l => l.status !== 'closed');
+
+  // Active lots grouped by community — each a collapsible group, DEFAULT EXPANDED.
+  // DISPLAY-ONLY (same guarantees as the closed group): list is already sorted
+  // community -> lot_number, so grouping preserves lot_number order within each
+  // community and the community order. A text SEARCH force-expands every group so
+  // a match in a folded community is never hidden (dropdown filters leave the
+  // user's manual collapse state alone — browsing, not finding).
+  const searchActive = (document.getElementById('lot-search').value || '').trim() !== '';
+  const commGroups = []; const byCode = {};
+  activeLots.forEach(lot => {
+    const code = lot.community || '—';
+    if (!byCode[code]) { byCode[code] = { code: code, lots: [] }; commGroups.push(byCode[code]); }
+    byCode[code].lots.push(lot);
+  });
+  const activeRows = commGroups.map(g => {
+    const expanded = searchActive || !communityCollapsed.has(g.code);
+    const name = (typeof SUB_NAMES !== 'undefined' && SUB_NAMES[g.code]) ? ' · ' + SUB_NAMES[g.code] : '';
+    const hdr = '<tr onclick="toggleCommunityGroup(\'' + String(g.code).replace(/'/g, "\\'") + '\')" style="cursor:pointer;background:#eef2f7">'
+      + '<td colspan="12" style="padding:8px 12px;font-weight:700;color:#334155;border-top:1px solid #e5e7eb">'
+      + (expanded ? '▾' : '▸') + ' ' + g.code + name + ' (' + g.lots.length + ')</td></tr>';
+    return hdr + (expanded ? g.lots.map(buildRow).join('') : '');
   }).join('');
+
+  const expandClosed = closedExpanded || activeLots.length === 0;
+  let closedBlock = '';
+  if (closedLots.length) {
+    const hdr = '<tr onclick="toggleClosedGroup()" style="cursor:pointer;background:#f3f4f6">'
+      + '<td colspan="12" style="padding:9px 12px;font-weight:700;color:#4C4C4C;border-top:2px solid #e5e7eb">'
+      + (expandClosed ? '▾' : '▸') + ' 🏠 Closed (' + closedLots.length + ')</td></tr>';
+    closedBlock = hdr + (expandClosed ? closedLots.map(buildRow).join('') : '');
+  }
 
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
       <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
       <th>Start</th><th>Completion<div style="font-size:10px;font-weight:400;color:var(--muted)">proj / baseline</div></th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
     </tr></thead>
-    <tbody>${rows}</tbody>
+    <tbody>${activeRows}${closedBlock}</tbody>
   </table>`;
 }
 
@@ -1576,7 +1641,14 @@ function openPhaseModal(lotId){
 }
 
 // ── FLAGS MODAL ──
+// Canned resolution prompt(s), index-referenced so onclick avoids quote-escaping.
+// ONE structured question — flags answer "is it handled?" (yes/no/not-sure);
+// detailed status belongs in a NOTE, not a second canned question.
+const RES_PROMPTS = ['Has this been resolved?'];
+let currentFlagsLotId = null;
+
 function openFlagsModal(lotId) {
+  currentFlagsLotId = lotId;
   const lot = scheduleLots.find(l=>l.id===lotId);
   const flags = flaggedNotesByLot[lotId] || [];
   document.getElementById('flags-modal-lot-label').textContent =
@@ -1586,13 +1658,39 @@ function openFlagsModal(lotId) {
         const icon = f.flag==='red' ? '🔴' : '🟡';
         const note = (f.note||'').replace(/</g,'&lt;').replace(/\n/g,'<br>');
         const when = new Date(f.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+        // Resolution UI — RED flags only (yellow flags carry no resolution ask).
+        // State is derived from the ONE shared module, never a separate calc.
+        let resHtml = '';
+        if (f.flag === 'red') {
+          const state = NoteResolution.deriveState(f);
+          const label = NoteResolution.stateLabel(f);
+          const stateColor = state==='confirmed_open' ? '#b91c1c' : (state==='asked' ? '#b45309' : 'var(--muted)');
+          const stateLine = label
+            ? `<div style="font-size:11px;font-weight:600;color:${stateColor};margin-top:6px">${label}${state==='asked'?' — "'+(f.resolution_prompt||'')+'"':''}</div>`
+            : '';
+          const btnLabel = state==='open' ? 'Ask builder:' : 'Ask again:';
+          resHtml = stateLine
+            + `<div style="margin-top:6px;font-size:11px;color:var(--muted)">${btnLabel}</div>`
+            + `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">`
+            + RES_PROMPTS.map((p,i)=>`<button class="btn btn-secondary btn-sm" onclick="sendResolutionRequest('${f.id}',${i})">${p}</button>`).join('')
+            + `</div>`;
+        }
         return `<div class="flag-item">
           <div>${icon} ${note}</div>
           <div class="flag-meta">Task #${f.bt_num!=null?f.bt_num:'—'} · ${f.builder_name||f.author||'Unknown'} · ${when}</div>
+          ${resHtml}
         </div>`;
       }).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No flags</p>';
   document.getElementById('modal-lot-flags').classList.add('open');
+}
+
+async function sendResolutionRequest(noteId, promptIdx) {
+  const prompt = RES_PROMPTS[promptIdx];
+  await sbCall('requestNoteResolution', { id: noteId, prompt });
+  await loadFlaggedNotes();               // refresh the flag data (now carries the request)
+  renderLotsTable();                      // update the 🚩 column
+  if (currentFlagsLotId) openFlagsModal(currentFlagsLotId);  // re-render modal with new state
 }
 
 // ── BULK ADD LOTS ──
