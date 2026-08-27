@@ -365,6 +365,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 
 <script src="schedule-engine.js?v=2"></script>
 <script src="note-resolution.js?v=1"></script>
+<script src="offline-queue.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
@@ -482,7 +483,8 @@ async function checkPendingResolutions(){
     });
     // 'skip' or backdrop-cancel (null) → leave pending, re-ask next open.
     if(ans==='resolved'||ans==='still_open'){
-      try { await sbCall('respondNoteResolution',{id:p.id,response:ans}); } catch(e){}
+      try { await queueAndSync({ type:'flag_response', apiAction:'respondNoteResolution',
+        target:{lot_id:p.lot_id, note_id:p.id}, payload:{id:p.id,response:ans}, builder:currentBuilder }); } catch(e){}
     }
   }
 }
@@ -849,11 +851,36 @@ function renderTasks(){
   });
 }
 
+// ── OFFLINE QUEUE ROUTER (Layer 2) ──
+// Every builder WRITE routes through the durable queue, then drains. While online
+// the drain runs immediately (enqueue -> sbCall -> markSynced) so behavior is
+// unchanged. Layer 3 will skip the drain when offline; Layer 1's queue already
+// holds the action durably regardless. drainQueue replays ALL pending in
+// (timestamp,seq) order, so a prior failure retries on the next action's drain.
+async function drainQueue(){
+  const pending = await OfflineQueue.getPending();
+  const results = {};
+  for(const a of pending){
+    try { results[a.id] = await sbCall(a.apiAction, a.payload); await OfflineQueue.markSynced(a.id); }
+    catch(e){ await OfflineQueue.markFailed(a.id, String((e&&e.message)||e)); }
+  }
+  return results;
+}
+async function queueAndSync(def){
+  const action = await OfflineQueue.enqueue(def);   // durable FIRST
+  const results = await drainQueue();               // online: syncs now
+  return { action, result: results[action.id] };    // result present when it synced this pass
+}
+
 async function saveTask(t){
   const a=act[t.num];
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null});
-  await saveStage();
-  await checkCompletionStamp(); // Item 4
+  const type=a.finished?'finish':(a.started?'start':'undo');
+  await queueAndSync({ type:type, apiAction:'updateScheduleLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:t.num},
+    payload:{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null},
+    builder:currentBuilder });
+  await saveStage();            // derived side-effect — direct for now (Layer 3: offline)
+  await checkCompletionStamp(); // Item 4 — derived, direct for now
 }
 async function saveStage(){
   const st=computeStage();
@@ -1341,10 +1368,13 @@ async function addNote(){
   const t=bn[noteTaskNum];
   const note=document.getElementById('note-text').value.trim();
   if(!note){alert('Write a note first.');return;}
-  const res=await sbCall('addTaskNote',{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder});
-  const row=Array.isArray(res)?res[0]:res;
+  const {action,result}=await queueAndSync({ type:'note', apiAction:'addTaskNote',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:t.num},
+    payload:{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder},
+    builder:currentBuilder });
+  const row=Array.isArray(result)?result[0]:result;
   if(row&&row.id){lotNotes.push(row);}
-  else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  else{lotNotes.push({id:action.id,lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
   const multi=document.getElementById('note-multi');
   const wantMulti=multi&&multi.checked;
   const savedText=note, savedFlag=(row&&row.flag)||noteFlag, savedBt=t.num;
