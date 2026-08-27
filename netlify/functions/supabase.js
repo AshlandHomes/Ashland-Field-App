@@ -3,6 +3,7 @@
 
 // Single source of truth for all schedule math (shared with the field app + admin).
 const ScheduleEngine = require('../../schedule-engine.js');
+const NoteResolution = require('../../note-resolution.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -1056,7 +1057,9 @@ exports.handler = async function(event) {
       }
 
       case 'getFlaggedNotes': {
-        const notes = await supabaseRequest('GET', `sched_lot_task_notes?flag=in.(red,yellow)&select=*&order=created_at.desc`);
+        // RED ONLY — the admin flag view is management escalations (🔴 Mgmt). Yellow
+        // (🟡 Remind) is the builder's own reminder and must NOT surface here.
+        const notes = await supabaseRequest('GET', `sched_lot_task_notes?flag=eq.red&select=*&order=created_at.desc`);
         const rows = notes.data || [];
         const lotIds = [...new Set(rows.map(n => n.lot_id).filter(Boolean))];
         let lotMap = {};
@@ -1071,6 +1074,59 @@ exports.handler = async function(event) {
           builder_name: lotMap[n.lot_id] ? lotMap[n.lot_id].builder_name : null
         }));
         return { statusCode: 200, body: JSON.stringify(enriched) };
+      }
+
+      // ── RED-FLAG RESOLUTION ────────────────────────────────
+      // A flag IS a note (flag='red'). These carry an admin resolution request and
+      // the builder's answer on the note row; state is derived via NoteResolution.
+
+      case 'requestNoteResolution': {
+        // ADMIN → asks the builder about a red-flag note.
+        const { id, prompt } = payload;
+        if (!id || !prompt) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'id and prompt are required' }) };
+        }
+        const r = await supabaseRequest('PATCH', `sched_lot_task_notes?id=eq.${id}`,
+          NoteResolution.buildRequestUpdate(prompt, new Date().toISOString()));
+        if (r.error) return { statusCode: 500, body: JSON.stringify({ error: r.error }) };
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'respondNoteResolution': {
+        // BUILDER → answers 'resolved' (clears flag, keeps note) or 'still_open'.
+        const { id, response } = payload;
+        if (!id || NoteResolution.VALID_RESPONSES.indexOf(response) === -1) {
+          return { statusCode: 400, body: JSON.stringify({ error: "id and response ('resolved'|'still_open') are required" }) };
+        }
+        const r = await supabaseRequest('PATCH', `sched_lot_task_notes?id=eq.${id}`,
+          NoteResolution.buildResponseUpdate(response, new Date().toISOString()));
+        if (r.error) return { statusCode: 500, body: JSON.stringify({ error: r.error }) };
+        return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      case 'getPendingResolutions': {
+        // FIELD APP on open → red-flag notes with an open request, scoped to the
+        // builder's own lots (field app scopes by builder_name === currentBuilder).
+        const { builder } = payload;
+        if (!builder) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'builder is required' }) };
+        }
+        const notes = await supabaseRequest('GET',
+          `sched_lot_task_notes?flag=eq.red&resolution_requested_at=not.is.null&resolution_response=is.null&select=*&order=resolution_requested_at.asc`);
+        const rows = notes.data || [];
+        const lotIds = [...new Set(rows.map(n => n.lot_id).filter(Boolean))];
+        let lotMap = {};
+        if (lotIds.length) {
+          const lots = await supabaseRequest('GET', `sched_lots?id=in.(${lotIds.join(',')})&select=id,lot_number,community,builder_name`);
+          (lots.data || []).forEach(l => { lotMap[l.id] = l; });
+        }
+        const pending = rows
+          .filter(n => lotMap[n.lot_id] && lotMap[n.lot_id].builder_name === builder)
+          .map(n => ({ ...n,
+            lot_number: lotMap[n.lot_id].lot_number,
+            community: lotMap[n.lot_id].community,
+            builder_name: lotMap[n.lot_id].builder_name }));
+        return { statusCode: 200, body: JSON.stringify(pending) };
       }
 
       // ══════════════════════════════════════════════════════

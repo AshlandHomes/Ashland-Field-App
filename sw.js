@@ -1,7 +1,7 @@
 // Ashland Homes Field Operations — Service Worker
 // Enables installability and basic offline caching
 
-const CACHE_NAME = 'ashland-field-ops-v2';
+const CACHE_NAME = 'ashland-field-ops-v3';
 const CACHE_FILES = [
   '/ashland-stage-update.html',
   '/manifest.json',
