@@ -13,11 +13,23 @@ NEVER silent-drop.
   (start/finish/note/flag_response) go through `queueAndSync` → enqueue then drain.
   Online = drains instantly, behavior unchanged. Proof: `test/offline-layer2-browser.js`.
   - Routed via 3 code points: `saveTask` (start/finish/undo), `addNote`, `checkPendingResolutions`.
-- **Layer 3 — online/offline detection + deferred sync** ⏳ NEXT. Detect true
-  connectivity; offline → enqueue + SKIP drain (UI succeeds locally); reconnect →
-  drain in order, retry failed; sync-status indicator.
-- **Layer 4 — offline app LAUNCH (PWA cache)** — later. Layer 3 assumes the app is
-  already loaded; Layer 4 makes it launch with no signal.
+- **Layer 3 — online/offline detection + deferred sync** ✅ DONE. True connectivity
+  (`navigator.onLine` + a backend probe that defeats captive portals); offline →
+  enqueue + SKIP drain (UI succeeds optimistically); reconnect → drain in order,
+  retry, recompute derived, reconcile note ids; `#sync-status` pill (quiet ✓ /
+  informative ⏳/⚠offline / loud ⚠failed). `sbCall` split into `sbCallRaw` (quiet,
+  network-vs-server error) + the interactive wrapper. Proof: `test/offline-layer3-browser.js`.
+- **Layer 4 — offline app LAUNCH (PWA cache)** ⏳ NEXT. Layer 3 assumes the app is
+  already loaded; Layer 4 makes it launch with no signal (cache the app shell +
+  the builder's lot/task data).
+
+## Known edge (Layer 3, accepted)
+- **Cross-lot derived recompute is best-effort for the CURRENT lot.** If a builder
+  queues actions on Lot A offline, switches to Lot B, then reconnects, the drain
+  replays A's actuals durably, but A's derived `reported_stage` / completion stamp
+  catch up only next time Lot A is touched online. Acceptable (one builder per lot;
+  actuals are captured durably — only the derived DISPLAY value lags). Same for
+  cross-lot note-id reconciliation (reconciles the note in the loaded lot).
 
 ## Explicit Layer 3 items (agreed)
 - **Recompute derived side-effects on sync.** `saveStage` (reported_stage) and

@@ -45,9 +45,9 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
 
   const out = await page.evaluate(async () => {
     await OfflineQueue._clearAll();
-    // record every sbCall; return success (addTaskNote hands back a server row).
+    // stub sbCallRaw — the drain (and the interactive sbCall wrapper) both use it.
     const calls = [];
-    sbCall = async (action, payload) => {
+    sbCallRaw = async (action, payload) => {
       calls.push({ action, payload });
       if (action === 'addTaskNote') return [{ id: 'srv-note-1', flag: payload.flag }];
       return {};
@@ -77,10 +77,10 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     await addNote();
 
     // 4) FLAG RESPONSE (via checkPendingResolutions -> appModal -> Yes)
-    const origSb = sbCall;
-    sbCall = async (action, payload) => {
+    const origRaw = sbCallRaw;
+    sbCallRaw = async (action, payload) => {
       if (action === 'getPendingResolutions') return [{ id: 'note-x', lot_id: 'L1', lot_number: '12', bt_num: 84, note: 'Paint run', resolution_prompt: 'Has this been resolved?' }];
-      return origSb(action, payload);
+      return origRaw(action, payload);
     };
     const p = checkPendingResolutions();
     await new Promise(r => setTimeout(r, 0));

@@ -33,7 +33,7 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
       { id:'n3', lot_number:'5',  community:'CO', bt_num:95, note:'Paint run',           resolution_prompt:'Has this been resolved?' },
     ];
     window.__calls = [];
-    sbCall = async (action, payload) => {
+    sbCallRaw = async (action, payload) => {
       if (action === 'getPendingResolutions') return pending;
       window.__calls.push({ action, payload });
       return {};

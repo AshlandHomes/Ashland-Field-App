@@ -370,7 +370,12 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
 async function loadSecret(){if(API_SECRET)return API_SECRET;const r=await fetch('/.netlify/functions/config');const d=await r.json();API_SECRET=d.secret;return API_SECRET;}
-async function sbCall(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});const d=await r.json();if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
+// Raw call: THROWS on a network/transport failure (= offline signal for the drain);
+// returns the parsed body (which may be {error} from a REACHABLE backend) otherwise.
+async function sbCallRaw(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});return await r.json();}
+// Interactive wrapper — unchanged behavior for existing callers (alerts on a
+// server error, returns null; still throws on network like before).
+async function sbCall(action,payload){const d=await sbCallRaw(action,payload);if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
 
 let currentBuilder=null, pinEntry='', myLots=[];
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
@@ -851,25 +856,140 @@ function renderTasks(){
   });
 }
 
-// ── OFFLINE QUEUE ROUTER (Layer 2) ──
-// Every builder WRITE routes through the durable queue, then drains. While online
-// the drain runs immediately (enqueue -> sbCall -> markSynced) so behavior is
-// unchanged. Layer 3 will skip the drain when offline; Layer 1's queue already
-// holds the action durably regardless. drainQueue replays ALL pending in
-// (timestamp,seq) order, so a prior failure retries on the next action's drain.
+// ── OFFLINE QUEUE ROUTER + CONNECTIVITY (Layers 2–3) ──
+// Every builder WRITE routes through the durable queue. ONLINE: drain immediately
+// (behavior unchanged). OFFLINE: enqueue + SKIP the drain — the action sits
+// pending and the UI already succeeded optimistically (act/lotNotes updated
+// before the write). On RECONNECT: drain in (timestamp,seq) order, retry, then
+// recompute the derived side-effects (reported_stage, completion stamp).
+let _isOnline = (typeof navigator !== 'undefined') ? (navigator.onLine !== false) : true;
+let _syncing = false, _reconnectTimer = null;
+
+// TRUE connectivity: navigator.onLine only proves the radio is up (lies on a
+// captive wifi with no real internet), so we also confirm OUR backend answered.
+async function probeConnectivity(){
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  try {
+    const r = await fetch('/.netlify/functions/config?ping=' + Date.now(), { method:'GET', cache:'no-store' });
+    if (!r.ok) return false;
+    const d = await r.json();
+    return !!(d && ('secret' in d));   // our config function responded -> backend reachable
+  } catch(e){ return false; }
+}
+
+// drain pending in (timestamp,seq) order. NETWORK error -> we're offline: stop and
+// leave the rest pending (NOT failed). SERVER error (reachable backend) -> markFailed
+// and surface. Success -> markSynced. Returns { actionId: serverResult }.
 async function drainQueue(){
   const pending = await OfflineQueue.getPending();
   const results = {};
-  for(const a of pending){
-    try { results[a.id] = await sbCall(a.apiAction, a.payload); await OfflineQueue.markSynced(a.id); }
-    catch(e){ await OfflineQueue.markFailed(a.id, String((e&&e.message)||e)); }
+  for (const a of pending){
+    let d;
+    try { d = await sbCallRaw(a.apiAction, a.payload); }
+    catch(e){ _isOnline = false; break; }              // transport failure = offline
+    if (d && d.error){ await OfflineQueue.markFailed(a.id, String(d.error)); }
+    else { results[a.id] = d; await OfflineQueue.markSynced(a.id); }
   }
   return results;
 }
+
+async function afterDrain(results){
+  if (_isOnline){ await recomputeDerivedAfterSync(results); reconcileNoteIds(results); }
+  else { startReconnectWatch(); }
+  await updateSyncStatus();
+}
+
+// Route a builder write: durable enqueue FIRST, then (online) drain now.
 async function queueAndSync(def){
-  const action = await OfflineQueue.enqueue(def);   // durable FIRST
-  const results = await drainQueue();               // online: syncs now
-  return { action, result: results[action.id] };    // result present when it synced this pass
+  const action = await OfflineQueue.enqueue(def);
+  let result = null;
+  if (_isOnline){
+    const r = await drainQueue();                     // fast path — same sbCall round-trip as before
+    result = r[action.id] || null;
+    await afterDrain(r);
+  } else {
+    startReconnectWatch();
+    await updateSyncStatus();
+  }
+  return { action, result };
+}
+
+// Full sync pass (reconnect / 'online' event / manual): PROBE first, then drain.
+async function syncQueue(){
+  if (_syncing) return {};
+  _syncing = true;
+  try {
+    _isOnline = await probeConnectivity();
+    if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
+    const r = await drainQueue();
+    await afterDrain(r);
+    return r;
+  } finally { _syncing = false; }
+}
+
+// While offline, poll for reconnect (the 'online' event is unreliable on mobile).
+function startReconnectWatch(){
+  if (_reconnectTimer) return;
+  _reconnectTimer = setInterval(async () => {
+    if (_isOnline){ clearInterval(_reconnectTimer); _reconnectTimer = null; return; }
+    if (await probeConnectivity()){ clearInterval(_reconnectTimer); _reconnectTimer = null; _isOnline = true; syncQueue(); }
+  }, 15000);
+}
+
+// On sync, recompute + write the DERIVED side-effects (reported_stage, completion
+// stamp) from the replayed task state — best-effort for the CURRENT lot (the one
+// the builder is on). Cross-lot backlog derived-recompute is a known edge (see
+// OFFLINE_PLAN.md); the derived value also self-corrects next time that lot is
+// touched online.
+async function recomputeDerivedAfterSync(results){
+  if (typeof curLot === 'undefined' || !curLot) return;
+  let all; try { all = await OfflineQueue.getAll(); } catch(e){ return; }
+  const taskSyncedForCurLot = all.some(a => results[a.id]
+    && a.apiAction === 'updateScheduleLotTask' && a.target && a.target.lot_id === curLot.id);
+  if (taskSyncedForCurLot){ try { await saveStage(); await checkCompletionStamp(); } catch(e){} }
+}
+
+// Reconcile a note created OFFLINE (local id = queue action id) to its real
+// server id once the addTaskNote action syncs. Best-effort.
+function reconcileNoteIds(results){
+  if (typeof lotNotes === 'undefined' || !Array.isArray(lotNotes)) return;
+  let changed = false;
+  for (const id in results){
+    const d = results[id]; const row = Array.isArray(d) ? d[0] : d;
+    if (row && row.id){
+      const note = lotNotes.find(n => n.id === id);   // id here IS the queue action id
+      if (note && note.id !== row.id){ note.id = row.id; changed = true; }
+    }
+  }
+  if (changed && typeof renderThread === 'function'){ try { renderThread(); } catch(e){} }
+}
+
+// ── SYNC STATUS INDICATOR (visible, not annoying) ──
+function ensureSyncStatusEl(){
+  let el = document.getElementById('sync-status');
+  if (!el){
+    el = document.createElement('div'); el.id = 'sync-status';
+    el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9998;font-family:inherit;font-size:12px;'
+      + 'font-weight:600;padding:4px 10px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.15);pointer-events:none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+async function updateSyncStatus(){
+  const el = ensureSyncStatusEl();
+  let s; try { s = await OfflineQueue.summary(); } catch(e){ return; }
+  if (s.failed > 0){ el.textContent = '⚠ ' + s.failed + ' failed' + (s.pending ? ' · ' + s.pending + ' queued' : '');
+    el.style.background = '#fee2e2'; el.style.color = '#b91c1c'; el.style.display = ''; return; }   // loud
+  if (!_isOnline){ el.textContent = '⚠ offline' + (s.pending ? ' · ' + s.pending + ' queued' : '');
+    el.style.background = '#fef3c7'; el.style.color = '#92400e'; el.style.display = ''; return; }   // informative
+  if (s.pending > 0){ el.textContent = '⏳ syncing ' + s.pending;
+    el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }    // informative
+  el.textContent = '✓ synced'; el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = ''; // quiet
+}
+
+if (typeof window !== 'undefined'){
+  window.addEventListener('online', () => { syncQueue(); });
+  window.addEventListener('offline', () => { _isOnline = false; updateSyncStatus(); });
 }
 
 async function saveTask(t){
@@ -879,8 +999,10 @@ async function saveTask(t){
     target:{lot_id:curLot.id, task_id:t._id, bt_num:t.num},
     payload:{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null},
     builder:currentBuilder });
-  await saveStage();            // derived side-effect — direct for now (Layer 3: offline)
-  await checkCompletionStamp(); // Item 4 — derived, direct for now
+  // Derived side-effects (reported_stage, completion stamp) are recomputed ONCE
+  // this task action SYNCS — in recomputeDerivedAfterSync (online now, or on
+  // reconnect). Not called inline: inline would double-write online and THROW
+  // offline (they are direct sbCalls). Offline they simply defer to reconnect.
 }
 async function saveStage(){
   const st=computeStage();
@@ -1392,6 +1514,9 @@ async function cycleNoteFlag(id){
 }
 
 loadBuilders();
+// Offline sync init: show the status pill, and drain any actions left PENDING
+// from a prior (offline) session that was closed before reconnecting.
+(async () => { try { await updateSyncStatus(); const s = await OfflineQueue.summary(); if (s.pending > 0) syncQueue(); } catch(e){} })();
 
 // ===== BULK PUSH MODULE =====
 // ---- NOTE PUSH: send a single note to same-subdivision active lots ----

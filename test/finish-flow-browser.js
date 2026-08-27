@@ -74,7 +74,7 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     };
     openDatePicker = async (title) => { cap.picker.push(title); return (o.pickerReturn === undefined ? null : o.pickerReturn); };
     openDelayReasonModal = async (bt, name, ref, actual, late) => { cap.delayCalled = true; cap.delayArgs = { ref, actual, late }; return { id:'r1', label:'Weather', note:'' }; };
-    sbCall = async (action, payload) => { cap.sb.push({ action, payload }); if (action === 'getDelayReasons') return [{ id:'r1', label:'Weather' }]; return {}; };
+    sbCallRaw = async (action, payload) => { cap.sb.push({ action, payload }); if (action === 'getDelayReasons') return [{ id:'r1', label:'Weather' }]; return {}; };
 
     await finishTask(113);
 
