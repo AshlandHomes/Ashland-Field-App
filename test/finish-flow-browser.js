@@ -23,8 +23,13 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
   const browser = await chromium.launch();
   const page = await browser.newPage();
   const errors = []; page.on('pageerror', e => errors.push(String(e)));
-  await page.route('**/*', r => r.request().url().startsWith('file://') ? r.continue()
-    : r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+  await page.route('**/*', r => {
+    const u = r.request().url();
+    // config endpoint answers with a secret so the startup connectivity probe reads ONLINE
+    if (u.includes('/.netlify/functions/config')) return r.fulfill({ status: 200, contentType: 'application/json', body: '{"secret":""}' });
+    if (u.startsWith('file://')) return r.continue();
+    return r.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
   await page.goto('file://' + path.resolve(__dirname, '..', 'ashland-stage-update-dev.html'), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(150); errors.length = 0;
 
@@ -53,7 +58,7 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
     startDate = new Date(cs + 'T00:00:00');
     curLot = { id:'lot-x', lot_number:'6', builder_name:'B', community:'RC', construction_start_date:cs,
                status:'active', template_id:null, completion_stamped_at:null, scheduled_close_date:null };
-    currentBuilder = 'B'; stageMap = []; lotGates = []; lotNotes = [];
+    currentBuilder = 'B'; _isOnline = true; stageMap = []; lotGates = []; lotNotes = [];
     collapsedPhases = {}; userToggledPhases = true; _drReasons = null;
     renderSchedule();                                  // engine sets _projected_ef
     const t = bn[113];

@@ -19,14 +19,19 @@ const check = (label, cond) => { allPass = allPass && cond; console.log('   [' +
   const browser = await chromium.launch();
   const page = await browser.newPage();
   const errors = []; page.on('pageerror', e => errors.push(String(e)));
-  await page.route('**/*', r => r.request().url().startsWith('file://') ? r.continue()
-    : r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+  await page.route('**/*', r => {
+    const u = r.request().url();
+    // config endpoint answers with a secret so the startup connectivity probe reads ONLINE
+    if (u.includes('/.netlify/functions/config')) return r.fulfill({ status: 200, contentType: 'application/json', body: '{"secret":""}' });
+    if (u.startsWith('file://')) return r.continue();
+    return r.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
   await page.goto('file://' + path.resolve(__dirname, '..', 'ashland-stage-update-dev.html'), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(150); errors.length = 0;
 
   // seed builder + 3 pending requests; capture respond calls; start the queue.
   await page.evaluate(() => {
-    currentBuilder = 'Marisa';
+    currentBuilder = 'Marisa'; _isOnline = true;   // feature test: force online (drain runs)
     const pending = [
       { id:'n1', lot_number:'12', community:'CO', bt_num:84, note:'Leak at rear window', resolution_prompt:'Has this been resolved?' },
       { id:'n2', lot_number:'8',  community:'CT', bt_num:88, note:'Tile crack',          resolution_prompt:"Please update — what's the current status?" },

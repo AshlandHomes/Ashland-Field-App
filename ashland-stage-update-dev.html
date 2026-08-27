@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Ashland Field (DEV)</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00A9D1">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--brand:#00A9D1;--brand-light:#e0f6fb;--brand-border:#b3e5f0;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b}
@@ -366,6 +368,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 <script src="schedule-engine.js?v=2"></script>
 <script src="note-resolution.js?v=1"></script>
 <script src="offline-queue.js?v=1"></script>
+<script src="offline-data.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
@@ -377,11 +380,57 @@ async function sbCallRaw(action,payload){await loadSecret();const r=await fetch(
 // server error, returns null; still throws on network like before).
 async function sbCall(action,payload){const d=await sbCallRaw(action,payload);if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
 
+// READ wrapper (Layer 4 — offline launch). Online: fetch live, cache the result in
+// OfflineData (read-through), return it. Offline OR a transport failure mid-session:
+// serve the LAST cached copy of this exact read (so the app renders lots/tasks/notes
+// with no signal). A REACHABLE backend {error} is surfaced (same as sbCall) and NOT
+// cached. Only READ actions go through here — writes still route via queueAndSync.
+async function sbRead(action,payload){
+  if (typeof _isOnline === 'undefined' || _isOnline){
+    try {
+      const d = await sbCallRaw(action,payload);
+      if (d && d.error){ alert('Error: '+d.error); return null; }   // reachable server error
+      try { await OfflineData.put(action,payload,d); } catch(e){}
+      return d;
+    } catch(e){
+      // transport failure while we thought we were online: flip offline, fall to cache
+      _isOnline = false;
+      try { startReconnectWatch(); } catch(_){}
+      try { await updateSyncStatus(); } catch(_){}
+    }
+  }
+  try { return await OfflineData.get(action,payload); } catch(e){ return null; }
+}
+
 let currentBuilder=null, pinEntry='', myLots=[];
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
 
+// ── OFFLINE SESSION (Layer 4) ───────────────────────────────────────────────
+// A builder who logged in ONLINE at least once can re-launch and unlock the app
+// with NO signal: on a successful online login we persist { builder, pinHash },
+// so their PIN is still VERIFIED offline (against the stored hash) — the gate is
+// preserved, never skipped. Online login + server lockout are unchanged.
+const SESSION_KEY='afo_session_v1';
+async function _pinHash(builder,pin){
+  try{
+    const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode('afo:'+builder+':'+pin));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){
+    let h=5381; const s='afo:'+builder+':'+pin; for(let i=0;i<s.length;i++){h=((h<<5)+h+s.charCodeAt(i))|0;} return 'f'+(h>>>0).toString(16);
+  }
+}
+async function saveSession(builder,pin){
+  try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ builder:builder, pinHash:await _pinHash(builder,pin), savedAt:Date.now() })); }catch(e){}
+}
+function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||'null'); }catch(e){ return null; } }
+function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+async function verifyPinOffline(builder,pin){
+  const s=loadSession(); if(!s||s.builder!==builder||!s.pinHash) return false;
+  return s.pinHash===await _pinHash(builder,pin);
+}
+
 async function loadBuilders(){
-  const bs=await sbCall('getBuilders',{})||[];
+  const bs=await sbRead('getBuilders',{})||[];
   const list=bs.filter(b=>!b.is_admin);
   const el=document.getElementById('builder-list');
   if(!list.length){el.innerHTML='<div class="empty">No builders found.</div>';return;}
@@ -408,20 +457,31 @@ async function pinKey(k){
   pinEntry+=k;renderPin();
   if(pinEntry.length===4){await tryPin();}
 }
+function _pinWrong(msg){
+  document.getElementById('pinerr').textContent=msg;pinEntry='';
+  setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},1100);
+}
 async function tryPin(){
-  const res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry});
-  if(res&&res.valid){
-    if(res.is_temp){startSetPin();return;}
-    enterApp();
-  } else if(res&&res.locked){
-    document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
-    pinEntry='';renderPin();
-  } else {
-    const left=(res&&typeof res.attemptsLeft==='number')?res.attemptsLeft:null;
-    const msg=(left!==null)?('Incorrect PIN — '+left+' attempt'+(left===1?'':'s')+' left'):'Incorrect PIN';
-    document.getElementById('pinerr').textContent=msg;pinEntry='';
-    setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},1100);
+  if(_isOnline){
+    let res;
+    try { res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry}); }
+    catch(e){ _isOnline=false; try{startReconnectWatch();updateSyncStatus();}catch(_){} return tryPin(); }  // network died mid-login -> offline verify
+    if(res&&res.valid){
+      if(res.is_temp){startSetPin();return;}
+      await saveSession(currentBuilder,pinEntry);   // remember for offline re-launch
+      enterApp();
+    } else if(res&&res.locked){
+      document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
+      pinEntry='';renderPin();
+    } else {
+      const left=(res&&typeof res.attemptsLeft==='number')?res.attemptsLeft:null;
+      _pinWrong((left!==null)?('Incorrect PIN — '+left+' attempt'+(left===1?'':'s')+' left'):'Incorrect PIN');
+    }
+    return;
   }
+  // OFFLINE: verify against the locally stored hash from the last online login.
+  if(await verifyPinOffline(currentBuilder,pinEntry)){ enterApp(); }
+  else { _pinWrong('Incorrect PIN — offline'); }
 }
 
 // ---- forced PIN change ----
@@ -454,7 +514,7 @@ async function setPinKey(k){
     if(setPinConfirm.length===4){
       if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
       const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
-      if(r&&r.success){enterApp();}
+      if(r&&r.success){await saveSession(currentBuilder,setPinEntry);enterApp();}
       else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
     }
   }
@@ -493,7 +553,7 @@ async function checkPendingResolutions(){
     }
   }
 }
-function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
+function signOut(){clearSession();currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
 async function refreshView(){
   const active=document.querySelector('.screen.active');if(!active)return;
   const id=active.id;
@@ -503,7 +563,7 @@ async function refreshView(){
 
 async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
-  const all=await sbCall('getScheduleLots',{})||[];
+  const all=await sbRead('getScheduleLots',{})||[];
   myLots=all.filter(l=>l.builder_name===currentBuilder&&l.reported_stage&&parseFloat(l.reported_stage)>=1.1);
   renderSubs();
 }
@@ -660,7 +720,7 @@ async function openLot(id){
   if(!curLot)return;
   showScreen('screen-schedule');
   document.getElementById('sched-view').innerHTML='<div class="loading">Loading schedule…</div>';
-  const data=await sbCall('getScheduleLotTasks',{lot_id:id});
+  const data=await sbRead('getScheduleLotTasks',{lot_id:id});
   if(!data){return;}
   const rows=data.tasks||[];
   lotGates=data.gates||[];
@@ -669,8 +729,8 @@ async function openLot(id){
   bn={};TASKS.forEach(t=>bn[t.num]=t);
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish,vendor_confirmed:!!r.vendor_confirmed};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
-  if(curLot.template_id){const sm=await sbCall('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
-  lotNotes=await sbCall('getTaskNotes',{lot_id:id})||[];
+  if(curLot.template_id){const sm=await sbRead('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
+  lotNotes=await sbRead('getTaskNotes',{lot_id:id})||[];
   userToggledPhases=false;collapsedPhases={};
   renderSchedule();
 }
@@ -975,13 +1035,26 @@ function ensureSyncStatusEl(){
   }
   return el;
 }
+// "3m ago" / "2h ago" / "yesterday" — how stale the cached data the builder is
+// looking at is (from the last online sync). Shown while offline.
+function _relTime(iso){
+  if(!iso) return null;
+  const then=new Date(iso).getTime(); if(isNaN(then)) return null;
+  const s=Math.max(0,Math.round((Date.now()-then)/1000));
+  if(s<60) return 'just now';
+  const m=Math.round(s/60); if(m<60) return m+'m ago';
+  const h=Math.round(m/60); if(h<24) return h+'h ago';
+  const d=Math.round(h/24); return d===1?'yesterday':(d+'d ago');
+}
 async function updateSyncStatus(){
   const el = ensureSyncStatusEl();
   let s; try { s = await OfflineQueue.summary(); } catch(e){ return; }
   if (s.failed > 0){ el.textContent = '⚠ ' + s.failed + ' failed' + (s.pending ? ' · ' + s.pending + ' queued' : '');
     el.style.background = '#fee2e2'; el.style.color = '#b91c1c'; el.style.display = ''; return; }   // loud
-  if (!_isOnline){ el.textContent = '⚠ offline' + (s.pending ? ' · ' + s.pending + ' queued' : '');
-    el.style.background = '#fef3c7'; el.style.color = '#92400e'; el.style.display = ''; return; }   // informative
+  if (!_isOnline){
+    let synced=null; try { synced=_relTime(await OfflineData.lastSynced()); } catch(e){}
+    el.textContent = '⚠ offline' + (s.pending ? ' · ' + s.pending + ' queued' : '') + (synced ? ' · synced ' + synced : '');
+    el.style.background = '#fef3c7'; el.style.color = '#92400e'; el.style.display = ''; return; }   // informative + staleness
   if (s.pending > 0){ el.textContent = '⏳ syncing ' + s.pending;
     el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }    // informative
   el.textContent = '✓ synced'; el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = ''; // quiet
@@ -1126,7 +1199,7 @@ async function finishTask(n){
     // (tables not deployed, API error), let the finish go through without it.
     let reasonsOk=true;
     try{
-      if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
+      if(!_drReasons){ _drReasons = await sbRead('getDelayReasons',{}); }
       if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
     }catch(e){ reasonsOk=false; }
     if(reasonsOk){
@@ -1513,10 +1586,29 @@ async function cycleNoteFlag(id){
   await sbCall('updateTaskNote',{id,flag:nt.flag});
 }
 
-loadBuilders();
-// Offline sync init: show the status pill, and drain any actions left PENDING
-// from a prior (offline) session that was closed before reconnecting.
-(async () => { try { await updateSyncStatus(); const s = await OfflineQueue.summary(); if (s.pending > 0) syncQueue(); } catch(e){} })();
+// ── STARTUP (Layer 4: offline-aware launch) ─────────────────────────────────
+(async () => {
+  // 1) Register the service worker so the app SHELL launches with no signal.
+  //    Network-first inside the SW keeps the app fresh when there IS signal.
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator){
+    try { await navigator.serviceWorker.register('sw.js'); } catch(e){}
+  }
+  // 2) TRUE connectivity check up front (navigator.onLine lies on captive wifi).
+  try { _isOnline = await probeConnectivity(); } catch(e){ _isOnline = (typeof navigator!=='undefined' && navigator.onLine!==false); }
+  // 3) OFFLINE re-launch with a remembered login → resume straight to that
+  //    builder's PIN (verified locally). Otherwise the normal builder list.
+  const sess = loadSession();
+  if (!_isOnline && sess && sess.builder){
+    currentBuilder = sess.builder; pinEntry='';
+    document.getElementById('pin-name').textContent = sess.builder;
+    document.getElementById('pinerr').textContent = '';
+    renderPin(); showScreen('screen-pin');
+  } else {
+    loadBuilders();
+  }
+  // 4) Status pill + drain anything left PENDING from a prior offline session.
+  try { await updateSyncStatus(); const s = await OfflineQueue.summary(); if (s.pending > 0) syncQueue(); } catch(e){}
+})();
 
 // ===== BULK PUSH MODULE =====
 // ---- NOTE PUSH: send a single note to same-subdivision active lots ----
