@@ -50,18 +50,23 @@ NEVER silent-drop.
 
 ## ⚠️ PROMOTE / SIGN-OFF NOTES for Layer 4 (Collin, read before we go live)
 - **Registering a service worker on the LIVE app is a real, powerful change** (it
-  controls the origin and caches the shell). The strategy is network-first so it can
-  NEVER trap builders on a stale app, and the cache name is versioned (`-v4`) so the
-  activate handler purges old caches. Still: this is the item to promote carefully and
-  watch after cutover. `sw.js` is a SHARED file (dev + live identical) — same promote
-  discipline as the engine.
-- **Offline PIN is verified against a LOCAL SHA-256 hash.** A 4-digit PIN space is
-  small, so a determined attacker WITH the unlocked phone + devtools could brute-force
-  the stored hash offline (no server lockout offline). Threat model is low (it's the
-  builder's own phone; data is construction schedule, not money) and this preserves the
-  PIN gate instead of skipping it — but it's a real tradeoff and it's YOUR call to
-  sign off before promote. Alternative if you want it tighter: don't persist offline
-  login at all (builder must be online to log in), at the cost of no offline cold-start.
+  controls the origin and caches the shell). ✅ APPROVED to proceed (Collin) — with the
+  careful-promote discipline + a real-device test on Dev FIRST. The strategy is
+  network-first so it can NEVER trap builders on a stale app, and the cache name is
+  versioned (`-v4`) so the activate handler purges old caches. Still the item to promote
+  deliberately and watch after cutover. `sw.js` is a SHARED file (dev + live identical)
+  — same promote discipline as the engine.
+- **Real-device test on Dev BEFORE promote:** see `DEVICE_TEST_offline.md` (airplane-mode
+  cold-start + offline actions + reconnect drain on Collin's actual phone). "Passes in the
+  harness" ≠ "works in-hand in airplane mode" — this ships to builders.
+- **Offline PIN is verified against a LOCAL SHA-256 hash.** ✅ APPROVED (Collin) — KEEP
+  as built. Reasoning: threat model is low (builder's OWN phone, gates SCHEDULE data
+  not money/PII, needs physical possession of the unlocked phone + devtools + motive);
+  the tighter alternative (no persisted offline login) DESTROYS the core feature (a
+  builder at a dead-zone lot couldn't open the app at all). The offline PIN still KEEPS
+  a gate (verifies locally, doesn't skip auth) — it just can't rate-limit offline.
+  **Future hardening (logged, NOT now):** 6-digit PIN, and/or a local too-many-attempts
+  lockout for the offline path. Polish, revisit later.
 - **Test-sandbox finding:** Playwright's `context.setOffline(true)` only flips
   `navigator.onLine` here — it does NOT actually sever localhost traffic. So both Layer 4
   proofs simulate offline by genuinely SHUTTING THE SERVER DOWN (a real connection
