@@ -1,8 +1,15 @@
-# Promote plan — Offline subsystem (Layers 1–4 + territory prefetch)
+# Promote plan — Offline subsystem (FULL scope, re-baselined at Dev 203b933)
 
 The most consequential promote yet: it registers a service worker on the LIVE app for
 the **first time ever**, changing how the app loads for every builder. Network-first
 strategy means it can't trap anyone on stale code, but this is the one to watch.
+
+**Everything in this one promote** (all inside the same 4 files — the file SET never grew):
+Layers 1–4 (durable queue, routed writes, offline detect/sync, PWA offline launch),
+territory prefetch (whole-subdivision background cache), the push-bar fix (honest
+completed/total bar + beforeunload guard), the four silent-loss fixes (delay reason,
+note-flag + client-id reconciliation, vendor-confirm, task-edit), utility gates offline,
+and the write-path guardrail test. Commits `26e1203 … 203b933` on Dev.
 
 ## 0. Verified facts (checked against origin/main, not assumed)
 - **`serviceWorker.register` has NEVER appeared anywhere in main's history.** No builder
@@ -68,11 +75,17 @@ Live URL (confirm hostname — docs only name the dev site): assume
 2. **Force-fresh the html** with `?v=live1` → confirm the **sync pill + cache pill appear**
    (on live there's no banner, so the pill is top-right at top:8). Log in; watch the cache
    pill fill the territory → `✓ N lots ready offline`.
-3. **Full offline cycle on the phone against LIVE** (same as DEVICE_TEST_offline.md but on
-   the live URL): cache online → close/reopen online (warms shell) → airplane mode →
-   cold-start opens + PIN + all lots (incl. one never opened) → act offline → reconnect →
-   drain to `✓ synced`.
-4. Only after that passes on a real phone do we consider it trusted for all builders.
+3. **Full offline cycle on the phone against LIVE** (DEVICE_TEST_offline.md on the live URL):
+   cache online → close/reopen online (warms shell) → airplane mode → cold-start opens +
+   PIN + all lots (incl. one never opened).
+4. **Exercise EVERY offline write while in airplane mode** (the silent-loss fixes), then
+   reconnect and confirm each persisted (pull-to-refresh, values stick):
+   - Finish a LATE task → pick a delay reason (both the finish AND the reason must survive).
+   - Toggle a utility gate.
+   - Add a note, then flag it red.
+   - Start/finish a task; vendor-confirm a task; edit a task (duration/est).
+   - Watch the pill: `⚠ offline · N queued` climbs, then `⏳ syncing` → `✓ synced` on reconnect.
+5. Only after all of that passes on a real phone do we consider it trusted for all builders.
 
 ## 5. SW-on-live risk & existing-builder first-load experience
 **No old SW exists (proven), so the first activation is clean.** Walkthrough:
