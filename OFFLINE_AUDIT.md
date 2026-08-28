@@ -47,17 +47,27 @@ And because it's a network throw, these also lose data on a transient ONLINE bli
 | `probeConnectivity` / `loadSecret` fetches | fail fast (reject), no hang | ✅ |
 | _No infinite spinners found._ | | ✅ |
 
-## 5. PRIORITY — the SILENT failures (lose field data with no warning)
-1. 🔴 **`addTaskDelay` — delay reason on a late-task finish.** Finish survives (queued), reason
-   vanishes. Data-integrity gap on a CORE offline action. **Highest.**
-2. 🔴 **`toggleConfirm` — vendor confirmed.** UI actively shows ✓, write lost, no error. A
-   builder confirming a vendor/utility in the field believes it saved. **High.**
-3. 🔴 **`cycleNoteFlag` — note flag (red/yellow).** UI shows the flag, write lost. Flags drive
-   the admin red-flag resolution loop, so a lost flag = a missed escalation. **Medium-high.**
-4. 🔴/⚠️ **`saveEditTask` — task edit.** Semi-visible (button hangs) but DB write silently lost;
-   in-memory edit misleads. Planning action, LOW field need. **Low.**
+## 5. PRIORITY — the SILENT failures (lose field data with no warning) — ALL RESOLVED
+1. ✅ **`addTaskDelay` — delay reason on a late-task finish.** Routed as an ordered pair with
+   the finish (`f4c8ffd`). Proof: `test/offline-delay-browser.js`.
+2. ✅ **`cycleNoteFlag` — note flag.** Routed + client-id reconciliation for offline-created
+   notes (`ecd8602`). Proof: `test/offline-flag-browser.js`.
+3. ✅ **`toggleConfirm` — vendor confirmed.** Routed as a partial write (`c474c97`). Proof:
+   `test/offline-confirm-browser.js`.
+4. ✅ **`saveEditTask` — task edit.** Routed as an ordered pair; also fixes the stuck-"Saving…"
+   hang (`8dd4c82`). Proof: `test/offline-edit-browser.js`.
 
-Note: #1–#3 also lose data on a transient ONLINE network blip (network throw, no retry),
-not only in full offline — so the fix (route through the durable queue) helps online too.
+(#1–#3 also lost data on a transient ONLINE blip — a network throw with no retry — so routing
+them through the durable queue hardened the online path too.)
 
-Fixes NOT applied — audit only. Fix order is Collin's call.
+## GUARDRAIL against bug #5 — `test/offline-write-guard.js`
+Static source scan: FAILS if any of the seven queued-write actions
+(`updateScheduleLotTask`, `addTaskNote`, `respondNoteResolution`, `updateScheduleLotGate`,
+`addTaskDelay`, `updateTaskNote`, `editLotTask`) is called via a direct `sbCall`/`sbCallRaw`
+literal OUTSIDE the sanctioned zones (`drainQueue`, and `_bpApply`/`_bpApplyNote` = bulk push /
+KI-13). Green today; goes red the moment a new direct queued-write is added — verified by
+injecting a rogue call. This is what makes a fifth silent-loss write impossible to merge unnoticed.
+
+Every simple builder write now goes through the ONE durable path (queueAndSync). Only the
+drain (the sanctioned executor) and bulk push (KI-13, replay-with-reads) still call sbCall for
+writes directly.
