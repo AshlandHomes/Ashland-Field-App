@@ -369,3 +369,27 @@ group (`renderLotsTable`, display-only). Canceled lots stay interleaved — canc
 is rare and semantically different from closed. If ever wanted, generalize the
 group to all-inactive (`status !== 'active'`) with a relabel (e.g. "Closed /
 Canceled"), or a second group. One-line filter change; no data impact.
+
+## KI-13 — Bulk push is ONLINE-ONLY and NOT durable through the offline queue
+
+**Status:** logged follow-up (Collin's choice: fix A+B now, log C). Dev, 2026-08-28.
+**Surfaced:** while fixing the misleading push progress bar.
+
+The bulk task/note push (`_bpApply`, `_bpApplyNote`) writes every lot with DIRECT
+`sbCall` — it never routes through the durable offline queue (`queueAndSync`). So:
+- It only works ONLINE (each lot does live reads to compute the target's stage).
+- If a builder hard-closes mid-push, the in-flight lot's write is aborted and LOST
+  (unrecoverable — nothing is queued).
+
+**Fixed now (A+B):** the progress bar counts COMPLETED/total (only hits 100% when the
+LAST push confirms — visible sliver + "keep open" message while in flight), and a
+`beforeunload` guard warns the browser if they try to close mid-push. Proof:
+`test/push-progress-browser.js`. This kills the reported bug (false "done" → early
+close → loss) and stops the close itself.
+
+**Deferred (C) — make bulk push durable through the queue.** Not a small change: bulk
+push does LIVE READS of each target lot (its task rows + template stage map) to
+compute the target's `reported_stage` before writing. It can't be a simple queued
+write like start/finish — it'd need a "push intent" action replayed at drain time
+with reads-at-replay (and a defined conflict rule if the target changed offline).
+Real architecture; do only if we want belt-and-suspenders durability beyond A+B.

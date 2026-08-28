@@ -1762,18 +1762,27 @@ async function _bpApplyNote(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length){alert('Select at least one lot.');return;}
   _bpProgressScreen(chosen.length);
-  const doneLots=[],failedLots=[]; let i=0;
+  _bpGuardOn();
+  const doneLots=[],failedLots=[]; const total=chosen.length; let completed=0;
+  try{
   for(const lot of chosen){
-    i++; _bpProgress(i,chosen.length,lot.lot_number,0,1);
+    _bpProgress(completed, total, lot.lot_number);   // bar stays at completed while THIS note is in flight
     try{
       const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
       const rows=(data&&data.tasks)||[];
       const tgt=rows.find(r=>r.bt_num===_bpNote.bt_num);
-      if(!tgt){failedLots.push(lot.lot_number+' (no task #'+_bpNote.bt_num+')');continue;}
-      await sbCall('addTaskNote',{lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpNote.bt_num,note:_bpNote.text+'  (pushed from '+curLot.lot_number+')',flag:_bpNote.flag,author:currentBuilder});
-      doneLots.push(lot.lot_number);
+      if(!tgt){ failedLots.push(lot.lot_number+' (no task #'+_bpNote.bt_num+')'); }
+      else {
+        await sbCall('addTaskNote',{lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpNote.bt_num,note:_bpNote.text+'  (pushed from '+curLot.lot_number+')',flag:_bpNote.flag,author:currentBuilder});
+        doneLots.push(lot.lot_number);
+      }
     }catch(e){failedLots.push(lot.lot_number);}
+    completed++;                          // only AFTER this note's write has SETTLED
+    _bpProgress(completed, total, null);  // advance the bar; on the final note -> 100% "✓ Done"
   }
+  } finally { _bpGuardOff(); }
+
+  await new Promise(r=>setTimeout(r, 700));   // let the 100% "✓ Done" register
   _bpClose();
   let msg='Note posted to '+doneLots.length+' of '+chosen.length+' lots.';
   if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
@@ -1939,36 +1948,60 @@ function _bpProgressScreen(total){
   _bpClose();
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
-    +'<div class="bp-head"><div class="bp-title">Applying push…</div></div>'
+    +'<div class="bp-head"><div class="bp-title" id="bp-prog-title">Applying push…</div></div>'
     +'<div class="bp-subtitle" id="bp-prog-label">Starting…</div>'
     +'<div class="bp-progbar"><div class="bp-progfill" id="bp-progfill" style="width:0%"></div></div>'
     +'<div class="bp-prog-detail" id="bp-prog-detail"></div>'
-    +'<div class="bp-prog-warn">Please keep this screen open until it finishes.</div>'
+    +'<div class="bp-prog-warn" id="bp-prog-warn">⚠ Keep this screen open — don’t close until it says “✓ Done”.</div>'
     +'</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
 }
-function _bpProgress(lotIdx, lotTotal, lotLabel, taskDone, taskTotal){
-  const pct=Math.round((lotIdx/lotTotal)*100);
+// Progress reflects COMPLETED pushes / total — NOT lots merely reached. The bar only
+// hits 100% (and the message flips to "✓ Done") once the LAST push actually confirms,
+// so the last lot in flight shows an almost-full bar with a visible sliver and a
+// "don't close" message — no builder closes early and loses the final push.
+function _bpProgress(completed, total, workingLabel){
+  const pct=Math.round((completed/Math.max(1,total))*100);
   const lbl=document.getElementById('bp-prog-label');
   const fill=document.getElementById('bp-progfill');
   const det=document.getElementById('bp-prog-detail');
-  if(lbl) lbl.textContent='Lot '+lotIdx+' of '+lotTotal+'  ('+lotLabel+')';
+  const title=document.getElementById('bp-prog-title');
+  const warn=document.getElementById('bp-prog-warn');
   if(fill) fill.style.width=pct+'%';
-  if(det) det.textContent=(taskTotal>1)?('task '+taskDone+' / '+taskTotal):'';
+  if(completed>=total){                                    // ALL confirmed -> done
+    if(title) title.textContent='✓ Done';
+    if(lbl) lbl.textContent='✓ Done — '+total+' lot'+(total===1?'':'s')+' updated';
+    if(det) det.textContent='';
+    if(warn) warn.style.display='none';
+  } else {                                                 // still pushing -> keep open
+    if(title) title.textContent='Applying push…';
+    if(lbl) lbl.textContent='Pushing lot '+(completed+1)+' of '+total+(workingLabel?'  ('+workingLabel+')':'')+' — keep open';
+    if(det) det.textContent=completed+' of '+total+' done';
+    if(warn) warn.style.display='';
+  }
 }
+
+// ── close-guard: while a push is in flight, warn the browser on unload so a builder
+// can't close mid-push and lose the last (direct, un-queued) write. See PROMOTE/
+// KNOWN_ISSUES: bulk push is online-only + NOT durable through the offline queue yet.
+let _bpInFlight=false;
+function _bpBeforeUnload(e){ if(!_bpInFlight) return; e.preventDefault(); e.returnValue='A push is still running — leave anyway? The last update may be lost.'; return e.returnValue; }
+function _bpGuardOn(){ _bpInFlight=true; try{ window.addEventListener('beforeunload', _bpBeforeUnload); }catch(e){} }
+function _bpGuardOff(){ _bpInFlight=false; try{ window.removeEventListener('beforeunload', _bpBeforeUnload); }catch(e){} }
 
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   _bpProgressScreen(chosen.length);
+  _bpGuardOn();
 
   let ok=0, fail=0; const errors=[];
   const doneLots=[], failedLots=[];
-  let lotIdx=0;
+  const total=chosen.length; let completed=0;
 
+  try{
   for(const lot of chosen){
-    lotIdx++;
     let lotHadError=false;
-    _bpProgress(lotIdx, chosen.length, lot.lot_number, 0, 1);
+    _bpProgress(completed, total, lot.lot_number);   // bar stays at completed while THIS lot is in flight
     try{
       // fetch this target lot's own task rows (its own task_ids per bt_num)
       const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
@@ -2015,7 +2048,6 @@ async function _bpApply(){
       else { reportedCode=trueStage?trueStage.code:null; }
 
       // ONE round-trip: all task writes + the lot stage write
-      _bpProgress(lotIdx, chosen.length, lot.lot_number, batch.length, batch.length);
       const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
       if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
       if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
@@ -2047,8 +2079,12 @@ async function _bpApply(){
       fail++; lotHadError=true; failedLots.push(lot.lot_number);
       errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
     }
+    completed++;                          // only AFTER this lot's writes have SETTLED
+    _bpProgress(completed, total, null);  // advance the bar; on the final lot -> 100% "✓ Done"
   }
+  } finally { _bpGuardOff(); }            // always release the close-guard
 
+  await new Promise(r=>setTimeout(r, 700));   // let the 100% "✓ Done" bar register before the summary
   _bpClose();
   let msg=doneLots.length+' of '+chosen.length+' lots updated.';
   if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
