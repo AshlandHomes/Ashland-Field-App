@@ -6,8 +6,9 @@ feature (esp. the service-worker registration) to live. "Passes in the harness" 
 
 **Dev field app URL:** https://ashland-field-ops-dev.netlify.app/ashland-stage-update-dev.html
 
-The small pill in the **top-right corner** is your status light the whole time:
-`✓ synced` (green) · `⏳ syncing N` (blue) · `⚠ offline · N queued · synced <time>` (amber) · `⚠ N failed` (red).
+Two small pills in the **top-right corner** are your status lights the whole time:
+- **Sync pill (top):** `✓ synced` (green) · `⏳ syncing N` (blue) · `⚠ offline · N queued · synced <time>` (amber) · `⚠ N failed` (red).
+- **Cache pill (just below it):** `⏳ Caching N/50 offline` (blue) while your whole territory downloads in the background → `✓ N lots ready offline` (green, then fades) → `⚠ N/M lots cached` (amber) if signal drops before it finishes.
 
 ---
 
@@ -15,12 +16,12 @@ The small pill in the **top-right corner** is your status light the whole time:
 The app can only launch offline if it has cached itself at least once. That happens on
 the **second** online load, not the first.
 
-1. On wifi/cellular, open the Dev URL above. Log in with your PIN. Wait for the pill to show **`✓ synced`**.
-2. **Open the lot(s) you want to test** — tap into a lot so its tasks/notes load. Only lots you open online are available offline. Open 1–2 lots, then back out.
+1. On wifi/cellular, open the Dev URL above. Log in with your PIN. Wait for the sync pill to show **`✓ synced`**.
+2. **Watch the cache pill (second pill) fill by itself:** `⏳ Caching 1/50 offline` climbing up to **`✓ N lots ready offline`**. This is your whole territory downloading in the background — you do NOT need to open each lot anymore. The app stays fully usable while it fills; just leave it a moment until the cache pill goes green. *(If you have signal, this takes ~15–30 seconds for 50 lots.)*
 3. Now **fully close the app** (swipe it away — don't just background it) and **reopen it** while STILL online. This second load is when it saves the app shell for offline.
 4. *(Optional but recommended — this is how builders will really use it):* tap the browser's Share → **Add to Home Screen**, and run the rest of the test from that home-screen icon.
 
-✅ Expected: it opens normally, PIN works, you see your lots, pill goes `✓ synced`.
+✅ Expected: it opens normally, PIN works, you see your lots, sync pill `✓ synced`, and the cache pill reached **`✓ N lots ready offline`**.
 
 ---
 
@@ -32,8 +33,9 @@ the **second** online load, not the first.
 - The app **OPENS** (does NOT show a "no internet / can't connect" browser error).
 - It goes straight to **your** PIN screen (your name already shown).
 - You enter your PIN and it **lets you in** (verified on the phone, no signal needed).
-- You see **your lots** — the ones you opened in Step 0.
-- Pill shows **`⚠ offline · synced <a few min ago>`**.
+- You see **your lots**.
+- **Tap into a lot you NEVER opened online** — its tasks and notes are there. This is the whole point of the territory cache: your entire subdivision is available, not just lots you happened to open.
+- Sync pill shows **`⚠ offline · synced <a few min ago>`**.
 
 ❌ If instead you get a browser "can't connect" page → the app didn't cache itself.
 Turn airplane mode off, redo Step 0 (especially 0.3, the close-and-reopen online), try again.

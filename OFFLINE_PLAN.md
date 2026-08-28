@@ -48,6 +48,27 @@ NEVER silent-drop.
   cache; offline serves the last-cached build with the server down). Both are TRUE
   offline (the server is actually stopped — see the sandbox note below).
 
+- **Layer 4b — background TERRITORY prefetch** ✅ DONE. Per-lot-on-open caching didn't
+  match how builders work (they own whole subdivisions, 50+ active lots, can't pre-open
+  each). Now: on online load the lot LIST loads first (app usable in seconds), then a
+  background filler caches EVERY active lot's tasks + notes so the whole territory is
+  offline — without blocking the UI or hammering the backend.
+  - **Set:** `builder_name===me && reported_stage>=1.1 && status!=='closed'` (active only;
+    a builder's "subdivisions" are just their lots grouped by `community` — assignment is
+    by builder_name, there's no separate subdivision table).
+  - **How:** `prefetchOffline()` — sequential + throttled (200ms/lot), recently-active
+    first (sort by `updated_at` desc, so if signal drops the lots worked TODAY are already
+    cached), template stage-maps deduped. Silent background reads (`_prefetchRead`, never
+    alerts). Reuses the SAME offline-data.js cache as the on-open path — no new store.
+  - **Refresh:** missing/stale only (a lot re-pulls at most ~once / 8h via `cached_at`);
+    pull-to-refresh (↻) forces a full re-fill; opening a lot always refreshes it.
+  - **Offline-aware:** pauses if signal drops mid-fill, resumes on reconnect (syncQueue).
+  - **Progress pill** (second pill, under the sync pill): `⏳ Caching 23/50 offline` →
+    `✓ 50 lots ready offline` (fades) → honest `⚠ 23/50 lots cached` if signal drops mid-fill.
+  - Proof: `test/offline-prefetch-browser.js` — 50 lots, app usable immediately, fill runs
+    in the background w/ progress, recently-active-first order, ALL 50 cached (none opened
+    by hand), closed lot skipped, then server SHUT DOWN and a never-opened lot opens offline.
+
 ## ⚠️ PROMOTE / SIGN-OFF NOTES for Layer 4 (Collin, read before we go live)
 - **Registering a service worker on the LIVE app is a real, powerful change** (it
   controls the origin and caches the shell). ✅ APPROVED to proceed (Collin) — with the

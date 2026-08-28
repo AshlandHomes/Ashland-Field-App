@@ -66,6 +66,18 @@
     });
   }
 
+  // Like get(), but returns { response, cached_at } so callers can judge staleness
+  // (used by the background territory prefetch to skip already-fresh lots).
+  function getWithMeta(action, payload) {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var r = db.transaction(READS, 'readonly').objectStore(READS).get(keyOf(action, payload));
+        r.onsuccess = function () { resolve(r.result ? { response: r.result.response, cached_at: r.result.cached_at } : null); };
+        r.onerror = function () { reject(r.error); };
+      });
+    });
+  }
+
   function lastSynced() {
     return openDB().then(function (db) {
       return new Promise(function (resolve) {
@@ -86,5 +98,5 @@
     });
   }
 
-  return { put: put, get: get, lastSynced: lastSynced, _clearAll: _clearAll, _dbName: DB_NAME };
+  return { put: put, get: get, getWithMeta: getWithMeta, lastSynced: lastSynced, _clearAll: _clearAll, _dbName: DB_NAME };
 }));

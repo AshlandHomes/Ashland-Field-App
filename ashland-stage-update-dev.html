@@ -523,7 +523,7 @@ async function setPinKey(k){
 const SUB_NAMES={RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
 let curSub=null;
 
-function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>checkPendingResolutions());}
+function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>{checkPendingResolutions();prefetchOffline();});}
 
 // ── RED-FLAG RESOLUTION (builder side) ──
 // On app open, if the admin has asked about any of this builder's red flags, pop
@@ -557,7 +557,7 @@ function signOut(){clearSession();currentBuilder=null;pinEntry='';curSub=null;my
 async function refreshView(){
   const active=document.querySelector('.screen.active');if(!active)return;
   const id=active.id;
-  if(id==='screen-subs'||id==='screen-lots'){await loadMyLots();}
+  if(id==='screen-subs'||id==='screen-lots'){await loadMyLots();prefetchOffline({force:true});}  // manual "top me up before I head out"
   else if(id==='screen-schedule'&&curLot){await openLot(curLot.id);}
 }
 
@@ -983,6 +983,7 @@ async function syncQueue(){
     if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
     const r = await drainQueue();
     await afterDrain(r);
+    if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
     return r;
   } finally { _syncing = false; }
 }
@@ -1072,6 +1073,113 @@ async function updateSyncStatus(){
 if (typeof window !== 'undefined'){
   window.addEventListener('online', () => { syncQueue(); });
   window.addEventListener('offline', () => { _isOnline = false; updateSyncStatus(); });
+}
+
+// ── OFFLINE TERRITORY PREFETCH (Layer 4b) ───────────────────────────────────
+// A builder owns whole subdivisions (50+ active lots) and can't pre-open each one.
+// After the lot LIST loads (app usable in seconds), we cache every active lot's
+// tasks + notes IN THE BACKGROUND — sequential + throttled so the UI never blocks
+// and the backend isn't hammered — so their whole territory is available offline.
+// Reuses the offline-data.js read cache (same store the on-open path fills).
+const PREFETCH_STALE_MS = 8 * 60 * 60 * 1000;   // refresh a lot at most ~once / 8h
+let PREFETCH_THROTTLE_MS = 200;                 // gap between lots (gentle on backend)
+let _prefetching = false;
+let _cacheStatus = { total: 0, done: 0, state: 'idle' };   // idle|filling|paused|complete
+
+// active lots to cache: myLots is already (this builder + reported_stage>=1.1);
+// exclude closed/archived (no field work there).
+function activeLotsToCache(){
+  return (typeof myLots !== 'undefined' ? myLots : []).filter(l => l && l.status !== 'closed');
+}
+
+// Silent read for the BACKGROUND fill — never alerts (unlike sbRead), caches on
+// success, and flips us offline (pausing the fill) on a transport failure.
+async function _prefetchRead(action, payload){
+  if (!_isOnline) return;
+  try {
+    const d = await sbCallRaw(action, payload);
+    if (d && d.error) return;                       // server error -> skip silently, keep going
+    try { await OfflineData.put(action, payload, d); } catch(e){}
+  } catch(e){
+    _isOnline = false;                              // transport failure = offline
+    try { startReconnectWatch(); } catch(_){}
+    try { await updateSyncStatus(); } catch(_){}
+  }
+}
+
+// Is this lot's cached copy still fresh (skip re-pulling within the staleness window)?
+async function _lotIsFresh(lot){
+  try {
+    const m = await OfflineData.getWithMeta('getScheduleLotTasks', { lot_id: lot.id });
+    if (!m || !m.response || !m.cached_at) return false;
+    return (Date.now() - new Date(m.cached_at).getTime()) < PREFETCH_STALE_MS;
+  } catch(e){ return false; }
+}
+
+// Fill the whole territory in the background. force=true (pull-to-refresh) ignores
+// staleness and re-pulls everything. Non-blocking; guarded against overlap.
+async function prefetchOffline(opts){
+  const force = !!(opts && opts.force);
+  if (_prefetching || !_isOnline) return;
+  _prefetching = true;
+  try {
+    // recently-active first: if signal drops partway, the lots most likely worked
+    // TODAY are already cached.
+    const lots = activeLotsToCache().slice()
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    _cacheStatus = { total: lots.length, done: 0, state: lots.length ? 'filling' : 'complete' };
+    updateCacheStatus();
+    const seenTemplates = new Set();
+    for (const lot of lots){
+      if (!_isOnline){ _cacheStatus.state = 'paused'; updateCacheStatus(); break; }
+      const fresh = force ? false : await _lotIsFresh(lot);
+      if (!fresh){
+        await _prefetchRead('getScheduleLotTasks', { lot_id: lot.id });
+        if (lot.template_id && !seenTemplates.has(lot.template_id)){
+          seenTemplates.add(lot.template_id);
+          await _prefetchRead('getTemplateStageMap', { template_id: lot.template_id });
+        }
+        await _prefetchRead('getTaskNotes', { lot_id: lot.id });
+        if (!_isOnline){ _cacheStatus.state = 'paused'; updateCacheStatus(); break; }  // a read flipped us offline
+        await new Promise(r => setTimeout(r, PREFETCH_THROTTLE_MS));
+      }
+      _cacheStatus.done++;
+      updateCacheStatus();
+    }
+    if (_isOnline && _cacheStatus.done >= _cacheStatus.total){ _cacheStatus.state = 'complete'; updateCacheStatus(); }
+  } finally { _prefetching = false; }
+}
+
+// ── cache-readiness pill (second pill, just under the sync pill) ──
+let _cacheStatusFade = null;
+function ensureCacheStatusEl(){
+  let el = document.getElementById('cache-status');
+  if (!el){
+    el = document.createElement('div'); el.id = 'cache-status';
+    const bannerEl = Array.prototype.find.call(document.querySelectorAll('div'),
+      d => d.textContent.trim() === '⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠');
+    let base = 8, z = 9998;
+    if (bannerEl){ base = (Math.ceil(bannerEl.getBoundingClientRect().height) || 30) + 8; z = 100000; }
+    const top = (base + 30) + 'px';   // sit one row below the sync pill
+    el.style.cssText = 'position:fixed;top:'+top+';right:8px;z-index:'+z+';font-family:inherit;font-size:12px;'
+      + 'font-weight:600;padding:4px 10px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.15);pointer-events:none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function updateCacheStatus(){
+  const el = ensureCacheStatusEl();
+  const s = _cacheStatus;
+  if (_cacheStatusFade){ clearTimeout(_cacheStatusFade); _cacheStatusFade = null; }
+  if (s.state === 'idle' || s.total === 0){ el.style.display = 'none'; return; }
+  if (s.state === 'filling'){ el.textContent = '⏳ Caching ' + s.done + '/' + s.total + ' offline';
+    el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }
+  if (s.state === 'paused'){ el.textContent = '⚠ ' + s.done + '/' + s.total + ' lots cached';
+    el.style.background = '#fef3c7'; el.style.color = '#92400e'; el.style.display = ''; return; }  // honest: not all cached
+  // complete
+  el.textContent = '✓ ' + s.total + ' lots ready offline';
+  el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = '';
+  _cacheStatusFade = setTimeout(() => { el.style.display = 'none'; }, 5000);   // fade the good news
 }
 
 async function saveTask(t){
