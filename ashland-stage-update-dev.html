@@ -948,7 +948,24 @@ async function drainQueue(){
     try { d = await sbCallRaw(a.apiAction, a.payload); }
     catch(e){ _isOnline = false; break; }              // transport failure = offline
     if (d && d.error){ await OfflineQueue.markFailed(a.id, String(d.error)); }
-    else { results[a.id] = d; await OfflineQueue.markSynced(a.id); }
+    else {
+      results[a.id] = d; await OfflineQueue.markSynced(a.id);
+      // If this action CREATED a server note (addTaskNote made offline, local id =
+      // this action's client id), rewrite any still-pending action that targets that
+      // client id (e.g. a flag change queued before the note synced) to the real
+      // server id — durably in IDB (survives a mid-drain disconnect) AND in this
+      // pass's snapshot (so the very next action in THIS loop uses the right id).
+      if (a.apiAction === 'addTaskNote'){
+        const row = Array.isArray(d) ? d[0] : d;
+        if (row && row.id && row.id !== a.id){
+          try { await OfflineQueue.remapNoteId(a.id, row.id); } catch(e){}
+          for (const p of pending){
+            if (p.payload && p.payload.id === a.id) p.payload.id = row.id;
+            if (p.target && p.target.note_id === a.id) p.target.note_id = row.id;
+          }
+        }
+      }
+    }
   }
   return results;
 }
@@ -1714,7 +1731,14 @@ async function cycleNoteFlag(id){
   const nt=lotNotes.find(x=>x.id===id);if(!nt)return;
   const order=['none','yellow','red'];nt.flag=order[(order.indexOf(nt.flag)+1)%3];
   renderThread();
-  await sbCall('updateTaskNote',{id,flag:nt.flag});
+  // SIMPLE write — route through the durable queue (was a direct sbCall that silently
+  // dropped offline / on a blip; a lost flag = a MISSED admin escalation). If `id` is a
+  // note created offline (still a client id), drainQueue rewrites this action's note id
+  // to the real server id after the note's addTaskNote syncs (remapNoteId).
+  await queueAndSync({ type:'flag', apiAction:'updateTaskNote',
+    target:{lot_id:(typeof curLot!=='undefined'&&curLot)?curLot.id:null, note_id:id},
+    payload:{id:id, flag:nt.flag},
+    builder:currentBuilder });
 }
 
 // ── STARTUP (Layer 4: offline-aware launch) ─────────────────────────────────

@@ -128,6 +128,33 @@
     });
   }
 
+  // Rewrite the NOTE id inside every still-PENDING action, from a client id (used
+  // for a note created offline) to its real server id, once the note's addTaskNote
+  // has synced. Without this, a flag/update queued against an offline-created note
+  // would replay with an id the server never issued and fail. Atomic (one tx:
+  // getAll then put the hits, so the tx stays alive to commit). Returns the count.
+  function remapNoteId(fromId, toId) {
+    if (fromId === toId || fromId == null) return Promise.resolve(0);
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(STORE, 'readwrite');
+        var os = tx.objectStore(STORE);
+        var patched = 0;
+        os.getAll().onsuccess = function (e) {
+          (e.target.result || []).forEach(function (r) {
+            if (r.status !== 'pending') return;
+            var hit = false;
+            if (r.payload && r.payload.id === fromId) { r.payload.id = toId; hit = true; }
+            if (r.target && r.target.note_id === fromId) { r.target.note_id = toId; hit = true; }
+            if (hit) { patched++; os.put(r); }
+          });
+        };
+        tx.oncomplete = function () { resolve(patched); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
   function markSynced(id) {
     return updateById(id, function (r) { r.status = 'synced'; r.synced_at = nowISO(); r.failed_reason = null; });
   }
@@ -160,6 +187,7 @@
     getAll: getAll,
     markSynced: markSynced,
     markFailed: markFailed,
+    remapNoteId: remapNoteId,
     summary: summary,
     VALID_STATUS: VALID_STATUS,
     _clearAll: _clearAll,
