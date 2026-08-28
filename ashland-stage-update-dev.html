@@ -1331,14 +1331,20 @@ async function finishTask(n){
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};renderSchedule();await saveTask(t);
 
   if(delayPayload){
-    try{
-    await sbCall('addTaskDelay', Object.assign({
-      lot_id:curLot.id, lot_task_id:t._id, bt_num:n, task_name:t.name,
-      lot_number:curLot.lot_number, community:curLot.community,
-      builder_name:curLot.builder_name||currentBuilder,
-      source_lot_id:null, author:currentBuilder
-    }, delayPayload));
-    }catch(e){ console.warn('delay not recorded:', e); }
+    // The delay reason is ONE logical action with the finish it explains ("finished
+    // late, here's why"). Route it through the durable queue, enqueued right AFTER
+    // the finish → higher seq → drains AFTER the finish, in order, on the same lot/task.
+    // (Was a direct sbCall in a try/catch that silently dropped the reason offline / on
+    // a network blip while the finish survived — the sneakiest silent-loss bug.)
+    await queueAndSync({ type:'delay', apiAction:'addTaskDelay',
+      target:{lot_id:curLot.id, task_id:t._id, bt_num:n},
+      payload:Object.assign({
+        lot_id:curLot.id, lot_task_id:t._id, bt_num:n, task_name:t.name,
+        lot_number:curLot.lot_number, community:curLot.community,
+        builder_name:curLot.builder_name||currentBuilder,
+        source_lot_id:null, author:currentBuilder
+      }, delayPayload),
+      builder:currentBuilder });
   }
 }
 
