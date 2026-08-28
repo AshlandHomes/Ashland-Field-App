@@ -1005,9 +1005,10 @@ function startReconnectWatch(){
 async function recomputeDerivedAfterSync(results){
   if (typeof curLot === 'undefined' || !curLot) return;
   let all; try { all = await OfflineQueue.getAll(); } catch(e){ return; }
-  const taskSyncedForCurLot = all.some(a => results[a.id]
-    && a.apiAction === 'updateScheduleLotTask' && a.target && a.target.lot_id === curLot.id);
-  if (taskSyncedForCurLot){ try { await saveStage(); await checkCompletionStamp(); } catch(e){} }
+  // A synced task OR gate action on the current lot changes derived reported_stage.
+  const derivedSyncedForCurLot = all.some(a => results[a.id] && a.target && a.target.lot_id === curLot.id
+    && (a.apiAction === 'updateScheduleLotTask' || a.apiAction === 'updateScheduleLotGate'));
+  if (derivedSyncedForCurLot){ try { await saveStage(); await checkCompletionStamp(); } catch(e){} }
 }
 
 // Reconcile a note created OFFLINE (local id = queue action id) to its real
@@ -1420,9 +1421,16 @@ async function checkCompletionStamp(){
 }
 async function toggleGate(gateId,currentlyConfirmed){
   const g=lotGates.find(x=>x.id===gateId);if(!g)return;
-  g.confirmed=!currentlyConfirmed;renderSchedule();
-  await sbCall('updateScheduleLotGate',{gate_id:gateId,confirmed:g.confirmed});
-  await saveStage();
+  g.confirmed=!currentlyConfirmed;renderSchedule();          // optimistic local flip
+  // SIMPLE write (a boolean toggle on an existing server gate row — no live reads),
+  // so it routes through the durable queue exactly like start/finish → works offline.
+  await queueAndSync({ type:'gate', apiAction:'updateScheduleLotGate',
+    target:{lot_id:curLot.id, gate_id:gateId},
+    payload:{gate_id:gateId, confirmed:g.confirmed},
+    builder:currentBuilder });
+  // Derived reported_stage (saveStage) is recomputed ONCE this gate action SYNCS, in
+  // recomputeDerivedAfterSync (online now, or on reconnect) — not inline (inline would
+  // double-write online and THROW offline). Offline it defers to reconnect.
 }
 
 // ============ TASK EDIT ============

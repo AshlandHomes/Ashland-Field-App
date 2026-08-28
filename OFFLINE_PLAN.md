@@ -68,6 +68,30 @@ NEVER silent-drop.
   - Proof: `test/offline-prefetch-browser.js` — 50 lots, app usable immediately, fill runs
     in the background w/ progress, recently-active-first order, ALL 50 cached (none opened
     by hand), closed lot skipped, then server SHUT DOWN and a never-opened lot opens offline.
+- **Layer 4c — UTILITY GATES offline** ✅ DONE. `toggleGate` is a SIMPLE write (a boolean
+  on an existing server gate row — no live reads), so it now routes through `queueAndSync`
+  exactly like start/finish: flips locally offline, enqueues, drains on reconnect; the
+  derived `reported_stage` (saveStage) recomputes post-drain (`recomputeDerivedAfterSync`
+  extended to fire on `updateScheduleLotGate`). Proof: `test/offline-gate-browser.js`.
+
+## Direct-write inventory (audit — which builder writes still bypass the queue)
+| Write (function) | Endpoint | Type | Needs offline? | Status |
+|---|---|---|---|---|
+| `toggleGate` | updateScheduleLotGate | SIMPLE (+derived) | HIGH (field) | ✅ ROUTED (4c) |
+| start/finish/undo (`saveTask`) | updateScheduleLotTask | SIMPLE (+derived) | core | ✅ routed (L2) |
+| note add (`addNote`) | addTaskNote | SIMPLE | core | ✅ routed (L2) |
+| flag response (`checkPendingResolutions`) | respondNoteResolution | SIMPLE | core | ✅ routed (L2) |
+| delay reason on finish (`finishTask` → addTaskDelay) | addTaskDelay | SIMPLE (client-computed) | HIGH — rides on the offline `finish`; today it's silently DROPPED offline | ⏳ DECIDE (recommend next) |
+| vendor confirm (`toggleConfirm`) | updateScheduleLotTask(vendor_confirmed) | SIMPLE | medium (field) | ⏳ DECIDE (easy) |
+| note flag cycle (`cycleNoteFlag`) | updateTaskNote(flag) | SIMPLE (client-id wrinkle for notes made offline) | medium | ⏳ DECIDE |
+| task edit (`saveEditTask`) | editLotTask + updateScheduleLotTask | 2 writes, structural (client-validated, no server reads) | LOW (planning, not field) | ⏳ DEFER |
+| bulk push (`_bpApply`/`_bpApplyNote`) | bulkUpdateLotTasks/addTaskNote | REPLAY-WITH-READS | — | ⏳ KI-13 (own pass) |
+| `saveStage` / `checkCompletionStamp` | updateScheduleLot / stampLotComplete | DERIVED (internal, auto) | — | already post-drain |
+
+**Recommended next (Collin to decide):** route `addTaskDelay` (the delay reason on
+finish) — it's simple and rides on the already-offline `finish`, but is silently dropped
+offline today, so it's a live data-integrity gap on a core action. `toggleConfirm` is a
+trivial add. `saveEditTask` is planning (low field need) → defer. Bulk push = KI-13.
 
 ## ⚠️ PROMOTE / SIGN-OFF NOTES for Layer 4 (Collin, read before we go live)
 - **Registering a service worker on the LIVE app is a real, powerful change** (it
