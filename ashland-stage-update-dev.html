@@ -1649,16 +1649,19 @@ async function saveEditTask(){
   t.phase_name=newPhaseName;
   t.est_start_date=newEstStart;
 
-  // Persist to DB
-  await sbCall('editLotTask',{
-    task_id:t._id,
-    predecessors:editPreds,
-    lag:lag,
-    duration:dur,
-    phase_name:newPhaseName,
-    phase_order:newPhase
-  });
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,est_start_date:newEstStart});
+  // Persist to DB — ONE logical edit, two partial writes to the same task row on
+  // disjoint columns, routed as an ORDERED pair through the durable queue (structure
+  // first, then the est override). No live reads (validation is client-side), so it's a
+  // simple route. Was two direct sbCalls that, offline, threw on the first — leaving the
+  // button stuck "Saving…" and the DB write silently lost; queuing fixes both.
+  await queueAndSync({ type:'edit', apiAction:'editLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:editTaskNum},
+    payload:{task_id:t._id, predecessors:editPreds, lag:lag, duration:dur, phase_name:newPhaseName, phase_order:newPhase},
+    builder:currentBuilder });
+  await queueAndSync({ type:'edit_est', apiAction:'updateScheduleLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:editTaskNum},
+    payload:{task_id:t._id, lot_id:curLot.id, est_start_date:newEstStart},
+    builder:currentBuilder });
 
   btn.textContent='Save Changes';btn.disabled=false;
   closeEditTask();
