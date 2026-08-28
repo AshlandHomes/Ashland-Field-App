@@ -208,7 +208,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 </style>
 </head>
 <body>
-<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠</div><div style="height:30px"></div>
+<div id="dev-banner" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#e74c3c;color:#fff;text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.15em;padding:6px;pointer-events:none">⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠</div><div style="height:30px"></div>
 
 <!-- Date picker modal -->
 <div id="dpick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
@@ -1053,8 +1053,7 @@ function ensureSyncStatusEl(){
     // (measured, so it's right even if the banner wraps to 2 lines on a narrow phone)
     // and ABOVE it (z:100000) so the pill is visible. On live (banner stripped by
     // generate-live) keep the original top:8 / z:9998 placement (below modals).
-    const bannerEl = Array.prototype.find.call(document.querySelectorAll('div'),
-      d => d.textContent.trim() === '⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠');
+    const bannerEl = document.getElementById('dev-banner');   // dev site only; stripped on live
     let top = '8px', z = 9998;
     if (bannerEl){ const h = Math.ceil(bannerEl.getBoundingClientRect().height) || 30; top = (h + 8) + 'px'; z = 100000; }
     el.style.cssText = 'position:fixed;top:'+top+';right:8px;z-index:'+z+';font-family:inherit;font-size:12px;'
@@ -1174,8 +1173,7 @@ function ensureCacheStatusEl(){
   let el = document.getElementById('cache-status');
   if (!el){
     el = document.createElement('div'); el.id = 'cache-status';
-    const bannerEl = Array.prototype.find.call(document.querySelectorAll('div'),
-      d => d.textContent.trim() === '⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠');
+    const bannerEl = document.getElementById('dev-banner');   // dev site only; stripped on live
     let base = 8, z = 9998;
     if (bannerEl){ base = (Math.ceil(bannerEl.getBoundingClientRect().height) || 30) + 8; z = 100000; }
     const top = (base + 30) + 'px';   // sit one row below the sync pill
