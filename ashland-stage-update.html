@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Ashland Field</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00A9D1">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--brand:#00A9D1;--brand-light:#e0f6fb;--brand-border:#b3e5f0;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b}
@@ -364,17 +366,70 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 
 <script src="schedule-engine.js?v=2"></script>
 <script src="note-resolution.js?v=1"></script>
+<script src="offline-queue.js?v=1"></script>
+<script src="offline-data.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
 let API_SECRET=null;
 async function loadSecret(){if(API_SECRET)return API_SECRET;const r=await fetch('/.netlify/functions/config');const d=await r.json();API_SECRET=d.secret;return API_SECRET;}
-async function sbCall(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});const d=await r.json();if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
+// Raw call: THROWS on a network/transport failure (= offline signal for the drain);
+// returns the parsed body (which may be {error} from a REACHABLE backend) otherwise.
+async function sbCallRaw(action,payload){await loadSecret();const r=await fetch(SUPABASE_FN,{method:'POST',headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},body:JSON.stringify({action,payload})});return await r.json();}
+// Interactive wrapper — unchanged behavior for existing callers (alerts on a
+// server error, returns null; still throws on network like before).
+async function sbCall(action,payload){const d=await sbCallRaw(action,payload);if(d&&d.error){alert('Error: '+d.error);return null;}return d;}
+
+// READ wrapper (Layer 4 — offline launch). Online: fetch live, cache the result in
+// OfflineData (read-through), return it. Offline OR a transport failure mid-session:
+// serve the LAST cached copy of this exact read (so the app renders lots/tasks/notes
+// with no signal). A REACHABLE backend {error} is surfaced (same as sbCall) and NOT
+// cached. Only READ actions go through here — writes still route via queueAndSync.
+async function sbRead(action,payload){
+  if (typeof _isOnline === 'undefined' || _isOnline){
+    try {
+      const d = await sbCallRaw(action,payload);
+      if (d && d.error){ alert('Error: '+d.error); return null; }   // reachable server error
+      try { await OfflineData.put(action,payload,d); } catch(e){}
+      return d;
+    } catch(e){
+      // transport failure while we thought we were online: flip offline, fall to cache
+      _isOnline = false;
+      try { startReconnectWatch(); } catch(_){}
+      try { await updateSyncStatus(); } catch(_){}
+    }
+  }
+  try { return await OfflineData.get(action,payload); } catch(e){ return null; }
+}
 
 let currentBuilder=null, pinEntry='', myLots=[];
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
 
+// ── OFFLINE SESSION (Layer 4) ───────────────────────────────────────────────
+// A builder who logged in ONLINE at least once can re-launch and unlock the app
+// with NO signal: on a successful online login we persist { builder, pinHash },
+// so their PIN is still VERIFIED offline (against the stored hash) — the gate is
+// preserved, never skipped. Online login + server lockout are unchanged.
+const SESSION_KEY='afo_session_v1';
+async function _pinHash(builder,pin){
+  try{
+    const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode('afo:'+builder+':'+pin));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){
+    let h=5381; const s='afo:'+builder+':'+pin; for(let i=0;i<s.length;i++){h=((h<<5)+h+s.charCodeAt(i))|0;} return 'f'+(h>>>0).toString(16);
+  }
+}
+async function saveSession(builder,pin){
+  try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ builder:builder, pinHash:await _pinHash(builder,pin), savedAt:Date.now() })); }catch(e){}
+}
+function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||'null'); }catch(e){ return null; } }
+function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+async function verifyPinOffline(builder,pin){
+  const s=loadSession(); if(!s||s.builder!==builder||!s.pinHash) return false;
+  return s.pinHash===await _pinHash(builder,pin);
+}
+
 async function loadBuilders(){
-  const bs=await sbCall('getBuilders',{})||[];
+  const bs=await sbRead('getBuilders',{})||[];
   const list=bs.filter(b=>!b.is_admin);
   const el=document.getElementById('builder-list');
   if(!list.length){el.innerHTML='<div class="empty">No builders found.</div>';return;}
@@ -401,20 +456,31 @@ async function pinKey(k){
   pinEntry+=k;renderPin();
   if(pinEntry.length===4){await tryPin();}
 }
+function _pinWrong(msg){
+  document.getElementById('pinerr').textContent=msg;pinEntry='';
+  setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},1100);
+}
 async function tryPin(){
-  const res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry});
-  if(res&&res.valid){
-    if(res.is_temp){startSetPin();return;}
-    enterApp();
-  } else if(res&&res.locked){
-    document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
-    pinEntry='';renderPin();
-  } else {
-    const left=(res&&typeof res.attemptsLeft==='number')?res.attemptsLeft:null;
-    const msg=(left!==null)?('Incorrect PIN — '+left+' attempt'+(left===1?'':'s')+' left'):'Incorrect PIN';
-    document.getElementById('pinerr').textContent=msg;pinEntry='';
-    setTimeout(()=>{document.getElementById('pinerr').textContent='';renderPin();},1100);
+  if(_isOnline){
+    let res;
+    try { res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry}); }
+    catch(e){ _isOnline=false; try{startReconnectWatch();updateSyncStatus();}catch(_){} return tryPin(); }  // network died mid-login -> offline verify
+    if(res&&res.valid){
+      if(res.is_temp){startSetPin();return;}
+      await saveSession(currentBuilder,pinEntry);   // remember for offline re-launch
+      enterApp();
+    } else if(res&&res.locked){
+      document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
+      pinEntry='';renderPin();
+    } else {
+      const left=(res&&typeof res.attemptsLeft==='number')?res.attemptsLeft:null;
+      _pinWrong((left!==null)?('Incorrect PIN — '+left+' attempt'+(left===1?'':'s')+' left'):'Incorrect PIN');
+    }
+    return;
   }
+  // OFFLINE: verify against the locally stored hash from the last online login.
+  if(await verifyPinOffline(currentBuilder,pinEntry)){ enterApp(); }
+  else { _pinWrong('Incorrect PIN — offline'); }
 }
 
 // ---- forced PIN change ----
@@ -447,7 +513,7 @@ async function setPinKey(k){
     if(setPinConfirm.length===4){
       if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
       const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
-      if(r&&r.success){enterApp();}
+      if(r&&r.success){await saveSession(currentBuilder,setPinEntry);enterApp();}
       else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
     }
   }
@@ -456,7 +522,7 @@ async function setPinKey(k){
 const SUB_NAMES={RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
 let curSub=null;
 
-function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>checkPendingResolutions());}
+function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>{checkPendingResolutions();prefetchOffline();});}
 
 // ── RED-FLAG RESOLUTION (builder side) ──
 // On app open, if the admin has asked about any of this builder's red flags, pop
@@ -481,21 +547,22 @@ async function checkPendingResolutions(){
     });
     // 'skip' or backdrop-cancel (null) → leave pending, re-ask next open.
     if(ans==='resolved'||ans==='still_open'){
-      try { await sbCall('respondNoteResolution',{id:p.id,response:ans}); } catch(e){}
+      try { await queueAndSync({ type:'flag_response', apiAction:'respondNoteResolution',
+        target:{lot_id:p.lot_id, note_id:p.id}, payload:{id:p.id,response:ans}, builder:currentBuilder }); } catch(e){}
     }
   }
 }
-function signOut(){currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
+function signOut(){clearSession();currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
 async function refreshView(){
   const active=document.querySelector('.screen.active');if(!active)return;
   const id=active.id;
-  if(id==='screen-subs'||id==='screen-lots'){await loadMyLots();}
+  if(id==='screen-subs'||id==='screen-lots'){await loadMyLots();prefetchOffline({force:true});}  // manual "top me up before I head out"
   else if(id==='screen-schedule'&&curLot){await openLot(curLot.id);}
 }
 
 async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
-  const all=await sbCall('getScheduleLots',{})||[];
+  const all=await sbRead('getScheduleLots',{})||[];
   myLots=all.filter(l=>l.builder_name===currentBuilder&&l.reported_stage&&parseFloat(l.reported_stage)>=1.1);
   renderSubs();
 }
@@ -652,7 +719,7 @@ async function openLot(id){
   if(!curLot)return;
   showScreen('screen-schedule');
   document.getElementById('sched-view').innerHTML='<div class="loading">Loading schedule…</div>';
-  const data=await sbCall('getScheduleLotTasks',{lot_id:id});
+  const data=await sbRead('getScheduleLotTasks',{lot_id:id});
   if(!data){return;}
   const rows=data.tasks||[];
   lotGates=data.gates||[];
@@ -661,8 +728,8 @@ async function openLot(id){
   bn={};TASKS.forEach(t=>bn[t.num]=t);
   act={};rows.forEach(r=>{act[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish,vendor_confirmed:!!r.vendor_confirmed};});
   startDate=curLot.construction_start_date?new Date(curLot.construction_start_date+'T00:00:00'):new Date();
-  if(curLot.template_id){const sm=await sbCall('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
-  lotNotes=await sbCall('getTaskNotes',{lot_id:id})||[];
+  if(curLot.template_id){const sm=await sbRead('getTemplateStageMap',{template_id:curLot.template_id});stageMap=(sm&&sm.stages)||[];}else{stageMap=[];}
+  lotNotes=await sbRead('getTaskNotes',{lot_id:id})||[];
   userToggledPhases=false;collapsedPhases={};
   renderSchedule();
 }
@@ -848,11 +915,299 @@ function renderTasks(){
   });
 }
 
+// ── OFFLINE QUEUE ROUTER + CONNECTIVITY (Layers 2–3) ──
+// Every builder WRITE routes through the durable queue. ONLINE: drain immediately
+// (behavior unchanged). OFFLINE: enqueue + SKIP the drain — the action sits
+// pending and the UI already succeeded optimistically (act/lotNotes updated
+// before the write). On RECONNECT: drain in (timestamp,seq) order, retry, then
+// recompute the derived side-effects (reported_stage, completion stamp).
+let _isOnline = (typeof navigator !== 'undefined') ? (navigator.onLine !== false) : true;
+let _syncing = false, _reconnectTimer = null;
+
+// TRUE connectivity: navigator.onLine only proves the radio is up (lies on a
+// captive wifi with no real internet), so we also confirm OUR backend answered.
+async function probeConnectivity(){
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  try {
+    const r = await fetch('/.netlify/functions/config?ping=' + Date.now(), { method:'GET', cache:'no-store' });
+    if (!r.ok) return false;
+    const d = await r.json();
+    return !!(d && ('secret' in d));   // our config function responded -> backend reachable
+  } catch(e){ return false; }
+}
+
+// drain pending in (timestamp,seq) order. NETWORK error -> we're offline: stop and
+// leave the rest pending (NOT failed). SERVER error (reachable backend) -> markFailed
+// and surface. Success -> markSynced. Returns { actionId: serverResult }.
+async function drainQueue(){
+  const pending = await OfflineQueue.getPending();
+  const results = {};
+  for (const a of pending){
+    let d;
+    try { d = await sbCallRaw(a.apiAction, a.payload); }
+    catch(e){ _isOnline = false; break; }              // transport failure = offline
+    if (d && d.error){ await OfflineQueue.markFailed(a.id, String(d.error)); }
+    else {
+      results[a.id] = d; await OfflineQueue.markSynced(a.id);
+      // If this action CREATED a server note (addTaskNote made offline, local id =
+      // this action's client id), rewrite any still-pending action that targets that
+      // client id (e.g. a flag change queued before the note synced) to the real
+      // server id — durably in IDB (survives a mid-drain disconnect) AND in this
+      // pass's snapshot (so the very next action in THIS loop uses the right id).
+      if (a.apiAction === 'addTaskNote'){
+        const row = Array.isArray(d) ? d[0] : d;
+        if (row && row.id && row.id !== a.id){
+          try { await OfflineQueue.remapNoteId(a.id, row.id); } catch(e){}
+          for (const p of pending){
+            if (p.payload && p.payload.id === a.id) p.payload.id = row.id;
+            if (p.target && p.target.note_id === a.id) p.target.note_id = row.id;
+          }
+        }
+      }
+    }
+  }
+  return results;
+}
+
+async function afterDrain(results){
+  if (_isOnline){ await recomputeDerivedAfterSync(results); reconcileNoteIds(results); }
+  else { startReconnectWatch(); }
+  await updateSyncStatus();
+}
+
+// Route a builder write: durable enqueue FIRST, then (online) drain now.
+async function queueAndSync(def){
+  const action = await OfflineQueue.enqueue(def);
+  let result = null;
+  if (_isOnline){
+    const r = await drainQueue();                     // fast path — same sbCall round-trip as before
+    result = r[action.id] || null;
+    await afterDrain(r);
+  } else {
+    startReconnectWatch();
+    await updateSyncStatus();
+  }
+  return { action, result };
+}
+
+// Full sync pass (reconnect / 'online' event / manual): PROBE first, then drain.
+async function syncQueue(){
+  if (_syncing) return {};
+  _syncing = true;
+  try {
+    _isOnline = await probeConnectivity();
+    if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
+    const r = await drainQueue();
+    await afterDrain(r);
+    if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
+    return r;
+  } finally { _syncing = false; }
+}
+
+// While offline, poll for reconnect (the 'online' event is unreliable on mobile).
+function startReconnectWatch(){
+  if (_reconnectTimer) return;
+  _reconnectTimer = setInterval(async () => {
+    if (_isOnline){ clearInterval(_reconnectTimer); _reconnectTimer = null; return; }
+    if (await probeConnectivity()){ clearInterval(_reconnectTimer); _reconnectTimer = null; _isOnline = true; syncQueue(); }
+  }, 15000);
+}
+
+// On sync, recompute + write the DERIVED side-effects (reported_stage, completion
+// stamp) from the replayed task state — best-effort for the CURRENT lot (the one
+// the builder is on). Cross-lot backlog derived-recompute is a known edge (see
+// OFFLINE_PLAN.md); the derived value also self-corrects next time that lot is
+// touched online.
+async function recomputeDerivedAfterSync(results){
+  if (typeof curLot === 'undefined' || !curLot) return;
+  let all; try { all = await OfflineQueue.getAll(); } catch(e){ return; }
+  // A synced task OR gate action on the current lot changes derived reported_stage.
+  const derivedSyncedForCurLot = all.some(a => results[a.id] && a.target && a.target.lot_id === curLot.id
+    && (a.apiAction === 'updateScheduleLotTask' || a.apiAction === 'updateScheduleLotGate'));
+  if (derivedSyncedForCurLot){ try { await saveStage(); await checkCompletionStamp(); } catch(e){} }
+}
+
+// Reconcile a note created OFFLINE (local id = queue action id) to its real
+// server id once the addTaskNote action syncs. Best-effort.
+function reconcileNoteIds(results){
+  if (typeof lotNotes === 'undefined' || !Array.isArray(lotNotes)) return;
+  let changed = false;
+  for (const id in results){
+    const d = results[id]; const row = Array.isArray(d) ? d[0] : d;
+    if (row && row.id){
+      const note = lotNotes.find(n => n.id === id);   // id here IS the queue action id
+      if (note && note.id !== row.id){ note.id = row.id; changed = true; }
+    }
+  }
+  if (changed && typeof renderThread === 'function'){ try { renderThread(); } catch(e){} }
+}
+
+// ── SYNC STATUS INDICATOR (visible, not annoying) ──
+function ensureSyncStatusEl(){
+  let el = document.getElementById('sync-status');
+  if (!el){
+    el = document.createElement('div'); el.id = 'sync-status';
+    // The DEV/UAT banner (dev site only) is a fixed full-width bar at top:0 with a
+    // very high z-index — it was COVERING the pill. On dev, sit just BELOW the banner
+    // (measured, so it's right even if the banner wraps to 2 lines on a narrow phone)
+    // and ABOVE it (z:100000) so the pill is visible. On live (banner stripped by
+    // generate-live) keep the original top:8 / z:9998 placement (below modals).
+    const bannerEl = document.getElementById('dev-banner');   // dev site only; stripped on live
+    let top = '8px', z = 9998;
+    if (bannerEl){ const h = Math.ceil(bannerEl.getBoundingClientRect().height) || 30; top = (h + 8) + 'px'; z = 100000; }
+    el.style.cssText = 'position:fixed;top:'+top+';right:8px;z-index:'+z+';font-family:inherit;font-size:12px;'
+      + 'font-weight:600;padding:4px 10px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.15);pointer-events:none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+// "3m ago" / "2h ago" / "yesterday" — how stale the cached data the builder is
+// looking at is (from the last online sync). Shown while offline.
+function _relTime(iso){
+  if(!iso) return null;
+  const then=new Date(iso).getTime(); if(isNaN(then)) return null;
+  const s=Math.max(0,Math.round((Date.now()-then)/1000));
+  if(s<60) return 'just now';
+  const m=Math.round(s/60); if(m<60) return m+'m ago';
+  const h=Math.round(m/60); if(h<24) return h+'h ago';
+  const d=Math.round(h/24); return d===1?'yesterday':(d+'d ago');
+}
+async function updateSyncStatus(){
+  const el = ensureSyncStatusEl();
+  let s; try { s = await OfflineQueue.summary(); } catch(e){ return; }
+  if (s.failed > 0){ el.textContent = '⚠ ' + s.failed + ' failed' + (s.pending ? ' · ' + s.pending + ' queued' : '');
+    el.style.background = '#fee2e2'; el.style.color = '#b91c1c'; el.style.display = ''; return; }   // loud
+  if (!_isOnline){
+    let synced=null; try { synced=_relTime(await OfflineData.lastSynced()); } catch(e){}
+    el.textContent = '⚠ offline' + (s.pending ? ' · ' + s.pending + ' queued' : '') + (synced ? ' · synced ' + synced : '');
+    el.style.background = '#fef3c7'; el.style.color = '#92400e'; el.style.display = ''; return; }   // informative + staleness
+  if (s.pending > 0){ el.textContent = '⏳ syncing ' + s.pending;
+    el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }    // informative
+  el.textContent = '✓ synced'; el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = ''; // quiet
+}
+
+if (typeof window !== 'undefined'){
+  window.addEventListener('online', () => { syncQueue(); });
+  window.addEventListener('offline', () => { _isOnline = false; updateSyncStatus(); });
+}
+
+// ── OFFLINE TERRITORY PREFETCH (Layer 4b) ───────────────────────────────────
+// A builder owns whole subdivisions (50+ active lots) and can't pre-open each one.
+// After the lot LIST loads (app usable in seconds), we cache every active lot's
+// tasks + notes IN THE BACKGROUND — sequential + throttled so the UI never blocks
+// and the backend isn't hammered — so their whole territory is available offline.
+// Reuses the offline-data.js read cache (same store the on-open path fills).
+const PREFETCH_STALE_MS = 8 * 60 * 60 * 1000;   // refresh a lot at most ~once / 8h
+let PREFETCH_THROTTLE_MS = 200;                 // gap between lots (gentle on backend)
+let _prefetching = false;
+let _cacheStatus = { total: 0, done: 0, state: 'idle' };   // idle|filling|paused|complete
+
+// active lots to cache: myLots is already (this builder + reported_stage>=1.1);
+// exclude closed/archived (no field work there).
+function activeLotsToCache(){
+  return (typeof myLots !== 'undefined' ? myLots : []).filter(l => l && l.status !== 'closed');
+}
+
+// Silent read for the BACKGROUND fill — never alerts (unlike sbRead), caches on
+// success, and flips us offline (pausing the fill) on a transport failure.
+async function _prefetchRead(action, payload){
+  if (!_isOnline) return;
+  try {
+    const d = await sbCallRaw(action, payload);
+    if (d && d.error) return;                       // server error -> skip silently, keep going
+    try { await OfflineData.put(action, payload, d); } catch(e){}
+  } catch(e){
+    _isOnline = false;                              // transport failure = offline
+    try { startReconnectWatch(); } catch(_){}
+    try { await updateSyncStatus(); } catch(_){}
+  }
+}
+
+// Is this lot's cached copy still fresh (skip re-pulling within the staleness window)?
+async function _lotIsFresh(lot){
+  try {
+    const m = await OfflineData.getWithMeta('getScheduleLotTasks', { lot_id: lot.id });
+    if (!m || !m.response || !m.cached_at) return false;
+    return (Date.now() - new Date(m.cached_at).getTime()) < PREFETCH_STALE_MS;
+  } catch(e){ return false; }
+}
+
+// Fill the whole territory in the background. force=true (pull-to-refresh) ignores
+// staleness and re-pulls everything. Non-blocking; guarded against overlap.
+async function prefetchOffline(opts){
+  const force = !!(opts && opts.force);
+  if (_prefetching || !_isOnline) return;
+  _prefetching = true;
+  try {
+    // recently-active first: if signal drops partway, the lots most likely worked
+    // TODAY are already cached.
+    const lots = activeLotsToCache().slice()
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    _cacheStatus = { total: lots.length, done: 0, state: lots.length ? 'filling' : 'complete' };
+    updateCacheStatus();
+    const seenTemplates = new Set();
+    for (const lot of lots){
+      if (!_isOnline){ _cacheStatus.state = 'paused'; updateCacheStatus(); break; }
+      const fresh = force ? false : await _lotIsFresh(lot);
+      if (!fresh){
+        await _prefetchRead('getScheduleLotTasks', { lot_id: lot.id });
+        if (lot.template_id && !seenTemplates.has(lot.template_id)){
+          seenTemplates.add(lot.template_id);
+          await _prefetchRead('getTemplateStageMap', { template_id: lot.template_id });
+        }
+        await _prefetchRead('getTaskNotes', { lot_id: lot.id });
+        if (!_isOnline){ _cacheStatus.state = 'paused'; updateCacheStatus(); break; }  // a read flipped us offline
+        await new Promise(r => setTimeout(r, PREFETCH_THROTTLE_MS));
+      }
+      _cacheStatus.done++;
+      updateCacheStatus();
+    }
+    if (_isOnline && _cacheStatus.done >= _cacheStatus.total){ _cacheStatus.state = 'complete'; updateCacheStatus(); }
+  } finally { _prefetching = false; }
+}
+
+// ── cache-readiness pill (second pill, just under the sync pill) ──
+let _cacheStatusFade = null;
+function ensureCacheStatusEl(){
+  let el = document.getElementById('cache-status');
+  if (!el){
+    el = document.createElement('div'); el.id = 'cache-status';
+    const bannerEl = document.getElementById('dev-banner');   // dev site only; stripped on live
+    let base = 8, z = 9998;
+    if (bannerEl){ base = (Math.ceil(bannerEl.getBoundingClientRect().height) || 30) + 8; z = 100000; }
+    const top = (base + 30) + 'px';   // sit one row below the sync pill
+    el.style.cssText = 'position:fixed;top:'+top+';right:8px;z-index:'+z+';font-family:inherit;font-size:12px;'
+      + 'font-weight:600;padding:4px 10px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.15);pointer-events:none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function updateCacheStatus(){
+  const el = ensureCacheStatusEl();
+  const s = _cacheStatus;
+  if (_cacheStatusFade){ clearTimeout(_cacheStatusFade); _cacheStatusFade = null; }
+  if (s.state === 'idle' || s.total === 0){ el.style.display = 'none'; return; }
+  if (s.state === 'filling'){ el.textContent = '⏳ Caching ' + s.done + '/' + s.total + ' offline';
+    el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }
+  if (s.state === 'paused'){ el.textContent = '⚠ ' + s.done + '/' + s.total + ' lots cached';
+    el.style.background = '#fef3c7'; el.style.color = '#92400e'; el.style.display = ''; return; }  // honest: not all cached
+  // complete
+  el.textContent = '✓ ' + s.total + ' lots ready offline';
+  el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = '';
+  _cacheStatusFade = setTimeout(() => { el.style.display = 'none'; }, 5000);   // fade the good news
+}
+
 async function saveTask(t){
   const a=act[t.num];
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null});
-  await saveStage();
-  await checkCompletionStamp(); // Item 4
+  const type=a.finished?'finish':(a.started?'start':'undo');
+  await queueAndSync({ type:type, apiAction:'updateScheduleLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:t.num},
+    payload:{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null},
+    builder:currentBuilder });
+  // Derived side-effects (reported_stage, completion stamp) are recomputed ONCE
+  // this task action SYNCS — in recomputeDerivedAfterSync (online now, or on
+  // reconnect). Not called inline: inline would double-write online and THROW
+  // offline (they are direct sbCalls). Offline they simply defer to reconnect.
 }
 async function saveStage(){
   const st=computeStage();
@@ -863,7 +1218,13 @@ async function toggleConfirm(n){
   const a=act[n]||{};
   act[n]={...a,vendor_confirmed:!a.vendor_confirmed};
   renderTasks();
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,vendor_confirmed:act[n].vendor_confirmed});
+  // SIMPLE partial write (the backend PATCHes only vendor_confirmed — can't wipe status),
+  // so route through the durable queue like start/finish. Was a direct sbCall that
+  // silently dropped offline / on a blip while the UI kept showing the ✓.
+  await queueAndSync({ type:'confirm', apiAction:'updateScheduleLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:n},
+    payload:{task_id:t._id,lot_id:curLot.id,vendor_confirmed:act[n].vendor_confirmed},
+    builder:currentBuilder });
 }
 
 async function startTask(n){
@@ -976,7 +1337,7 @@ async function finishTask(n){
     // (tables not deployed, API error), let the finish go through without it.
     let reasonsOk=true;
     try{
-      if(!_drReasons){ _drReasons = await sbCall('getDelayReasons',{}); }
+      if(!_drReasons){ _drReasons = await sbRead('getDelayReasons',{}); }
       if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
     }catch(e){ reasonsOk=false; }
     if(reasonsOk){
@@ -990,14 +1351,20 @@ async function finishTask(n){
   const a=act[n]||{};act[n]={started:true,finished:true,start:a.start||v,finish:v};renderSchedule();await saveTask(t);
 
   if(delayPayload){
-    try{
-    await sbCall('addTaskDelay', Object.assign({
-      lot_id:curLot.id, lot_task_id:t._id, bt_num:n, task_name:t.name,
-      lot_number:curLot.lot_number, community:curLot.community,
-      builder_name:curLot.builder_name||currentBuilder,
-      source_lot_id:null, author:currentBuilder
-    }, delayPayload));
-    }catch(e){ console.warn('delay not recorded:', e); }
+    // The delay reason is ONE logical action with the finish it explains ("finished
+    // late, here's why"). Route it through the durable queue, enqueued right AFTER
+    // the finish → higher seq → drains AFTER the finish, in order, on the same lot/task.
+    // (Was a direct sbCall in a try/catch that silently dropped the reason offline / on
+    // a network blip while the finish survived — the sneakiest silent-loss bug.)
+    await queueAndSync({ type:'delay', apiAction:'addTaskDelay',
+      target:{lot_id:curLot.id, task_id:t._id, bt_num:n},
+      payload:Object.assign({
+        lot_id:curLot.id, lot_task_id:t._id, bt_num:n, task_name:t.name,
+        lot_number:curLot.lot_number, community:curLot.community,
+        builder_name:curLot.builder_name||currentBuilder,
+        source_lot_id:null, author:currentBuilder
+      }, delayPayload),
+      builder:currentBuilder });
   }
 }
 
@@ -1080,9 +1447,16 @@ async function checkCompletionStamp(){
 }
 async function toggleGate(gateId,currentlyConfirmed){
   const g=lotGates.find(x=>x.id===gateId);if(!g)return;
-  g.confirmed=!currentlyConfirmed;renderSchedule();
-  await sbCall('updateScheduleLotGate',{gate_id:gateId,confirmed:g.confirmed});
-  await saveStage();
+  g.confirmed=!currentlyConfirmed;renderSchedule();          // optimistic local flip
+  // SIMPLE write (a boolean toggle on an existing server gate row — no live reads),
+  // so it routes through the durable queue exactly like start/finish → works offline.
+  await queueAndSync({ type:'gate', apiAction:'updateScheduleLotGate',
+    target:{lot_id:curLot.id, gate_id:gateId},
+    payload:{gate_id:gateId, confirmed:g.confirmed},
+    builder:currentBuilder });
+  // Derived reported_stage (saveStage) is recomputed ONCE this gate action SYNCS, in
+  // recomputeDerivedAfterSync (online now, or on reconnect) — not inline (inline would
+  // double-write online and THROW offline). Offline it defers to reconnect.
 }
 
 // ============ TASK EDIT ============
@@ -1272,16 +1646,19 @@ async function saveEditTask(){
   t.phase_name=newPhaseName;
   t.est_start_date=newEstStart;
 
-  // Persist to DB
-  await sbCall('editLotTask',{
-    task_id:t._id,
-    predecessors:editPreds,
-    lag:lag,
-    duration:dur,
-    phase_name:newPhaseName,
-    phase_order:newPhase
-  });
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,est_start_date:newEstStart});
+  // Persist to DB — ONE logical edit, two partial writes to the same task row on
+  // disjoint columns, routed as an ORDERED pair through the durable queue (structure
+  // first, then the est override). No live reads (validation is client-side), so it's a
+  // simple route. Was two direct sbCalls that, offline, threw on the first — leaving the
+  // button stuck "Saving…" and the DB write silently lost; queuing fixes both.
+  await queueAndSync({ type:'edit', apiAction:'editLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:editTaskNum},
+    payload:{task_id:t._id, predecessors:editPreds, lag:lag, duration:dur, phase_name:newPhaseName, phase_order:newPhase},
+    builder:currentBuilder });
+  await queueAndSync({ type:'edit_est', apiAction:'updateScheduleLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:editTaskNum},
+    payload:{task_id:t._id, lot_id:curLot.id, est_start_date:newEstStart},
+    builder:currentBuilder });
 
   btn.textContent='Save Changes';btn.disabled=false;
   closeEditTask();
@@ -1340,10 +1717,13 @@ async function addNote(){
   const t=bn[noteTaskNum];
   const note=document.getElementById('note-text').value.trim();
   if(!note){alert('Write a note first.');return;}
-  const res=await sbCall('addTaskNote',{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder});
-  const row=Array.isArray(res)?res[0]:res;
+  const {action,result}=await queueAndSync({ type:'note', apiAction:'addTaskNote',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:t.num},
+    payload:{lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note:note,flag:noteFlag,author:currentBuilder},
+    builder:currentBuilder });
+  const row=Array.isArray(result)?result[0]:result;
   if(row&&row.id){lotNotes.push(row);}
-  else{lotNotes.push({id:'tmp'+Date.now(),lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
+  else{lotNotes.push({id:action.id,lot_task_id:t._id,lot_id:curLot.id,bt_num:t.num,note,flag:noteFlag,author:currentBuilder,created_at:new Date().toISOString()});}
   const multi=document.getElementById('note-multi');
   const wantMulti=multi&&multi.checked;
   const savedText=note, savedFlag=(row&&row.flag)||noteFlag, savedBt=t.num;
@@ -1357,10 +1737,39 @@ async function cycleNoteFlag(id){
   const nt=lotNotes.find(x=>x.id===id);if(!nt)return;
   const order=['none','yellow','red'];nt.flag=order[(order.indexOf(nt.flag)+1)%3];
   renderThread();
-  await sbCall('updateTaskNote',{id,flag:nt.flag});
+  // SIMPLE write — route through the durable queue (was a direct sbCall that silently
+  // dropped offline / on a blip; a lost flag = a MISSED admin escalation). If `id` is a
+  // note created offline (still a client id), drainQueue rewrites this action's note id
+  // to the real server id after the note's addTaskNote syncs (remapNoteId).
+  await queueAndSync({ type:'flag', apiAction:'updateTaskNote',
+    target:{lot_id:(typeof curLot!=='undefined'&&curLot)?curLot.id:null, note_id:id},
+    payload:{id:id, flag:nt.flag},
+    builder:currentBuilder });
 }
 
-loadBuilders();
+// ── STARTUP (Layer 4: offline-aware launch) ─────────────────────────────────
+(async () => {
+  // 1) Register the service worker so the app SHELL launches with no signal.
+  //    Network-first inside the SW keeps the app fresh when there IS signal.
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator){
+    try { await navigator.serviceWorker.register('sw.js'); } catch(e){}
+  }
+  // 2) TRUE connectivity check up front (navigator.onLine lies on captive wifi).
+  try { _isOnline = await probeConnectivity(); } catch(e){ _isOnline = (typeof navigator!=='undefined' && navigator.onLine!==false); }
+  // 3) OFFLINE re-launch with a remembered login → resume straight to that
+  //    builder's PIN (verified locally). Otherwise the normal builder list.
+  const sess = loadSession();
+  if (!_isOnline && sess && sess.builder){
+    currentBuilder = sess.builder; pinEntry='';
+    document.getElementById('pin-name').textContent = sess.builder;
+    document.getElementById('pinerr').textContent = '';
+    renderPin(); showScreen('screen-pin');
+  } else {
+    loadBuilders();
+  }
+  // 4) Status pill + drain anything left PENDING from a prior offline session.
+  try { await updateSyncStatus(); const s = await OfflineQueue.summary(); if (s.pending > 0) syncQueue(); } catch(e){}
+})();
 
 // ===== BULK PUSH MODULE =====
 // ---- NOTE PUSH: send a single note to same-subdivision active lots ----
@@ -1397,18 +1806,27 @@ async function _bpApplyNote(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length){alert('Select at least one lot.');return;}
   _bpProgressScreen(chosen.length);
-  const doneLots=[],failedLots=[]; let i=0;
+  _bpGuardOn();
+  const doneLots=[],failedLots=[]; const total=chosen.length; let completed=0;
+  try{
   for(const lot of chosen){
-    i++; _bpProgress(i,chosen.length,lot.lot_number,0,1);
+    _bpProgress(completed, total, lot.lot_number);   // bar stays at completed while THIS note is in flight
     try{
       const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
       const rows=(data&&data.tasks)||[];
       const tgt=rows.find(r=>r.bt_num===_bpNote.bt_num);
-      if(!tgt){failedLots.push(lot.lot_number+' (no task #'+_bpNote.bt_num+')');continue;}
-      await sbCall('addTaskNote',{lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpNote.bt_num,note:_bpNote.text+'  (pushed from '+curLot.lot_number+')',flag:_bpNote.flag,author:currentBuilder});
-      doneLots.push(lot.lot_number);
+      if(!tgt){ failedLots.push(lot.lot_number+' (no task #'+_bpNote.bt_num+')'); }
+      else {
+        await sbCall('addTaskNote',{lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpNote.bt_num,note:_bpNote.text+'  (pushed from '+curLot.lot_number+')',flag:_bpNote.flag,author:currentBuilder});
+        doneLots.push(lot.lot_number);
+      }
     }catch(e){failedLots.push(lot.lot_number);}
+    completed++;                          // only AFTER this note's write has SETTLED
+    _bpProgress(completed, total, null);  // advance the bar; on the final note -> 100% "✓ Done"
   }
+  } finally { _bpGuardOff(); }
+
+  await new Promise(r=>setTimeout(r, 700));   // let the 100% "✓ Done" register
   _bpClose();
   let msg='Note posted to '+doneLots.length+' of '+chosen.length+' lots.';
   if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
@@ -1574,36 +1992,60 @@ function _bpProgressScreen(total){
   _bpClose();
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
-    +'<div class="bp-head"><div class="bp-title">Applying push…</div></div>'
+    +'<div class="bp-head"><div class="bp-title" id="bp-prog-title">Applying push…</div></div>'
     +'<div class="bp-subtitle" id="bp-prog-label">Starting…</div>'
     +'<div class="bp-progbar"><div class="bp-progfill" id="bp-progfill" style="width:0%"></div></div>'
     +'<div class="bp-prog-detail" id="bp-prog-detail"></div>'
-    +'<div class="bp-prog-warn">Please keep this screen open until it finishes.</div>'
+    +'<div class="bp-prog-warn" id="bp-prog-warn">⚠ Keep this screen open — don’t close until it says “✓ Done”.</div>'
     +'</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
 }
-function _bpProgress(lotIdx, lotTotal, lotLabel, taskDone, taskTotal){
-  const pct=Math.round((lotIdx/lotTotal)*100);
+// Progress reflects COMPLETED pushes / total — NOT lots merely reached. The bar only
+// hits 100% (and the message flips to "✓ Done") once the LAST push actually confirms,
+// so the last lot in flight shows an almost-full bar with a visible sliver and a
+// "don't close" message — no builder closes early and loses the final push.
+function _bpProgress(completed, total, workingLabel){
+  const pct=Math.round((completed/Math.max(1,total))*100);
   const lbl=document.getElementById('bp-prog-label');
   const fill=document.getElementById('bp-progfill');
   const det=document.getElementById('bp-prog-detail');
-  if(lbl) lbl.textContent='Lot '+lotIdx+' of '+lotTotal+'  ('+lotLabel+')';
+  const title=document.getElementById('bp-prog-title');
+  const warn=document.getElementById('bp-prog-warn');
   if(fill) fill.style.width=pct+'%';
-  if(det) det.textContent=(taskTotal>1)?('task '+taskDone+' / '+taskTotal):'';
+  if(completed>=total){                                    // ALL confirmed -> done
+    if(title) title.textContent='✓ Done';
+    if(lbl) lbl.textContent='✓ Done — '+total+' lot'+(total===1?'':'s')+' updated';
+    if(det) det.textContent='';
+    if(warn) warn.style.display='none';
+  } else {                                                 // still pushing -> keep open
+    if(title) title.textContent='Applying push…';
+    if(lbl) lbl.textContent='Pushing lot '+(completed+1)+' of '+total+(workingLabel?'  ('+workingLabel+')':'')+' — keep open';
+    if(det) det.textContent=completed+' of '+total+' done';
+    if(warn) warn.style.display='';
+  }
 }
+
+// ── close-guard: while a push is in flight, warn the browser on unload so a builder
+// can't close mid-push and lose the last (direct, un-queued) write. See PROMOTE/
+// KNOWN_ISSUES: bulk push is online-only + NOT durable through the offline queue yet.
+let _bpInFlight=false;
+function _bpBeforeUnload(e){ if(!_bpInFlight) return; e.preventDefault(); e.returnValue='A push is still running — leave anyway? The last update may be lost.'; return e.returnValue; }
+function _bpGuardOn(){ _bpInFlight=true; try{ window.addEventListener('beforeunload', _bpBeforeUnload); }catch(e){} }
+function _bpGuardOff(){ _bpInFlight=false; try{ window.removeEventListener('beforeunload', _bpBeforeUnload); }catch(e){} }
 
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   _bpProgressScreen(chosen.length);
+  _bpGuardOn();
 
   let ok=0, fail=0; const errors=[];
   const doneLots=[], failedLots=[];
-  let lotIdx=0;
+  const total=chosen.length; let completed=0;
 
+  try{
   for(const lot of chosen){
-    lotIdx++;
     let lotHadError=false;
-    _bpProgress(lotIdx, chosen.length, lot.lot_number, 0, 1);
+    _bpProgress(completed, total, lot.lot_number);   // bar stays at completed while THIS lot is in flight
     try{
       // fetch this target lot's own task rows (its own task_ids per bt_num)
       const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
@@ -1650,7 +2092,6 @@ async function _bpApply(){
       else { reportedCode=trueStage?trueStage.code:null; }
 
       // ONE round-trip: all task writes + the lot stage write
-      _bpProgress(lotIdx, chosen.length, lot.lot_number, batch.length, batch.length);
       const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
       if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
       if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
@@ -1682,8 +2123,12 @@ async function _bpApply(){
       fail++; lotHadError=true; failedLots.push(lot.lot_number);
       errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
     }
+    completed++;                          // only AFTER this lot's writes have SETTLED
+    _bpProgress(completed, total, null);  // advance the bar; on the final lot -> 100% "✓ Done"
   }
+  } finally { _bpGuardOff(); }            // always release the close-guard
 
+  await new Promise(r=>setTimeout(r, 700));   // let the 100% "✓ Done" bar register before the summary
   _bpClose();
   let msg=doneLots.length+' of '+chosen.length+' lots updated.';
   if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
