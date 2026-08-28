@@ -1029,7 +1029,16 @@ function ensureSyncStatusEl(){
   let el = document.getElementById('sync-status');
   if (!el){
     el = document.createElement('div'); el.id = 'sync-status';
-    el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9998;font-family:inherit;font-size:12px;'
+    // The DEV/UAT banner (dev site only) is a fixed full-width bar at top:0 with a
+    // very high z-index — it was COVERING the pill. On dev, sit just BELOW the banner
+    // (measured, so it's right even if the banner wraps to 2 lines on a narrow phone)
+    // and ABOVE it (z:100000) so the pill is visible. On live (banner stripped by
+    // generate-live) keep the original top:8 / z:9998 placement (below modals).
+    const bannerEl = Array.prototype.find.call(document.querySelectorAll('div'),
+      d => d.textContent.trim() === '⚠ DEVELOPMENT / UAT — NOT FOR BUILDER USE ⚠');
+    let top = '8px', z = 9998;
+    if (bannerEl){ const h = Math.ceil(bannerEl.getBoundingClientRect().height) || 30; top = (h + 8) + 'px'; z = 100000; }
+    el.style.cssText = 'position:fixed;top:'+top+';right:8px;z-index:'+z+';font-family:inherit;font-size:12px;'
       + 'font-weight:600;padding:4px 10px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.15);pointer-events:none';
     document.body.appendChild(el);
   }
