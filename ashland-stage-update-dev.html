@@ -1221,7 +1221,13 @@ async function toggleConfirm(n){
   const a=act[n]||{};
   act[n]={...a,vendor_confirmed:!a.vendor_confirmed};
   renderTasks();
-  await sbCall('updateScheduleLotTask',{task_id:t._id,lot_id:curLot.id,vendor_confirmed:act[n].vendor_confirmed});
+  // SIMPLE partial write (the backend PATCHes only vendor_confirmed — can't wipe status),
+  // so route through the durable queue like start/finish. Was a direct sbCall that
+  // silently dropped offline / on a blip while the UI kept showing the ✓.
+  await queueAndSync({ type:'confirm', apiAction:'updateScheduleLotTask',
+    target:{lot_id:curLot.id, task_id:t._id, bt_num:n},
+    payload:{task_id:t._id,lot_id:curLot.id,vendor_confirmed:act[n].vendor_confirmed},
+    builder:currentBuilder });
 }
 
 async function startTask(n){
