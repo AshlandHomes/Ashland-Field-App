@@ -567,7 +567,7 @@ tr:hover td{background:#e5e7eb}
         <input id="edit-start-date" type="date">
       </div>
       <div class="field" style="margin-bottom:0">
-        <label>Scheduled Close Date</label>
+        <label id="edit-close-label">Scheduled Close Date</label>
         <input id="edit-close-date" type="date">
       </div>
     </div>
@@ -1959,6 +1959,10 @@ function openEditLotModal(id) {
   document.getElementById('edit-manual-stage').value = lot.manual_stage||'';
   const isClosed = lot.status==='closed';
   const isCanceled = lot.status==='canceled';
+  // On a CLOSED lot this field is the shown completion/close date (editable to correct
+  // a stale legacy date); on an active lot it's the scheduled target. Label accordingly.
+  document.getElementById('edit-close-label').textContent =
+    isClosed ? 'Completion / Close Date' : 'Scheduled Close Date';
   const label = isClosed ? '🏠 Closed' : isCanceled ? '❌ Canceled' : 'Active';
   const sub = isClosed ? 'Mark closed when the real estate transaction is complete.'
             : isCanceled ? 'Transaction was canceled.'
