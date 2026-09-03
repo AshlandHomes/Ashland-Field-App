@@ -2924,6 +2924,10 @@ function showSection(name, tabEl) {
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('section-'+name).classList.add('active');
   if (tabEl) tabEl.classList.add('active');
+  // Summary tiles are lots-only (they summarize lots, not Delays/Settings). Toggle here
+  // so show/hide is synchronous with the tab switch — no jarring layout jump.
+  const sr = document.getElementById('stat-row');
+  if (sr) sr.style.display = (name === 'lots') ? '' : 'none';
 }
 
 // ── EXPORT ──
