@@ -619,7 +619,7 @@ function runEngine(mode){
   // Single source of truth: schedule-engine.js. This is now a thin adapter that
   // feeds the field-app task shape to the shared engine and writes the computed
   // offsets back onto the task objects the UI reads (_{mode}_es/_ef, _crit).
-  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode);
+  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode,todayYmd());  // today-floor: not-started tasks can't project into the past
   TASKS.forEach(t=>{const x=r.byNum[t.num];if(!x)return;t['_'+mode+'_es']=x.es;t['_'+mode+'_ef']=x.ef;if(mode==='planned')t._crit=x.critical;});
   return r.end;
 }

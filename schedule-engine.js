@@ -112,6 +112,11 @@
     var startDate = opts.startDate
       ? (opts.startDate instanceof Date ? opts.startDate : new Date(opts.startDate + 'T00:00:00'))
       : null;
+    // TODAY-FLOOR input (KI-9): the working-day offset of "today" from construction
+    // start. Explicit param (no hidden clock) — null when not supplied or no start date,
+    // in which case the floor is a NO-OP (backward-compatible). Only used in projected mode.
+    var todayIso = opts.today ? (opts.today instanceof Date ? ymd(opts.today) : opts.today) : null;
+    var todayOff = (todayIso && startDate) ? actOffset(todayIso, startDate) : null;
 
     var TASKS = (rawTasks || []).map(normalizeTask);
     var bn = {}; TASKS.forEach(function (t) { bn[t.num] = t; });
@@ -145,14 +150,24 @@
         var aStartOff = (mode === 'projected' && a.started && a.start) ? actOffset(a.start, startDate) : null;
         var start;
         if (aStartOff !== null) {
-          start = aStartOff;                          // actuals are truth — bypass projection
-        } else if (t.lag < 0 && backDriver !== null) {
-          start = backDriver;
+          start = aStartOff;                          // actuals are truth — bypass projection & floor
         } else {
-          start = (pd !== null) ? pd : (t.relativeStart != null ? t.relativeStart : 1); // relative_start = FALLBACK only
-          if (mode === 'projected' && !a.started && t.estStartDate) {
-            var estOff = actOffset(t.estStartDate, startDate);
-            if (estOff !== null) start = Math.max(start, estOff);   // est_start_date = FLOOR
+          if (t.lag < 0 && backDriver !== null) {
+            start = backDriver;
+          } else {
+            start = (pd !== null) ? pd : (t.relativeStart != null ? t.relativeStart : 1); // relative_start = FALLBACK only
+            if (mode === 'projected' && !a.started && t.estStartDate) {
+              var estOff = actOffset(t.estStartDate, startDate);
+              if (estOff !== null) start = Math.max(start, estOff);   // est_start_date = FLOOR
+            }
+          }
+          // TODAY-FLOOR: a not-started/not-finished task can't be projected to have
+          // begun in the PAST — the earliest it could still begin is today. Applies to
+          // ALL not-started tasks (incl. negative-lag). Cascades naturally: `end` derives
+          // from this `start`, and successors read this `ef`. No-op when start is already
+          // >= today, so on-track lots are unchanged.
+          if (mode === 'projected' && todayOff !== null && !a.started && !a.finished) {
+            start = Math.max(start, todayOff);
           }
         }
         if (start < 1) start = 1;                     // global floor: nothing before construction start. Ever.
@@ -175,10 +190,17 @@
           var aStartOff = (a.started && a.start) ? actOffset(a.start, startDate) : null;
           var aFinOff = (a.finished && a.finish) ? actOffset(a.finish, startDate) : null;
           var estOff = (!a.started && t.estStartDate) ? actOffset(t.estStartDate, startDate) : null;
+          // TODAY-FLOOR folded into the not-started start floor (max of est + today), so
+          // it propagates through maxSlip exactly like an est floor would.
+          var floorOff = null;
+          if (!a.started && !a.finished) {
+            if (estOff !== null) floorOff = estOff;
+            if (todayOff !== null) floorOff = (floorOff === null) ? todayOff : Math.max(floorOff, todayOff);
+          }
           var slip = 0;
           if (aFinOff !== null) slip = aFinOff - (rs + t.duration - 1);
           else if (aStartOff !== null) slip = aStartOff - rs;
-          else if (estOff !== null) slip = Math.max(0, estOff - rs);
+          else if (floorOff !== null) slip = Math.max(0, floorOff - rs);
           maxSlip = Math.max(maxSlip, slip);
           es[t.num] = rs + maxSlip;
           ef[t.num] = (aFinOff !== null) ? aFinOff : es[t.num] + t.duration - 1;
@@ -246,7 +268,7 @@
   // This wrapper reshapes that into the canonical form, runs the one engine, and
   // returns { end, byNum } for the caller to write back onto its task objects.
   // The critical set is pure CPM float ≤ 0 (force_critical no longer exists).
-  function computeFieldSchedule(TASKS, act, startDate, mode) {
+  function computeFieldSchedule(TASKS, act, startDate, mode, today) {
     act = act || {};
     var tasks = (TASKS || []).map(function (t) {
       var a = act[t.num] || {};
@@ -258,7 +280,7 @@
         actualStart: a.start, actualFinish: a.finish
       };
     });
-    var r = computeSchedule(tasks, { startDate: startDate, mode: mode });
+    var r = computeSchedule(tasks, { startDate: startDate, mode: mode, today: today || null });
     return { end: r.end, byNum: r.byNum };
   }
 
@@ -282,8 +304,8 @@
   // supabase.js getAllLotPhases. tasks: sched_lot_tasks rows. Mutates each task
   // in place, writing _es (offset) and _projected_date (YYYY-MM-DD), then returns
   // the array. startDate is the lot's construction_start_date (string|Date|null).
-  function computeLotProjected(tasks, startDate) {
-    var r = computeSchedule(tasks, { startDate: startDate, mode: 'projected' });
+  function computeLotProjected(tasks, startDate, today) {
+    var r = computeSchedule(tasks, { startDate: startDate, mode: 'projected', today: today || null });
     (tasks || []).forEach(function (t) {
       var x = r.byNum[t.bt_num];
       if (x) { t._es = x.es; t._projected_date = x.projectedDate; }
@@ -302,10 +324,10 @@
   // computeLotProjected, so the per-task admin dates are unchanged. Returns
   // { tasks, planEnd, projEnd, planEndDate, projEndDate }: *End are working-day
   // OFFSETS; *EndDate are YYYY-MM-DD completion dates (null when startDate null).
-  function computeLotSchedule(tasks, startDate) {
+  function computeLotSchedule(tasks, startDate, today) {
     var sd = startDate ? (startDate instanceof Date ? startDate : new Date(startDate + 'T00:00:00')) : null;
-    var proj = computeSchedule(tasks, { startDate: sd, mode: 'projected' });
-    var plan = computeSchedule(tasks, { startDate: sd, mode: 'planned' });
+    var proj = computeSchedule(tasks, { startDate: sd, mode: 'projected', today: today || null });
+    var plan = computeSchedule(tasks, { startDate: sd, mode: 'planned' });   // baseline: no today-floor
     (tasks || []).forEach(function (t) {
       var x = proj.byNum[t.bt_num];
       if (x) { t._es = x.es; t._projected_date = x.projectedDate; }

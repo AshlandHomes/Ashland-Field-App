@@ -825,8 +825,9 @@ exports.handler = async function(event) {
           // lot's baseline+projected completion (KI-2: admin now reads these
           // engine dates instead of the deleted flat-99 calcPlannedCompletion).
           const endsByLot = {};
+          const todayIso = new Date().toISOString().slice(0, 10);   // today-floor: not-started tasks can't project into the past
           Object.keys(byLot).forEach(lotId => {
-            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId]);
+            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId], todayIso);
             endsByLot[lotId] = { planEndDate: s.planEndDate, projEndDate: s.projEndDate };
           });
 
