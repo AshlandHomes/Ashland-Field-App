@@ -563,7 +563,20 @@ exports.handler = async function(event) {
 
       case 'getScheduleLots': {
         const r = await supabaseRequest('GET', 'sched_lots?select=*&order=created_at.desc');
-        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+        const lots = r.data || [];
+        // Floor on read: a lot with no stored stage shows its template's FIRST stage
+        // (lowest stage_order). The stored column is a cache written on task actions;
+        // this keeps display correct without a masking back-fill, and self-corrects
+        // the moment the lot's next task action writes the (already-floored) stage.
+        const blanks = lots.filter(l => !l.reported_stage && l.template_id);
+        if (blanks.length) {
+          const tids = [...new Set(blanks.map(l => l.template_id))].map(encodeURIComponent).join(',');
+          const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=in.(${tids})&select=template_id,stage_code,stage_order&order=stage_order`);
+          const firstByTpl = {};
+          (smRes.data || []).forEach(s => { if (firstByTpl[s.template_id] === undefined) firstByTpl[s.template_id] = s.stage_code; });
+          lots.forEach(l => { if (!l.reported_stage && firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id]; });
+        }
+        return { statusCode: 200, body: JSON.stringify(lots) };
       }
 
       case 'deleteScheduleLot': {
