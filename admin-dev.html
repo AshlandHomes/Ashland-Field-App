@@ -2575,6 +2575,8 @@ async function openTemplateEditor(id){
   tplEdit.template = d.template || null;
   tplEdit.phases = d.phases || [];
   tplEdit.tasks = d.tasks || [];
+  const _sm = await sbCall('getTemplateStageMap', { template_id: id }) || {};
+  tplEdit.stages = (_sm.stages || []).slice().sort((a,b)=>(a.order||0)-(b.order||0));
   document.getElementById('tpl-editor-title').textContent =
     'Edit: ' + (tplEdit.template ? tplEdit.template.name : '') +
     '  (' + tplEdit.phases.length + ' phases · ' + tplEdit.tasks.length + ' tasks)';
@@ -2587,10 +2589,87 @@ function closeTemplateEditor(){
   loadTemplatesView();
 }
 
+// ── STAGE GATES (template builder) ──────────────────────────────────────────
+// Ordered list of gates; attach tasks; completing an attached task advances the
+// lot to that gate (engine computeStage). First gate = where a new lot starts.
+function _stagesPanelHtml(){
+  const stages=(tplEdit.stages||[]);
+  const rows=stages.map((s,i)=>{
+    const trg=(s.triggers||[]).filter(x=>x!=null).sort((a,b)=>a-b);
+    const tasks=trg.length?trg.map(bt=>'#'+bt).join(', '):'<span style="color:var(--muted)">no tasks attached</span>';
+    return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+      +'<div><strong>'+(i+1)+'. '+(s.label||s.code||'(unnamed)')+'</strong>'
+      +  '<div class="flag-meta">advances here when complete: '+tasks+'</div></div>'
+      +'<div style="display:flex;gap:6px;white-space:nowrap">'
+      +  '<button class="btn btn-secondary btn-sm" onclick="moveStageGate('+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
+      +  '<button class="btn btn-secondary btn-sm" onclick="moveStageGate('+i+',1)"'+(i===stages.length-1?' disabled':'')+'>↓</button>'
+      +  '<button class="btn btn-secondary btn-sm" onclick="openAttachTasks('+i+')">Tasks</button>'
+      +  '<button class="btn btn-secondary btn-sm" onclick="renameStageGate('+i+')">Rename</button>'
+      +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteStageGate('+i+')">Delete</button>'
+      +'</div></div>';
+  }).join('');
+  return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:12px;overflow:hidden">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#e0f2fe">'
+    +  '<div style="font-weight:700;color:#0369a1">Stage Gates ('+stages.length+') · first gate = where a new lot starts</div>'
+    +  '<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="addStageGate()">+ Add Gate</button>'
+    +  '<button class="btn btn-sm" style="background:#0369a1;color:#fff" onclick="saveStageGates()">Save Gates</button></div>'
+    +'</div><div style="padding:4px 8px 8px">'
+    +(rows||'<p style="color:var(--muted);padding:8px 4px;font-size:13px">No stage gates yet. Add one — the first gate is where every new lot begins.</p>')
+    +'</div></div>';
+}
+function addStageGate(){
+  const name=(prompt('Stage gate name (e.g. "Framing" or "1.1"):')||'').trim();
+  if(!name)return;
+  (tplEdit.stages=tplEdit.stages||[]).push({code:name,label:name,order:tplEdit.stages.length+1,is_manual:false,triggers:[]});
+  renderTemplateEditor();
+}
+function renameStageGate(i){
+  const s=tplEdit.stages[i]; if(!s)return;
+  const name=(prompt('Rename stage gate:',s.label||s.code||'')||'').trim(); if(!name)return;
+  s.label=name; s.code=name; renderTemplateEditor();
+}
+function deleteStageGate(i){
+  if(!confirm('Delete this stage gate?'))return;
+  tplEdit.stages.splice(i,1); tplEdit.stages.forEach((s,k)=>s.order=k+1); renderTemplateEditor();
+}
+function moveStageGate(i,dir){
+  const a=tplEdit.stages, j=i+dir; if(j<0||j>=a.length)return;
+  const t=a[i]; a[i]=a[j]; a[j]=t; a.forEach((s,k)=>s.order=k+1); renderTemplateEditor();
+}
+function openAttachTasks(i){
+  const s=tplEdit.stages[i]; if(!s)return;
+  const set=new Set((s.triggers||[]).map(Number));
+  const tasks=(tplEdit.tasks||[]).slice().sort((a,b)=>(a.bt_num||0)-(b.bt_num||0));
+  let ov=document.getElementById('modal-attach-tasks');
+  if(!ov){ ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='modal-attach-tasks'; document.body.appendChild(ov); }
+  ov.innerHTML='<div class="modal" style="max-width:460px">'
+    +'<h3 style="margin:0 0 10px">Tasks that complete "'+(s.label||s.code)+'"</h3>'
+    +'<div style="max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:2px 8px">'
+    +(tasks.length?tasks.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #f1f5f9"><input type="checkbox" value="'+t.bt_num+'"'+(set.has(Number(t.bt_num))?' checked':'')+'><span>#'+t.bt_num+' '+(t.name||'')+'</span></label>').join(''):'<p style="color:var(--muted);padding:8px">This template has no tasks yet.</p>')
+    +'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-secondary" style="flex:1" onclick="document.getElementById(\'modal-attach-tasks\').classList.remove(\'open\')">Cancel</button>'
+    +'<button class="btn" style="flex:1;background:#0369a1;color:#fff" onclick="saveAttachTasks('+i+')">Attach</button></div></div>';
+  ov.classList.add('open');
+}
+function saveAttachTasks(i){
+  const s=tplEdit.stages[i];
+  if(s) s.triggers=[...document.querySelectorAll('#modal-attach-tasks input:checked')].map(c=>Number(c.value));
+  document.getElementById('modal-attach-tasks').classList.remove('open');
+  renderTemplateEditor();
+}
+async function saveStageGates(){
+  const stages=(tplEdit.stages||[]).map((s,i)=>({
+    stage_code:String(s.code||s.label||(i+1)), stage_label:String(s.label||s.code||(i+1)),
+    stage_order:i+1, is_manual:!!s.is_manual, task_bt_nums:(s.triggers||[]).map(Number)
+  }));
+  const r=await sbCall('saveTemplateStages',{template_id:tplEdit.template.id,stages});
+  if(r&&r.success){ alert('Saved '+r.gates+' stage gates · '+r.attachments+' task attachments.'); await openTemplateEditor(tplEdit.template.id); }
+}
+
 function renderTemplateEditor(){
   const box = document.getElementById('tpl-editor-body');
   if(!tplEdit.phases.length && !tplEdit.tasks.length){
-    box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Empty template. Add a phase, then add tasks to it.</p>';
+    box.innerHTML = _stagesPanelHtml() + '<p style="color:var(--muted);text-align:center;padding:20px">Empty template. Add a phase, then add tasks to it.</p>';
     return;
   }
   const byPhase = {};
@@ -2618,7 +2697,7 @@ function renderTemplateEditor(){
       +'<div style="padding:9px 11px;font-weight:700;color:#b45309">⚠ Tasks with no phase ('+orphans.length+')</div>'
       +'<div style="padding:4px 8px 8px">'+orphans.map(_tplTaskRow).join('')+'</div></div>';
   }
-  box.innerHTML = html;
+  box.innerHTML = _stagesPanelHtml() + html;
 }
 
 function _tplTaskRow(t){

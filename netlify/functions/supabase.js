@@ -483,6 +483,47 @@ exports.handler = async function(event) {
         }) };
       }
 
+      case 'saveTemplateStages': {
+        // Replace-all the template's stage gates + task attachments in one save.
+        // payload.stages = [{ stage_code, stage_label, stage_order, is_manual?, task_bt_nums:[...] }]
+        const { template_id, stages } = payload;
+        if (!template_id || !Array.isArray(stages)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and stages[] required' }) };
+        }
+        // bt_num -> task id for this template (attachments reference bt_num in the UI)
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num`);
+        const idByBt = {}; (tkRes.data || []).forEach(t => { idByBt[t.bt_num] = t.id; });
+        // drop existing joins, then existing gates (replace-all)
+        const oldSm = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${template_id}&select=id`);
+        const oldIds = (oldSm.data || []).map(s => s.id);
+        if (oldIds.length) await supabaseRequest('DELETE', `sched_stage_map_tasks?stage_map_id=in.(${oldIds.join(',')})`);
+        await supabaseRequest('DELETE', `sched_template_stage_map?template_id=eq.${template_id}`);
+        // insert gates
+        const rows = stages.map((s, i) => ({
+          template_id,
+          stage_code:  s.stage_code  != null ? String(s.stage_code)  : String(s.stage_label != null ? s.stage_label : (i + 1)),
+          stage_label: s.stage_label != null ? String(s.stage_label) : String(s.stage_code  != null ? s.stage_code  : (i + 1)),
+          stage_order: s.stage_order != null ? s.stage_order : (i + 1),
+          is_manual:   !!s.is_manual
+        }));
+        let inserted = [];
+        if (rows.length) {
+          const ins = await supabaseRequest('POST', 'sched_template_stage_map', rows);
+          if (ins.error) return { statusCode: 200, body: JSON.stringify({ error: 'DB(stage insert): ' + ins.error }) };
+          inserted = ins.data || [];
+        }
+        // attach tasks: match inserted gate ids back to input by stage_order
+        const idByOrder = {}; inserted.forEach(s => { idByOrder[s.stage_order] = s.id; });
+        const joins = [];
+        stages.forEach((s, i) => {
+          const smId = idByOrder[s.stage_order != null ? s.stage_order : (i + 1)];
+          if (!smId) return;
+          (s.task_bt_nums || []).forEach(bt => { if (idByBt[bt]) joins.push({ stage_map_id: smId, task_id: idByBt[bt] }); });
+        });
+        if (joins.length) await supabaseRequest('POST', 'sched_stage_map_tasks', joins);
+        return { statusCode: 200, body: JSON.stringify({ success: true, gates: inserted.length, attachments: joins.length }) };
+      }
+
       case 'upsertTemplatePhase': {
         const { id, template_id, name, phase_order } = payload;
         if (!id && (!template_id || !name)) {
