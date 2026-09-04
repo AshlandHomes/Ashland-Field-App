@@ -565,6 +565,18 @@ async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
   const all=await sbRead('getScheduleLots',{})||[];
   myLots=all.filter(l=>l.builder_name===currentBuilder&&l.status==='active');  // every active lot visible; stage is display-only (first-stage floor applies on read)
+  // Offline-safe first-stage floor for the list badge: a lot with no stored stage shows its
+  // template's first stage, computed from the CACHED stage map — never blank, even with no signal.
+  const blanks=myLots.filter(l=>!l.reported_stage&&l.template_id);
+  if(blanks.length){
+    const firsts={};
+    for(const tid of [...new Set(blanks.map(l=>l.template_id))]){
+      const sm=await sbRead('getTemplateStageMap',{template_id:tid});
+      const stages=(sm&&sm.stages)||[];
+      if(stages.length) firsts[tid]=stages.reduce((a,b)=>b.order<a.order?b:a).code;
+    }
+    myLots.forEach(l=>{ if(!l.reported_stage&&firsts[l.template_id]) l.reported_stage=firsts[l.template_id]; });
+  }
   renderSubs();
 }
 
