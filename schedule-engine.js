@@ -526,6 +526,11 @@
       trueStage = stageMap.filter(function (s) { return s.code === gateState.manualCode; })[0]
         || { code: gateState.manualCode, label: 'Pre-construction', order: 0 };
     }
+    // Floor: a lot on a stage-enabled template sits at its FIRST stage (lowest sort_order)
+    // until completed tasks compute a higher one. Starting the schedule IS the first stage.
+    if (!trueStage && stageMap.length) {
+      trueStage = stageMap.reduce(function (a, b) { return b.order < a.order ? b : a; });
+    }
     var gatesOpen = !!gateState.open;
     var held = false, reportedCode, reportedLabel;
     if (trueStage && gatesOpen && parseFloat(trueStage.code) > 5.9) {
