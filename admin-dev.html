@@ -2592,29 +2592,43 @@ function closeTemplateEditor(){
 // ── STAGE GATES (template builder) ──────────────────────────────────────────
 // Ordered list of gates; attach tasks; completing an attached task advances the
 // lot to that gate (engine computeStage). First gate = where a new lot starts.
-function _stagesPanelHtml(){
-  const stages=(tplEdit.stages||[]);
-  const rows=stages.map((s,i)=>{
-    const trg=(s.triggers||[]).filter(x=>x!=null).sort((a,b)=>a-b);
-    const tasks=trg.length?trg.map(bt=>'#'+bt).join(', '):'<span style="color:var(--muted)">no tasks attached</span>';
-    return '<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
-      +'<div><strong>'+(i+1)+'. '+(s.label||s.code||'(unnamed)')+'</strong>'
-      +  '<div class="flag-meta">advances here when complete: '+tasks+'</div></div>'
-      +'<div style="display:flex;gap:6px;white-space:nowrap">'
-      +  '<button class="btn btn-secondary btn-sm" onclick="moveStageGate('+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
-      +  '<button class="btn btn-secondary btn-sm" onclick="moveStageGate('+i+',1)"'+(i===stages.length-1?' disabled':'')+'>↓</button>'
-      +  '<button class="btn btn-secondary btn-sm" onclick="openAttachTasks('+i+')">Tasks</button>'
-      +  '<button class="btn btn-secondary btn-sm" onclick="renameStageGate('+i+')">Rename</button>'
-      +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteStageGate('+i+')">Delete</button>'
-      +'</div></div>';
-  }).join('');
-  return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:12px;overflow:hidden">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#e0f2fe">'
-    +  '<div style="font-weight:700;color:#0369a1">Stage Gates ('+stages.length+') · first gate = where a new lot starts</div>'
-    +  '<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="addStageGate()">+ Add Gate</button>'
-    +  '<button class="btn btn-sm" style="background:#0369a1;color:#fff" onclick="saveStageGates()">Save Gates</button></div>'
-    +'</div><div style="padding:4px 8px 8px">'
-    +(rows||'<p style="color:var(--muted);padding:8px 4px;font-size:13px">No stage gates yet. Add one — the first gate is where every new lot begins.</p>')
+function _stagesHeaderHtml(){
+  const n=(tplEdit.stages||[]).length;
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;padding:8px 11px;background:#f0f9ff;border:1px solid var(--line);border-radius:8px">'
+    +'<div style="font-weight:700;color:#0369a1">Stage Gates ('+n+') — shown inline below, each at the task that triggers it · first gate = new-lot start</div>'
+    +'<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="addStageGate()">+ Add Gate</button>'
+    +'<button class="btn btn-sm" style="background:#0369a1;color:#fff" onclick="saveStageGates()">Save Gates</button></div></div>';
+}
+// Which task each gate anchors to (its highest-ordered trigger task); gates with no
+// valid trigger task are "entry" gates shown at the top of the flow.
+function _gateAnchors(){
+  const stages=tplEdit.stages||[];
+  const taskByBt={}; (tplEdit.tasks||[]).forEach(t=>{ taskByBt[t.bt_num]=t; });
+  const phaseOrder={}; (tplEdit.phases||[]).forEach(p=>{ phaseOrder[p.id]=p.phase_order||0; });
+  const rank=t=> (phaseOrder[t.phase_id]||0)*100000 + (t.task_order||0);
+  const byTaskId={}, entry=[];
+  stages.forEach((s,i)=>{
+    const trg=(s.triggers||[]).map(bt=>taskByBt[bt]).filter(Boolean);
+    if(!trg.length){ entry.push(i); return; }
+    let last=trg[0]; trg.forEach(t=>{ if(rank(t)>rank(last)) last=t; });
+    (byTaskId[last.id]=byTaskId[last.id]||[]).push(i);
+  });
+  return {byTaskId, entry};
+}
+function _gateBanner(i){
+  const s=tplEdit.stages[i]; if(!s) return '';
+  const n=(tplEdit.stages||[]).length;
+  const trg=(s.triggers||[]).filter(x=>x!=null).sort((a,b)=>a-b);
+  const trigTxt=trg.length?('triggers: '+trg.map(bt=>'#'+bt).join(', ')):'no trigger tasks (entry gate)';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0;padding:8px 11px;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px">'
+    +'<div style="min-width:0"><span style="font-weight:700;color:#0369a1">⟐ STAGE GATE: '+(s.label||s.code||'(unnamed)')+'</span>'
+    +  '<div class="flag-meta">'+trigTxt+'</div></div>'
+    +'<div style="display:flex;gap:6px;white-space:nowrap">'
+    +  '<button class="btn btn-secondary btn-sm" onclick="moveStageGate('+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
+    +  '<button class="btn btn-secondary btn-sm" onclick="moveStageGate('+i+',1)"'+(i===n-1?' disabled':'')+'>↓</button>'
+    +  '<button class="btn btn-secondary btn-sm" onclick="openAttachTasks('+i+')">Tasks</button>'
+    +  '<button class="btn btn-secondary btn-sm" onclick="renameStageGate('+i+')">Rename</button>'
+    +  '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteStageGate('+i+')">Delete</button>'
     +'</div></div>';
 }
 function addStageGate(){
@@ -2669,15 +2683,23 @@ async function saveStageGates(){
 function renderTemplateEditor(){
   const box = document.getElementById('tpl-editor-body');
   if(!tplEdit.phases.length && !tplEdit.tasks.length){
-    box.innerHTML = _stagesPanelHtml() + '<p style="color:var(--muted);text-align:center;padding:20px">Empty template. Add a phase, then add tasks to it.</p>';
+    box.innerHTML = _stagesHeaderHtml() + '<p style="color:var(--muted);text-align:center;padding:20px">Empty template. Add a phase, then add tasks to it.</p>';
     return;
   }
   const byPhase = {};
   tplEdit.tasks.forEach(t=>{ const k=t.phase_id||'none'; (byPhase[k]=byPhase[k]||[]).push(t); });
+  const anchors = _gateAnchors();
 
-  let html = tplEdit.phases.slice().sort((a,b)=>(a.phase_order||0)-(b.phase_order||0)).map(p=>{
+  // Inline layout: entry gates (no trigger task) at the top of the flow, then each
+  // gate rendered right after the task that triggers it — tasks → gate → tasks → gate.
+  let html = anchors.entry.map(gi=>_gateBanner(gi)).join('');
+
+  html += tplEdit.phases.slice().sort((a,b)=>(a.phase_order||0)-(b.phase_order||0)).map(p=>{
     const ts = (byPhase[p.id]||[]).sort((a,b)=>(a.task_order||0)-(b.task_order||0));
     const crit = ts.filter(t=>t.is_critical).length;
+    const rows = ts.length
+      ? ts.map(t=>_tplTaskRow(t) + (anchors.byTaskId[t.id]||[]).map(gi=>_gateBanner(gi)).join('')).join('')
+      : '<p style="color:var(--muted);padding:8px 4px;font-size:13px">No tasks in this phase.</p>';
     return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#dfe7ec">'
       +  '<div style="font-weight:700;color:#334155">Phase '+p.phase_order+' · '+p.name+'</div>'
@@ -2686,18 +2708,17 @@ function renderTemplateEditor(){
       +    '<button class="btn btn-secondary btn-sm" onclick="openEditPhaseModal(\'' + p.id + '\')">Edit</button>'
       +    '<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deletePhaseUI(\'' + p.id + '\')">Delete</button>'
       +  '</div></div>'
-      +'<div style="padding:4px 8px 8px">'
-      + (ts.length ? ts.map(_tplTaskRow).join('') : '<p style="color:var(--muted);padding:8px 4px;font-size:13px">No tasks in this phase.</p>')
-      +'</div></div>';
+      +'<div style="padding:4px 8px 8px">'+rows+'</div></div>';
   }).join('');
 
   const orphans = (byPhase['none']||[]);
   if(orphans.length){
+    const orows = orphans.map(t=>_tplTaskRow(t) + (anchors.byTaskId[t.id]||[]).map(gi=>_gateBanner(gi)).join('')).join('');
     html += '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;margin-bottom:8px;overflow:hidden">'
       +'<div style="padding:9px 11px;font-weight:700;color:#b45309">⚠ Tasks with no phase ('+orphans.length+')</div>'
-      +'<div style="padding:4px 8px 8px">'+orphans.map(_tplTaskRow).join('')+'</div></div>';
+      +'<div style="padding:4px 8px 8px">'+orows+'</div></div>';
   }
-  box.innerHTML = _stagesPanelHtml() + html;
+  box.innerHTML = _stagesHeaderHtml() + html;
 }
 
 function _tplTaskRow(t){
