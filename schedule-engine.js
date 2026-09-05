@@ -112,12 +112,6 @@
     var startDate = opts.startDate
       ? (opts.startDate instanceof Date ? opts.startDate : new Date(opts.startDate + 'T00:00:00'))
       : null;
-    // TODAY-FLOOR input (KI-9): the working-day offset of "today" from construction
-    // start. Explicit param (no hidden clock) — null when not supplied or no start date,
-    // in which case the floor is a NO-OP (backward-compatible). Only used in projected mode.
-    var todayIso = opts.today ? (opts.today instanceof Date ? ymd(opts.today) : opts.today) : null;
-    var todayOff = (todayIso && startDate) ? actOffset(todayIso, startDate) : null;
-
     var TASKS = (rawTasks || []).map(normalizeTask);
     var bn = {}; TASKS.forEach(function (t) { bn[t.num] = t; });
 
@@ -161,14 +155,6 @@
               if (estOff !== null) start = Math.max(start, estOff);   // est_start_date = FLOOR
             }
           }
-          // TODAY-FLOOR: a not-started/not-finished task can't be projected to have
-          // begun in the PAST — the earliest it could still begin is today. Applies to
-          // ALL not-started tasks (incl. negative-lag). Cascades naturally: `end` derives
-          // from this `start`, and successors read this `ef`. No-op when start is already
-          // >= today, so on-track lots are unchanged.
-          if (mode === 'projected' && todayOff !== null && !a.started && !a.finished) {
-            start = Math.max(start, todayOff);
-          }
         }
         if (start < 1) start = 1;                     // global floor: nothing before construction start. Ever.
         var aFinOff = (mode === 'projected' && a.finished && a.finish) ? actOffset(a.finish, startDate) : null;
@@ -190,12 +176,9 @@
           var aStartOff = (a.started && a.start) ? actOffset(a.start, startDate) : null;
           var aFinOff = (a.finished && a.finish) ? actOffset(a.finish, startDate) : null;
           var estOff = (!a.started && t.estStartDate) ? actOffset(t.estStartDate, startDate) : null;
-          // TODAY-FLOOR folded into the not-started start floor (max of est + today), so
-          // it propagates through maxSlip exactly like an est floor would.
           var floorOff = null;
           if (!a.started && !a.finished) {
             if (estOff !== null) floorOff = estOff;
-            if (todayOff !== null) floorOff = (floorOff === null) ? todayOff : Math.max(floorOff, todayOff);
           }
           var slip = 0;
           if (aFinOff !== null) slip = aFinOff - (rs + t.duration - 1);
