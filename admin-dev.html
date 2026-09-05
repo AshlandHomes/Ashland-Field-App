@@ -2650,19 +2650,21 @@ function openStageEdit(i){
   const esc=v=> v==null?'':String(v).replace(/"/g,'&quot;');
   let ov=document.getElementById('modal-stage-edit');
   if(!ov){ ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='modal-stage-edit'; ov.style.zIndex='200'; document.body.appendChild(ov); }
+  const inpStyle='width:100%;padding:9px 10px;border:1.5px solid #94a3b8;border-radius:6px;font-size:14px;background:#fff';
+  const lblStyle='display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#475569;margin-bottom:5px';
   ov.innerHTML='<div class="modal" style="max-width:520px">'
-    +'<h3 style="margin:0 0 12px">'+(isNew?'Add stage':'Edit stage')+'</h3>'
-    +'<div style="display:flex;gap:10px;margin-bottom:12px">'
-    +  '<div style="width:96px"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Number</label>'
-    +    '<input id="se-code" value="'+esc(s.code)+'" placeholder="1.1" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px"></div>'
-    +  '<div style="flex:1"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Name</label>'
-    +    '<input id="se-label" value="'+esc(s.label)+'" placeholder="Permit Received &amp; Released" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px"></div>'
+    +'<h3 style="margin:0 0 14px">'+(isNew?'Add stage':'Edit stage')+'</h3>'
+    +'<div style="display:flex;gap:10px;margin-bottom:14px">'
+    +  '<div style="width:110px"><label style="'+lblStyle+'">Stage Code</label>'
+    +    '<input id="se-code" value="'+esc(s.code)+'" placeholder="1.1" style="'+inpStyle+'"></div>'
+    +  '<div style="flex:1"><label style="'+lblStyle+'">Stage Name</label>'
+    +    '<input id="se-label" value="'+esc(s.label)+'" placeholder="Permit Received &amp; Released" style="'+inpStyle+'"></div>'
     +'</div>'
-    +'<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Trigger tasks — completing these advances a lot to this stage</label>'
-    +'<div id="se-tasks" style="max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:2px 8px">'
-    +(tasks.length?tasks.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid #f1f5f9"><input type="checkbox" value="'+t.bt_num+'"'+(set.has(Number(t.bt_num))?' checked':'')+'><span>#'+t.bt_num+' '+(t.name||'')+'</span></label>').join(''):'<p style="color:var(--muted);padding:8px">No tasks in this template yet.</p>')
+    +'<label style="'+lblStyle+'">Trigger tasks — completing these advances a lot to this stage</label>'
+    +'<div id="se-tasks" style="max-height:38vh;overflow:auto;border:1.5px solid #94a3b8;border-radius:8px;background:#f8fafc;padding:4px 10px">'
+    +(tasks.length?tasks.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #e2e8f0"><input type="checkbox" value="'+t.bt_num+'"'+(set.has(Number(t.bt_num))?' checked':'')+'><span>#'+t.bt_num+' '+(t.name||'')+'</span></label>').join(''):'<p style="color:var(--muted);padding:8px">No tasks in this template yet.</p>')
     +'</div>'
-    +'<div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-secondary" style="flex:1" onclick="closeStageEdit()">Cancel</button>'
+    +'<div style="display:flex;gap:8px;margin-top:18px"><button class="btn btn-secondary" style="flex:1" onclick="closeStageEdit()">Cancel</button>'
     +'<button class="btn" style="flex:1;background:#0369a1;color:#fff" onclick="saveStageEdit()">Save stage</button></div>'
     +'</div>';
   ov.classList.add('open');
