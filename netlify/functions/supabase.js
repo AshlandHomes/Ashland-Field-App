@@ -879,9 +879,13 @@ exports.handler = async function(event) {
           // lot's baseline+projected completion (KI-2: admin now reads these
           // engine dates instead of the deleted flat-99 calcPlannedCompletion).
           const endsByLot = {};
-          const todayIso = new Date().toISOString().slice(0, 10);   // today-floor: not-started tasks can't project into the past
+          // TODAY-FLOOR (KI-9) reversed per decision: projected dates are the raw
+          // calculated values; staleness handled by builders maintaining dates. Flip
+          // to true to re-enable — the floor logic stays intact in schedule-engine.js.
+          const TODAY_FLOOR_ENABLED = false;
+          const todayIso = new Date().toISOString().slice(0, 10);
           Object.keys(byLot).forEach(lotId => {
-            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId], todayIso);
+            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId], TODAY_FLOOR_ENABLED ? todayIso : null);
             endsByLot[lotId] = { planEndDate: s.planEndDate, projEndDate: s.projEndDate };
           });
 

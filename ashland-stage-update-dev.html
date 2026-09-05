@@ -617,6 +617,11 @@ function backToLots(){showScreen('screen-lots');renderLots();}
 let TASKS=[],bn={},act={},startDate=null;
 let collapsedPhases={},userToggledPhases=false;
 let curLot=null,stageMap=[],lotGates=[],curManual=null;
+// TODAY-FLOOR (KI-9) reversed per decision: projected dates are the raw calculated
+// values (no floor); staleness is handled by builders maintaining upcoming dates.
+// Flip to true to re-enable — the floor logic itself stays intact in schedule-engine.js
+// (it's a no-op whenever `today` isn't passed to the engine).
+const TODAY_FLOOR_ENABLED = false;
 
 // Working-day helpers now live in the single shared engine (schedule-engine.js).
 // Thin hoisted wrappers preserve the existing call convention (startDate is a module global here).
@@ -631,7 +636,7 @@ function runEngine(mode){
   // Single source of truth: schedule-engine.js. This is now a thin adapter that
   // feeds the field-app task shape to the shared engine and writes the computed
   // offsets back onto the task objects the UI reads (_{mode}_es/_ef, _crit).
-  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode,todayYmd());  // today-floor: not-started tasks can't project into the past
+  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode, TODAY_FLOOR_ENABLED ? todayYmd() : null);  // floor reversed: pass null = raw dates
   TASKS.forEach(t=>{const x=r.byNum[t.num];if(!x)return;t['_'+mode+'_es']=x.es;t['_'+mode+'_ef']=x.ef;if(mode==='planned')t._crit=x.critical;});
   return r.end;
 }
