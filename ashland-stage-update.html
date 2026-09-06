@@ -2043,8 +2043,27 @@ function _bpProgress(completed, total, workingLabel){
 // KNOWN_ISSUES: bulk push is online-only + NOT durable through the offline queue yet.
 let _bpInFlight=false;
 function _bpBeforeUnload(e){ if(!_bpInFlight) return; e.preventDefault(); e.returnValue='A push is still running — leave anyway? The last update may be lost.'; return e.returnValue; }
-function _bpGuardOn(){ _bpInFlight=true; try{ window.addEventListener('beforeunload', _bpBeforeUnload); }catch(e){} }
-function _bpGuardOff(){ _bpInFlight=false; try{ window.removeEventListener('beforeunload', _bpBeforeUnload); }catch(e){} }
+// ── SCREEN WAKE LOCK — keep the screen awake for a push's duration; pairs with the
+// beforeunload guard. Best-effort: if unsupported or the request is rejected, the push
+// runs normally (never a blocker). iOS drops the lock on backgrounding, so re-acquire on
+// return to foreground while a push is still in flight. (Screen-sleep only — does NOT stop
+// a power-button lock or survive app close; that's KI-13 durable push, separate.)
+let _wakeLock=null;
+async function _acquireWakeLock(){
+  try{
+    if(_wakeLock || !('wakeLock' in navigator)) return;
+    _wakeLock=await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', ()=>{ _wakeLock=null; });   // OS/browser released it
+  }catch(e){ _wakeLock=null; }                                        // rejected -> push still runs
+}
+async function _releaseWakeLock(){
+  try{ const w=_wakeLock; _wakeLock=null; if(w) await w.release(); }catch(e){ _wakeLock=null; }
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && _bpInFlight && !_wakeLock) _acquireWakeLock();
+});
+function _bpGuardOn(){ _bpInFlight=true; try{ window.addEventListener('beforeunload', _bpBeforeUnload); }catch(e){} _acquireWakeLock(); }
+function _bpGuardOff(){ _bpInFlight=false; try{ window.removeEventListener('beforeunload', _bpBeforeUnload); }catch(e){} _releaseWakeLock(); }
 
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
