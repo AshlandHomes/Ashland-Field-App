@@ -483,6 +483,47 @@ exports.handler = async function(event) {
         }) };
       }
 
+      case 'saveTemplateStages': {
+        // Replace-all the template's stage gates + task attachments in one save.
+        // payload.stages = [{ stage_code, stage_label, stage_order, is_manual?, task_bt_nums:[...] }]
+        const { template_id, stages } = payload;
+        if (!template_id || !Array.isArray(stages)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and stages[] required' }) };
+        }
+        // bt_num -> task id for this template (attachments reference bt_num in the UI)
+        const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${template_id}&select=id,bt_num`);
+        const idByBt = {}; (tkRes.data || []).forEach(t => { idByBt[t.bt_num] = t.id; });
+        // drop existing joins, then existing gates (replace-all)
+        const oldSm = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${template_id}&select=id`);
+        const oldIds = (oldSm.data || []).map(s => s.id);
+        if (oldIds.length) await supabaseRequest('DELETE', `sched_stage_map_tasks?stage_map_id=in.(${oldIds.join(',')})`);
+        await supabaseRequest('DELETE', `sched_template_stage_map?template_id=eq.${template_id}`);
+        // insert gates
+        const rows = stages.map((s, i) => ({
+          template_id,
+          stage_code:  s.stage_code  != null ? String(s.stage_code)  : String(s.stage_label != null ? s.stage_label : (i + 1)),
+          stage_label: s.stage_label != null ? String(s.stage_label) : String(s.stage_code  != null ? s.stage_code  : (i + 1)),
+          stage_order: s.stage_order != null ? s.stage_order : (i + 1),
+          is_manual:   !!s.is_manual
+        }));
+        let inserted = [];
+        if (rows.length) {
+          const ins = await supabaseRequest('POST', 'sched_template_stage_map', rows);
+          if (ins.error) return { statusCode: 200, body: JSON.stringify({ error: 'DB(stage insert): ' + ins.error }) };
+          inserted = ins.data || [];
+        }
+        // attach tasks: match inserted gate ids back to input by stage_order
+        const idByOrder = {}; inserted.forEach(s => { idByOrder[s.stage_order] = s.id; });
+        const joins = [];
+        stages.forEach((s, i) => {
+          const smId = idByOrder[s.stage_order != null ? s.stage_order : (i + 1)];
+          if (!smId) return;
+          (s.task_bt_nums || []).forEach(bt => { if (idByBt[bt]) joins.push({ stage_map_id: smId, task_id: idByBt[bt] }); });
+        });
+        if (joins.length) await supabaseRequest('POST', 'sched_stage_map_tasks', joins);
+        return { statusCode: 200, body: JSON.stringify({ success: true, gates: inserted.length, attachments: joins.length }) };
+      }
+
       case 'upsertTemplatePhase': {
         const { id, template_id, name, phase_order } = payload;
         if (!id && (!template_id || !name)) {
@@ -563,7 +604,20 @@ exports.handler = async function(event) {
 
       case 'getScheduleLots': {
         const r = await supabaseRequest('GET', 'sched_lots?select=*&order=created_at.desc');
-        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+        const lots = r.data || [];
+        // Floor on read: a lot with no stored stage shows its template's FIRST stage
+        // (lowest stage_order). The stored column is a cache written on task actions;
+        // this keeps display correct without a masking back-fill, and self-corrects
+        // the moment the lot's next task action writes the (already-floored) stage.
+        const blanks = lots.filter(l => !l.reported_stage && l.template_id);
+        if (blanks.length) {
+          const tids = [...new Set(blanks.map(l => l.template_id))].map(encodeURIComponent).join(',');
+          const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=in.(${tids})&select=template_id,stage_code,stage_order&order=stage_order`);
+          const firstByTpl = {};
+          (smRes.data || []).forEach(s => { if (firstByTpl[s.template_id] === undefined) firstByTpl[s.template_id] = s.stage_code; });
+          lots.forEach(l => { if (!l.reported_stage && firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id]; });
+        }
+        return { statusCode: 200, body: JSON.stringify(lots) };
       }
 
       case 'deleteScheduleLot': {
@@ -826,7 +880,7 @@ exports.handler = async function(event) {
           // engine dates instead of the deleted flat-99 calcPlannedCompletion).
           const endsByLot = {};
           Object.keys(byLot).forEach(lotId => {
-            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId]);
+            const s = ScheduleEngine.computeLotSchedule(byLot[lotId], startById[lotId]);   // today-floor removed: raw calculated dates
             endsByLot[lotId] = { planEndDate: s.planEndDate, projEndDate: s.projEndDate };
           });
 
