@@ -568,18 +568,6 @@ tr:hover td{background:#e5e7eb}
       </div>
     </div>
     <div class="modal-section">
-      <div class="modal-section-label">Pre-Construction Stage Override</div>
-      <div class="field" style="margin-bottom:0">
-        <select id="edit-manual-stage">
-          <option value="">— none (auto-stage from tasks) —</option>
-          <option value="0.3">0.3 — Released to Obtain Permit</option>
-          <option value="0.9">0.9 — Permit Check Received</option>
-          <option value="1">1 — Permit Received, Not Released</option>
-          <option value="1.1">1.1 — Permit Received &amp; Released</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-section">
       <div class="modal-section-label">Lot Status</div>
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div>
@@ -1952,7 +1940,6 @@ function openEditLotModal(id) {
   document.getElementById('edit-builder').innerHTML = builderOptions(lot.builder_name||'');
   document.getElementById('edit-start-date').value = lot.construction_start_date||'';
   document.getElementById('edit-close-date').value = lot.scheduled_close_date||'';
-  document.getElementById('edit-manual-stage').value = lot.manual_stage||'';
   const isClosed = lot.status==='closed';
   const isCanceled = lot.status==='canceled';
   // On a CLOSED lot this field is the shown completion/close date (editable to correct
@@ -1986,14 +1973,7 @@ async function submitEditLot() {
     builder_name:            document.getElementById('edit-builder').value||null,
     construction_start_date: document.getElementById('edit-start-date').value||null,
     scheduled_close_date:    document.getElementById('edit-close-date').value||null,
-    manual_stage:            document.getElementById('edit-manual-stage').value||null,
   };
-  const lot = scheduleLots.find(l=>l.id===id);
-  const preCodes = ['','0.3','0.9','1','1.1'];
-  if (lot && preCodes.includes(lot.reported_stage||'') && updates.manual_stage) {
-    updates.reported_stage = updates.manual_stage;
-    updates.true_stage = updates.manual_stage;
-  }
   await sbCall('updateScheduleLot', updates); // errors alert via sbCall; proceed regardless
   closeModal('modal-edit-lot');
   await reloadLots();
