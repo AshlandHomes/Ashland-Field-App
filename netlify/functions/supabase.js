@@ -524,6 +524,55 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify({ success: true, gates: inserted.length, attachments: joins.length }) };
       }
 
+      case 'saveTemplateHoldGates': {
+        // Replace-SET the template's hold gates. Unlike stage gates (full
+        // delete+reinsert), gates are UPSERTED BY ID so existing gate ids survive
+        // — legacy manual gates keep their per-lot state (sched_lot_gate_state
+        // .source_gate_id). Task-driven gates carry no lot state (release is
+        // derived from the attached tasks' completion), so id churn is harmless
+        // for them, but preserving ids is uniformly correct.
+        // payload.gates = [{ id?, name, hold_stage_code, status_message, task_bt_nums:[...], icon? }]
+        const { template_id, gates } = payload;
+        if (!template_id || !Array.isArray(gates)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and gates[] required' }) };
+        }
+        const exRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=id`);
+        const existing = new Set((exRes.data || []).map(g => g.id));
+        const keep = new Set();
+        let order = 0;
+        for (const g of gates) {
+          order += 1;
+          const code = (g.hold_stage_code != null && String(g.hold_stage_code).trim() !== '') ? String(g.hold_stage_code).trim() : null;
+          const msg  = (g.status_message  != null && String(g.status_message).trim()  !== '') ? String(g.status_message).trim()  : null;
+          const bts  = Array.isArray(g.task_bt_nums) ? g.task_bt_nums.map(Number).filter(n => !isNaN(n)) : [];
+          const row = {
+            name: (g.name != null && String(g.name).trim() !== '') ? String(g.name).trim() : 'Hold gate',
+            hold_stage_code: code,
+            status_message: msg,
+            hold_task_bt_nums: bts,
+            gate_order: order
+          };
+          if (g.icon != null) row.icon = g.icon;
+          if (g.id && existing.has(g.id)) {
+            keep.add(g.id);
+            const upd = await supabaseRequest('PATCH', `sched_template_gates?id=eq.${g.id}`, row);
+            if (upd.error) return { statusCode: 200, body: JSON.stringify({ error: 'DB(hold gate update): ' + upd.error }) };
+          } else {
+            row.template_id = template_id;
+            const ins = await supabaseRequest('POST', 'sched_template_gates', row);
+            if (ins.error) return { statusCode: 200, body: JSON.stringify({ error: 'DB(hold gate insert): ' + ins.error }) };
+            const newRow = Array.isArray(ins.data) ? ins.data[0] : ins.data;
+            if (newRow && newRow.id) keep.add(newRow.id);
+          }
+        }
+        const toDelete = [...existing].filter(id => !keep.has(id));
+        if (toDelete.length) {
+          await supabaseRequest('DELETE', `sched_lot_gate_state?source_gate_id=in.(${toDelete.join(',')})`);
+          await supabaseRequest('DELETE', `sched_template_gates?id=in.(${toDelete.join(',')})`);
+        }
+        return { statusCode: 200, body: JSON.stringify({ success: true, gates: gates.length, removed: toDelete.length }) };
+      }
+
       case 'upsertTemplatePhase': {
         const { id, template_id, name, phase_order } = payload;
         if (!id && (!template_id || !name)) {
@@ -1043,7 +1092,7 @@ exports.handler = async function(event) {
           code: s.stage_code, label: s.stage_label, is_manual: s.is_manual, order: s.stage_order,
           triggers: (trig[s.id] || []).filter(x => x != null)
         }));
-        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=name,icon,hold_stage_code,gate_order&order=gate_order`);
+        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=id,name,icon,hold_stage_code,status_message,hold_task_bt_nums,gate_order&order=gate_order`);
         return { statusCode: 200, body: JSON.stringify({ stages, gates: gRes.data || [] }) };
       }
 
