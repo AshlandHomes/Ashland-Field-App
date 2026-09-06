@@ -603,11 +603,13 @@ function renderLots(){
   const lots=myLots.filter(l=>(l.community||'—')===curSub).sort((a,b)=>a.lot_number.localeCompare(b.lot_number,undefined,{numeric:true}));
   if(!lots.length){el.innerHTML='<div class="empty">No lots here.</div>';return;}
   el.innerHTML=lots.map(l=>{
-    const held=(l.reported_stage==='5.9'&&l.true_stage&&l.true_stage!=='5.9');
+    // Held = reported stage is capped BELOW the true stage (any hold gate, any
+    // threshold) — generalized from the old hardcoded 5.9 check.
+    const held=(l.reported_stage&&l.true_stage&&l.reported_stage!==l.true_stage&&parseFloat(l.reported_stage)<parseFloat(l.true_stage));
     return '<div class="lotcard" onclick="openLot(\''+l.id+'\')">'
       +'<div class="lh"><div><div class="num">'+l.lot_number+'</div>'+(l.community?'<div class="comm">'+l.community+'</div>':'')+'</div>'
       +'<span class="stagebadge'+(held?' held':'')+'">'+l.reported_stage+'</span></div>'
-      +'<div class="lotmeta">'+(l.construction_start_date?'Start: '+l.construction_start_date:'No start date set')+(held?' · ⚡ held at 5.9':'')+'</div>'
+      +'<div class="lotmeta">'+(l.construction_start_date?'Start: '+l.construction_start_date:'No start date set')+(held?' · ⚡ held at '+l.reported_stage:'')+'</div>'
       +'</div>';
   }).join('');
 }
@@ -766,7 +768,7 @@ function renderSchedule(){
   let h='<div class="sbar"><div class="r"><div class="num">'+curLot.lot_number
     +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
     +'</div><div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div></div>'
-    +'<div class="sub">'+(st.held?'⚡ Held at 5.9 — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(projEndDate)+'</div></div>';
+    +'<div class="sub">'+(st.held?'⚡ Held at '+st.reportedCode+(st.blockingName?' ('+st.blockingName+')':'')+' — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(projEndDate)+'</div></div>';
   h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button></div>';
 
   // ── Stat cards (Items 5+6) ──
@@ -2189,7 +2191,7 @@ async function _bpApply(){
       <div class="ilg"><span class="ilg-i" style="color:#cbd5e1">◇</span><span>Non-critical task — has float</span></div>
       <div class="ilg"><span class="ilg-i">📋</span><span>Action task — ordering / scheduling</span></div>
       <div class="ilg"><span class="ilg-i">🔨</span><span>On-site work</span></div>
-      <div class="ilg"><span class="ilg-i" style="color:var(--amber,#e67e22)">⚡</span><span>Held at stage 5.9 — utilities not confirmed</span></div>
+      <div class="ilg"><span class="ilg-i" style="color:var(--amber,#e67e22)">⚡</span><span>Held by a hold gate — capped below true stage until released</span></div>
       <div class="ilg"><span class="ilg-i" style="color:#1E8449">✓</span><span>Confirmed — utility or vendor</span></div>
       <div class="ilg"><span class="ilg-i">✅</span><span>All complete / ready</span></div>
       <div class="ilg"><span class="ilg-i">⧉</span><span>Push this to other lots</span></div>

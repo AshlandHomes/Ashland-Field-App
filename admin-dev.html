@@ -1197,7 +1197,8 @@ function subBadge(community) {
 
 function stageCell(lot) {
   if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
-  const held = lot.reported_stage==='5.9' && lot.true_stage && lot.true_stage!=='5.9';
+  // Held = reported capped below true (any hold gate / threshold), generalized from the old 5.9 check.
+  const held = lot.reported_stage && lot.true_stage && lot.reported_stage!==lot.true_stage && parseFloat(lot.reported_stage)<parseFloat(lot.true_stage);
   return '<span class="badge" style="background:#e0f2fe;color:#0369a1;cursor:pointer" onclick="openStageModal(\''+lot.id+'\')" title="View stage legend">' + lot.reported_stage + '</span>'
     + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + lot.true_stage + '</div>' : '');
 }
