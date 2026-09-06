@@ -2577,7 +2577,7 @@ function closeTemplateEditor(){
 let _stageExpanded = -1, _stageEditIdx = -1;
 function _stageMgmtButton(){
   const n=(tplEdit.stages||[]).length;
-  return '<div style="margin-bottom:10px"><button class="btn" style="background:#0369a1;color:#fff" onclick="openStagesModal()">⟐ Manage Stage Gates ('+n+')</button></div>';
+  return '<div style="margin-bottom:8px"><button class="btn" style="background:#0369a1;color:#fff;min-width:230px;text-align:center" onclick="openStagesModal()">⟐ Manage Stage Gates ('+n+')</button></div>';
 }
 function openStagesModal(){
   let ov=document.getElementById('modal-stages');
@@ -2696,7 +2696,7 @@ async function persistStages(){
 let _holdExpanded = -1, _holdEditIdx = -1;
 function _holdGateMgmtButton(){
   const n=(tplEdit.holdGates||[]).length;
-  return '<div style="margin-bottom:14px"><button class="btn" style="background:var(--amber);color:#fff" onclick="openHoldGatesModal()">⚡ Manage Hold Gates ('+n+')</button></div>';
+  return '<div style="margin-bottom:8px"><button class="btn" style="background:var(--amber);color:#fff;min-width:230px;text-align:center" onclick="openHoldGatesModal()">⚡ Manage Hold Gates ('+n+')</button></div>';
 }
 function openHoldGatesModal(){
   let ov=document.getElementById('modal-holds');
@@ -2714,11 +2714,11 @@ function renderHoldGatesModal(){
     const bts=(g.hold_task_bt_nums||[]).filter(x=>x!=null).map(Number).sort((a,b)=>a-b);
     const rel=bts.length?'task-driven':'manual';
     let h='<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:6px">'
-      +'<div style="display:flex;align-items:center;gap:8px;padding:9px 11px">'
-      +  '<button class="btn btn-secondary btn-sm" style="width:28px" title="Peek at linked tasks" onclick="toggleHoldPeek('+i+')">'+(_holdExpanded===i?'▾':'▸')+'</button>'
-      +  '<span style="font-weight:700;color:#0f172a;flex:1;min-width:0">'+(esc(g.name)||'(unnamed)')+'</span>'
-      +  '<span class="flag-meta" style="white-space:nowrap">blocks past '+(esc(g.hold_stage_code)||'—')+'</span>'
-      +  '<span class="flag-meta" style="white-space:nowrap">'+bts.length+' task'+(bts.length===1?'':'s')+'</span>'
+      +'<div style="display:flex;align-items:center;gap:10px;padding:9px 11px">'
+      +  '<button class="btn btn-secondary btn-sm" style="width:28px;flex:none" title="Peek at linked tasks" onclick="toggleHoldPeek('+i+')">'+(_holdExpanded===i?'▾':'▸')+'</button>'
+      +  '<span style="font-weight:700;color:#0f172a;flex:1;min-width:0;padding-right:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(esc(g.name)||'(unnamed)')+'</span>'
+      +  '<span class="flag-meta" style="white-space:nowrap;background:#f1f5f9;padding:2px 8px;border-radius:6px">blocks past '+(esc(g.hold_stage_code)||'—')+'</span>'
+      +  '<span class="flag-meta" style="white-space:nowrap;background:#f1f5f9;padding:2px 8px;border-radius:6px">'+bts.length+' task'+(bts.length===1?'':'s')+'</span>'
       +  '<button class="btn btn-secondary btn-sm" onclick="moveHoldGate('+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
       +  '<button class="btn btn-secondary btn-sm" onclick="moveHoldGate('+i+',1)"'+(i===gates.length-1?' disabled':'')+'>↓</button>'
       +  '<button class="btn btn-secondary btn-sm" onclick="openHoldGateEdit('+i+')">Edit</button>'
@@ -2751,24 +2751,33 @@ function openHoldGateEdit(i){
   const g=isNew?{name:'',hold_stage_code:'',status_message:'',hold_task_bt_nums:[]}:tplEdit.holdGates[i];
   const tasks=(tplEdit.tasks||[]).slice().sort((a,b)=>(a.bt_num||0)-(b.bt_num||0));
   const set=new Set((g.hold_task_bt_nums||[]).map(Number));
-  const stageCodes=(tplEdit.stages||[]).slice().sort((a,b)=>(a.order||0)-(b.order||0)).map(s=>s.code).filter(Boolean);
+  const mode=(g.hold_task_bt_nums||[]).length?'task':'manual';
   const esc=v=> v==null?'':String(v).replace(/"/g,'&quot;');
   let ov=document.getElementById('modal-hold-edit');
   if(!ov){ ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='modal-hold-edit'; ov.style.zIndex='200'; document.body.appendChild(ov); }
   const inpStyle='width:100%;padding:9px 10px;border:1.5px solid #94a3b8;border-radius:6px;font-size:14px;background:#fff';
   const lblStyle='display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#475569;margin-bottom:5px';
-  const hint=stageCodes.length?'<div class="flag-meta" style="margin-top:4px">Stage codes in this template: '+stageCodes.join(', ')+'</div>':'';
+  const modeLbl='display:flex;align-items:center;justify-content:center;gap:7px;flex:1;padding:9px 10px;border:1.5px solid #94a3b8;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600';
   ov.innerHTML='<div class="modal" style="max-width:540px">'
     +'<h3 style="margin:0 0 14px">'+(isNew?'Add hold gate':'Edit hold gate')+'</h3>'
     +'<div style="margin-bottom:14px"><label style="'+lblStyle+'">Hold Gate Name</label>'
     +  '<input id="hg-name" value="'+esc(g.name)+'" placeholder="e.g. Closing Hold, Utilities, Final Inspection" style="'+inpStyle+'"></div>'
     +'<div style="margin-bottom:14px"><label style="'+lblStyle+'">Blocks advancement past stage (code)</label>'
-    +  '<input id="hg-code" value="'+esc(g.hold_stage_code)+'" placeholder="e.g. 6.0" style="'+inpStyle+';max-width:160px">'+hint+'</div>'
+    +  '<input id="hg-code" value="'+esc(g.hold_stage_code)+'" placeholder="e.g. 6.0" style="'+inpStyle+';max-width:160px"></div>'
     +'<div style="margin-bottom:14px"><label style="'+lblStyle+'">Status Message — shown to sales in the status column &amp; export</label>'
     +  '<textarea id="hg-msg" rows="2" placeholder="e.g. Do not schedule closing" style="'+inpStyle+';resize:vertical">'+esc(g.status_message)+'</textarea></div>'
-    +'<label style="'+lblStyle+'">Trigger tasks — the hold releases when ALL of these are complete (leave empty for a manual-confirm gate)</label>'
-    +'<div id="hg-tasks" style="max-height:34vh;overflow:auto;border:1.5px solid #94a3b8;border-radius:8px;background:#f8fafc;padding:4px 10px">'
-    +(tasks.length?tasks.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #e2e8f0"><input type="checkbox" value="'+t.bt_num+'"'+(set.has(Number(t.bt_num))?' checked':'')+'><span>#'+t.bt_num+' '+(t.name||'')+'</span></label>').join(''):'<p style="color:var(--muted);padding:8px">No tasks in this template yet.</p>')
+    +'<div style="margin-bottom:14px"><label style="'+lblStyle+'">Release mode</label>'
+    +  '<div style="display:flex;gap:8px">'
+    +    '<label style="'+modeLbl+'"><input type="radio" name="hg-mode" value="manual"'+(mode==='manual'?' checked':'')+' onclick="_hgSyncMode()"> Manual on/off</label>'
+    +    '<label style="'+modeLbl+'"><input type="radio" name="hg-mode" value="task"'+(mode==='task'?' checked':'')+' onclick="_hgSyncMode()"> Task-triggered</label>'
+    +  '</div>'
+    +  '<div class="flag-meta" style="margin-top:5px">Manual = you flip the gate on/off yourself. Task-triggered = it releases automatically when the selected tasks are all complete.</div>'
+    +'</div>'
+    +'<div id="hg-tasks-section" style="display:'+(mode==='task'?'block':'none')+'">'
+    +  '<label style="'+lblStyle+'">Trigger tasks — the hold releases when ALL of these are complete</label>'
+    +  '<div id="hg-tasks" style="max-height:34vh;overflow:auto;border:1.5px solid #94a3b8;border-radius:8px;background:#f8fafc;padding:4px 10px">'
+    +  (tasks.length?tasks.map(t=>'<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #e2e8f0"><input type="checkbox" value="'+t.bt_num+'"'+(set.has(Number(t.bt_num))?' checked':'')+'><span>#'+t.bt_num+' '+(t.name||'')+'</span></label>').join(''):'<p style="color:var(--muted);padding:8px">No tasks in this template yet.</p>')
+    +  '</div>'
     +'</div>'
     +'<div style="display:flex;gap:8px;margin-top:18px"><button class="btn btn-secondary" style="flex:1" onclick="closeHoldGateEdit()">Cancel</button>'
     +'<button class="btn" style="flex:1;background:var(--amber);color:#fff" onclick="saveHoldGateEdit()">Save hold gate</button></div>'
@@ -2776,13 +2785,22 @@ function openHoldGateEdit(i){
   ov.classList.add('open');
 }
 function closeHoldGateEdit(){ const ov=document.getElementById('modal-hold-edit'); if(ov) ov.classList.remove('open'); }
+// Show the task list only when the gate is task-triggered.
+function _hgSyncMode(){
+  const m=(document.querySelector('input[name=hg-mode]:checked')||{}).value;
+  const sec=document.getElementById('hg-tasks-section');
+  if(sec) sec.style.display = (m==='task') ? 'block' : 'none';
+}
 async function saveHoldGateEdit(){
   const name=(document.getElementById('hg-name').value||'').trim();
   const code=(document.getElementById('hg-code').value||'').trim();
   const msg=(document.getElementById('hg-msg').value||'').trim();
-  const bts=[...document.querySelectorAll('#hg-tasks input:checked')].map(c=>Number(c.value));
+  const modeSel=(document.querySelector('input[name=hg-mode]:checked')||{}).value||'manual';
+  // Manual gate carries NO tasks (empty = manual-confirm); task gate carries its checked tasks.
+  const bts = modeSel==='task' ? [...document.querySelectorAll('#hg-tasks input:checked')].map(c=>Number(c.value)) : [];
   if(!name){ alert('Give the hold gate a name.'); return; }
   if(!code){ alert('Set the threshold stage code it blocks past (e.g. 6.0).'); return; }
+  if(modeSel==='task' && !bts.length){ alert('Task-triggered: pick at least one trigger task, or switch to Manual on/off.'); return; }
   if(_holdEditIdx<0){
     (tplEdit.holdGates=tplEdit.holdGates||[]).push({name,hold_stage_code:code,status_message:msg,hold_task_bt_nums:bts});
   } else {
