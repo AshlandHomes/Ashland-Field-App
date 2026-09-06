@@ -1213,7 +1213,11 @@ async function openStageModal(lotId){
   if(lot.template_id){ const sm=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); stages=(sm&&sm.stages)||[]; }
   const td=await sbCall('getScheduleLotTasks',{lot_id:lotId}); gates=(td&&td.gates)||[]; const ltasks=(td&&td.tasks)||[];
   const rep = lot.reported_stage, tru = lot.true_stage;
-  const gatesOpen = gates.some(g=>!g.confirmed);
+  // Piece 4: this utility-hold banner reflects MANUAL gates only. Task-driven hold
+  // gates release from task completion (confirmed is always false for them) and get
+  // their own status-message surfacing in piece 5 — don't let them trip this banner.
+  const manualGates = gates.filter(g=>!(g.hold_task_bt_nums&&g.hold_task_bt_nums.length));
+  const gatesOpen = manualGates.some(g=>!g.confirmed);
   // HOLD AGING: how long has this lot been ready to pass 5.9 but held by open gates?
   // Clock starts when the lot EARNED its way past 5.9 (the finish date of the latest
   // finished task that pushed true stage above 5.9) — not when gates were created,
@@ -1237,13 +1241,13 @@ async function openStageModal(lotId){
   }
 
   let gateHtml = '';
-  if(gates.length){
+  if(manualGates.length){
     const holdLine = (holdDays!==null && holdDays>0)
       ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #fde68a;font-size:13px;color:#b45309"><strong>\u23f0 Held '+holdDays+' working day'+(holdDays===1?'':'s')+'</strong> \u2014 ready to advance since '+holdSince.toISOString().slice(0,10)+'</div>'
       : '';
     gateHtml = '<div style="background:'+(gatesOpen?'#fffbeb':'#f0fdf4')+';border:1px solid '+(gatesOpen?'#fde68a':'#bbf7d0')+';border-radius:8px;padding:10px;margin-bottom:12px">'
       +'<div style="font-weight:700;margin-bottom:6px;color:'+(gatesOpen?'#b45309':'#15803d')+'">'+(gatesOpen?'⚡ Utility gates OPEN — reported stage capped at 5.9':'✓ All utility gates confirmed')+'</div>'
-      + gates.map(g=>'<span style="display:inline-block;margin:2px 6px 2px 0;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:'+(g.confirmed?'#dcfce7':'#fee2e2')+';color:'+(g.confirmed?'#15803d':'#b91c1c')+'">'+(g.confirmed?'\u2713 ':'\u25cb ')+g.gate_name+' \u2014 '+(g.confirmed?'Confirmed':'Unconfirmed')+'</span>').join('')
+      + manualGates.map(g=>'<span style="display:inline-block;margin:2px 6px 2px 0;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:'+(g.confirmed?'#dcfce7':'#fee2e2')+';color:'+(g.confirmed?'#15803d':'#b91c1c')+'">'+(g.confirmed?'\u2713 ':'\u25cb ')+g.gate_name+' \u2014 '+(g.confirmed?'Confirmed':'Unconfirmed')+'</span>').join('')
       + holdLine
       +'</div>';
   }

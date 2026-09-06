@@ -734,8 +734,12 @@ exports.handler = async function(event) {
 
         const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=*`);
         const gates = gRes.data || [];
-        if (gates.length) {
-          const gateRows = gates.map(g => ({
+        // Only MANUAL gates (no attached tasks) get a per-lot confirm row. Task-
+        // driven gates release from task completion (derived) — creating a manual
+        // row for them would leave them stuck as a permanent unconfirmed hold.
+        const manualGates = gates.filter(g => !(Array.isArray(g.hold_task_bt_nums) && g.hold_task_bt_nums.length));
+        if (manualGates.length) {
+          const gateRows = manualGates.map(g => ({
             lot_id,
             source_gate_id: g.id,
             gate_name: g.name,
@@ -744,7 +748,7 @@ exports.handler = async function(event) {
           await supabaseRequest('POST', 'sched_lot_gate_state', gateRows);
         }
 
-        return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, task_count: lotTasks.length, gate_count: gates.length }) };
+        return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, task_count: lotTasks.length, gate_count: manualGates.length }) };
       }
 
       case 'updateScheduleLot': {
@@ -975,7 +979,37 @@ exports.handler = async function(event) {
         }
         const t = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lot_id}&select=*&order=task_order`);
         const g = await supabaseRequest('GET', `sched_lot_gate_state?lot_id=eq.${lot_id}&select=*`);
-        return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates: g.data || [] }) };
+        const lotGateRows = g.data || [];
+        // UNIFIED gates: merge the template gate DEFINITIONS (threshold, attached
+        // tasks, status message) with per-lot MANUAL confirm state. Task-driven
+        // gates have no sched_lot_gate_state row (release is derived from the
+        // lot's own task completion), but still surface here so the client can
+        // compute their release. Manual gates carry their confirm + toggle id.
+        const lotRes = await supabaseRequest('GET', `sched_lots?id=eq.${lot_id}&select=template_id`);
+        const tplId = ((lotRes.data || [])[0] || {}).template_id;
+        let gates = lotGateRows;
+        if (tplId) {
+          const defRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${tplId}&select=id,name,hold_stage_code,hold_task_bt_nums,status_message,gate_order&order=gate_order`);
+          const defs = defRes.data || [];
+          if (defs.length) {
+            const stateBySrc = {};
+            lotGateRows.forEach(r => { stateBySrc[r.source_gate_id] = r; });
+            gates = defs.map(d => {
+              const st = stateBySrc[d.id] || null;
+              return {
+                id: st ? st.id : null,               // lot_gate_state row id (manual toggle target); null for task gates
+                source_gate_id: d.id,
+                gate_name: d.name,
+                hold_stage_code: d.hold_stage_code,
+                hold_task_bt_nums: d.hold_task_bt_nums || [],
+                status_message: d.status_message,
+                confirmed: st ? !!st.confirmed : false,
+                gate_order: d.gate_order
+              };
+            });
+          }
+        }
+        return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates }) };
       }
 
       case 'bulkUpdateLotTasks': {
@@ -1427,9 +1461,12 @@ exports.handler = async function(event) {
 
         const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=*`);
         const tgates = gRes.data || [];
-        if (tgates.length) {
+        // Manual gates only get a per-lot confirm row; task-driven gates release
+        // from task completion (derived), same rule as stampLot.
+        const tManual = tgates.filter(tg => !(Array.isArray(tg.hold_task_bt_nums) && tg.hold_task_bt_nums.length));
+        if (tManual.length) {
           const g = gates || {};
-          const gateRows = tgates.map(tg => {
+          const gateRows = tManual.map(tg => {
             const key = (tg.name || '').toLowerCase();
             const conf = !!g[key];
             return { lot_id, source_gate_id: tg.id, gate_name: tg.name, confirmed: conf, confirmed_at: conf ? new Date().toISOString() : null };

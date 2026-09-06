@@ -638,16 +638,16 @@ function runEngine(mode){
 function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return{planEnd:p,projEnd:pr};}
 
 function computeStage(){
-  const achieved=stageMap.filter(s=>!s.is_manual&&s.triggers&&s.triggers.length&&s.triggers.every(bt=>act[bt]&&act[bt].finished));
-  let trueStage=null;
-  achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
-  if(!trueStage&&curManual){trueStage=stageMap.find(s=>s.code===curManual)||{code:curManual,label:'Pre-construction',order:0};}
-  if(!trueStage&&stageMap.length){trueStage=stageMap.reduce((a,b)=>b.order<a.order?b:a);}  // floor: first stage by sort_order
-  const gatesOpen=lotGates.some(g=>!g.confirmed);
-  let held=false,reportedCode,reportedLabel;
-  if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){held=true;reportedCode='5.9';reportedLabel='Utility Hold';}
-  else{reportedCode=trueStage?trueStage.code:'—';reportedLabel=trueStage?trueStage.label:'Pre-construction';}
-  return{reportedCode,reportedLabel,held,trueCode:trueStage?trueStage.code:null,trueLabel:trueStage?trueStage.label:null,gatesOpen};
+  // Thin adapter over the shared engine (same pattern as runEngine). Build the
+  // finished-task map + per-gate release state, then let ScheduleEngine apply the
+  // generalized hold-gate block/release/snap rule (per-gate threshold, no hardcode).
+  const finished={}; Object.keys(act).forEach(bt=>{ if(act[bt]&&act[bt].finished) finished[bt]=true; });
+  const gates=(lotGates||[]).map(g=>{
+    const bts=(g.hold_task_bt_nums||[]).map(Number).filter(n=>!isNaN(n));
+    const released = bts.length ? bts.every(bt=>finished[bt]) : !!g.confirmed;  // TASK vs MANUAL release
+    return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message };
+  });
+  return ScheduleEngine.computeStage(stageMap, finished, { gates, manualCode:curManual });
 }
 
 // ── STAGE LEGEND (read-only reference: which tasks drive each stage) ──
@@ -799,10 +799,14 @@ function renderSchedule(){
     h+='<div class="close-banner">🏠 Ready to schedule closing'+closeNote+'</div>';
   }
 
-  if(lotGates.length){
-    const anyOpen=lotGates.some(g=>!g.confirmed);
+  // MANUAL gates only render as confirm buttons here. Task-driven hold gates
+  // (those with attached tasks) release via task completion and get their own
+  // grouped UI in piece 3 — they must NOT show a manual toggle (no lot-state row).
+  const manualGates=(lotGates||[]).filter(g=>!(g.hold_task_bt_nums&&g.hold_task_bt_nums.length));
+  if(manualGates.length){
+    const anyOpen=manualGates.some(g=>!g.confirmed);
     h+='<div class="gatebar"><div class="gh">'+(anyOpen?'Utilities — confirm when installed':'✓ All utilities confirmed')+'</div><div class="grow">';
-    lotGates.forEach(g=>{h+='<button class="gbtn'+(g.confirmed?' on':'')+'" data-gid="'+g.id+'" data-cf="'+(g.confirmed?1:0)+'">'+g.gate_name+(g.confirmed?' ✓':'')+'</button>';});
+    manualGates.forEach(g=>{h+='<button class="gbtn'+(g.confirmed?' on':'')+'" data-gid="'+g.id+'" data-cf="'+(g.confirmed?1:0)+'">'+g.gate_name+(g.confirmed?' ✓':'')+'</button>';});
     h+='</div></div>';
   }
   h+=stageLegendHtml();
@@ -2114,16 +2118,18 @@ async function _bpApply(){
       }
 
       // ---- compute this target lot's stage from its NEW task set (client-side) ----
+      // Same shared-engine path as the single-lot computeStage() adapter.
       let sm=[];
       if(lot.template_id){ const r=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); sm=(r&&r.stages)||[]; }
-      let trueStage=null;
-      sm.filter(s=>!s.is_manual&&s.triggers&&s.triggers.length&&s.triggers.every(bt=>tgtAct[bt]&&tgtAct[bt].finished))
-        .forEach(s=>{ if(!trueStage||s.order>trueStage.order) trueStage=s; });
-      if(!trueStage&&sm.length){trueStage=sm.reduce((a,b)=>b.order<a.order?b:a);}  // floor: first stage by sort_order
-      const gatesOpen=gates.some(g=>!g.confirmed);
-      let reportedCode, trueCode=trueStage?trueStage.code:null;
-      if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){ reportedCode='5.9'; }
-      else { reportedCode=trueStage?trueStage.code:null; }
+      const finishedT={}; Object.keys(tgtAct).forEach(bt=>{ if(tgtAct[bt]&&tgtAct[bt].finished) finishedT[bt]=true; });
+      const gArr=(gates||[]).map(g=>{
+        const bts=(g.hold_task_bt_nums||[]).map(Number).filter(n=>!isNaN(n));
+        const released = bts.length ? bts.every(bt=>finishedT[bt]) : !!g.confirmed;
+        return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message };
+      });
+      const stComputed=ScheduleEngine.computeStage(sm, finishedT, { gates:gArr });
+      const trueCode=stComputed.trueCode;
+      const reportedCode=(stComputed.reportedCode==='—')?null:stComputed.reportedCode;
 
       // ONE round-trip: all task writes + the lot stage write
       const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
