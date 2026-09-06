@@ -563,7 +563,19 @@ async function refreshView(){
 async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
   const all=await sbRead('getScheduleLots',{})||[];
-  myLots=all.filter(l=>l.builder_name===currentBuilder&&l.reported_stage&&parseFloat(l.reported_stage)>=1.1);
+  myLots=all.filter(l=>l.builder_name===currentBuilder&&l.status==='active');  // every active lot visible; stage is display-only (first-stage floor applies on read)
+  // Offline-safe first-stage floor for the list badge: a lot with no stored stage shows its
+  // template's first stage, computed from the CACHED stage map — never blank, even with no signal.
+  const blanks=myLots.filter(l=>!l.reported_stage&&l.template_id);
+  if(blanks.length){
+    const firsts={};
+    for(const tid of [...new Set(blanks.map(l=>l.template_id))]){
+      const sm=await sbRead('getTemplateStageMap',{template_id:tid});
+      const stages=(sm&&sm.stages)||[];
+      if(stages.length) firsts[tid]=stages.reduce((a,b)=>b.order<a.order?b:a).code;
+    }
+    myLots.forEach(l=>{ if(!l.reported_stage&&firsts[l.template_id]) l.reported_stage=firsts[l.template_id]; });
+  }
   renderSubs();
 }
 
@@ -618,7 +630,7 @@ function runEngine(mode){
   // Single source of truth: schedule-engine.js. This is now a thin adapter that
   // feeds the field-app task shape to the shared engine and writes the computed
   // offsets back onto the task objects the UI reads (_{mode}_es/_ef, _crit).
-  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode);
+  const r=ScheduleEngine.computeFieldSchedule(TASKS,act,startDate,mode);  // today-floor removed: raw calculated dates
   TASKS.forEach(t=>{const x=r.byNum[t.num];if(!x)return;t['_'+mode+'_es']=x.es;t['_'+mode+'_ef']=x.ef;if(mode==='planned')t._crit=x.critical;});
   return r.end;
 }
@@ -629,6 +641,7 @@ function computeStage(){
   let trueStage=null;
   achieved.forEach(s=>{if(!trueStage||s.order>trueStage.order)trueStage=s;});
   if(!trueStage&&curManual){trueStage=stageMap.find(s=>s.code===curManual)||{code:curManual,label:'Pre-construction',order:0};}
+  if(!trueStage&&stageMap.length){trueStage=stageMap.reduce((a,b)=>b.order<a.order?b:a);}  // floor: first stage by sort_order
   const gatesOpen=lotGates.some(g=>!g.confirmed);
   let held=false,reportedCode,reportedLabel;
   if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){held=true;reportedCode='5.9';reportedLabel='Utility Hold';}
@@ -2086,6 +2099,7 @@ async function _bpApply(){
       let trueStage=null;
       sm.filter(s=>!s.is_manual&&s.triggers&&s.triggers.length&&s.triggers.every(bt=>tgtAct[bt]&&tgtAct[bt].finished))
         .forEach(s=>{ if(!trueStage||s.order>trueStage.order) trueStage=s; });
+      if(!trueStage&&sm.length){trueStage=sm.reduce((a,b)=>b.order<a.order?b:a);}  // floor: first stage by sort_order
       const gatesOpen=gates.some(g=>!g.confirmed);
       let reportedCode, trueCode=trueStage?trueStage.code:null;
       if(trueStage&&gatesOpen&&parseFloat(trueStage.code)>5.9){ reportedCode='5.9'; }
