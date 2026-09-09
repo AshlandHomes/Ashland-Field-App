@@ -524,6 +524,55 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify({ success: true, gates: inserted.length, attachments: joins.length }) };
       }
 
+      case 'saveTemplateHoldGates': {
+        // Replace-SET the template's hold gates. Unlike stage gates (full
+        // delete+reinsert), gates are UPSERTED BY ID so existing gate ids survive
+        // — legacy manual gates keep their per-lot state (sched_lot_gate_state
+        // .source_gate_id). Task-driven gates carry no lot state (release is
+        // derived from the attached tasks' completion), so id churn is harmless
+        // for them, but preserving ids is uniformly correct.
+        // payload.gates = [{ id?, name, hold_stage_code, status_message, task_bt_nums:[...], icon? }]
+        const { template_id, gates } = payload;
+        if (!template_id || !Array.isArray(gates)) {
+          return { statusCode: 400, body: JSON.stringify({ error: 'template_id and gates[] required' }) };
+        }
+        const exRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=id`);
+        const existing = new Set((exRes.data || []).map(g => g.id));
+        const keep = new Set();
+        let order = 0;
+        for (const g of gates) {
+          order += 1;
+          const code = (g.hold_stage_code != null && String(g.hold_stage_code).trim() !== '') ? String(g.hold_stage_code).trim() : null;
+          const msg  = (g.status_message  != null && String(g.status_message).trim()  !== '') ? String(g.status_message).trim()  : null;
+          const bts  = Array.isArray(g.task_bt_nums) ? g.task_bt_nums.map(Number).filter(n => !isNaN(n)) : [];
+          const row = {
+            name: (g.name != null && String(g.name).trim() !== '') ? String(g.name).trim() : 'Hold gate',
+            hold_stage_code: code,
+            status_message: msg,
+            hold_task_bt_nums: bts,
+            gate_order: order
+          };
+          if (g.icon != null) row.icon = g.icon;
+          if (g.id && existing.has(g.id)) {
+            keep.add(g.id);
+            const upd = await supabaseRequest('PATCH', `sched_template_gates?id=eq.${g.id}`, row);
+            if (upd.error) return { statusCode: 200, body: JSON.stringify({ error: 'DB(hold gate update): ' + upd.error }) };
+          } else {
+            row.template_id = template_id;
+            const ins = await supabaseRequest('POST', 'sched_template_gates', row);
+            if (ins.error) return { statusCode: 200, body: JSON.stringify({ error: 'DB(hold gate insert): ' + ins.error }) };
+            const newRow = Array.isArray(ins.data) ? ins.data[0] : ins.data;
+            if (newRow && newRow.id) keep.add(newRow.id);
+          }
+        }
+        const toDelete = [...existing].filter(id => !keep.has(id));
+        if (toDelete.length) {
+          await supabaseRequest('DELETE', `sched_lot_gate_state?source_gate_id=in.(${toDelete.join(',')})`);
+          await supabaseRequest('DELETE', `sched_template_gates?id=in.(${toDelete.join(',')})`);
+        }
+        return { statusCode: 200, body: JSON.stringify({ success: true, gates: gates.length, removed: toDelete.length }) };
+      }
+
       case 'upsertTemplatePhase': {
         const { id, template_id, name, phase_order } = payload;
         if (!id && (!template_id || !name)) {
@@ -617,6 +666,29 @@ exports.handler = async function(event) {
           (smRes.data || []).forEach(s => { if (firstByTpl[s.template_id] === undefined) firstByTpl[s.template_id] = s.stage_code; });
           lots.forEach(l => { if (!l.reported_stage && firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id]; });
         }
+        // Hold surfacing (compute-on-read): a lot is HELD when reported_stage is
+        // capped BELOW true_stage. Piece 4 sets reportedCode = the blocking gate's
+        // threshold, so the blocking gate is the template hold gate whose
+        // hold_stage_code == reported_stage — attach its message + name for the
+        // admin status column + export. No stored derived state.
+        const heldLots = lots.filter(l => l.template_id && l.reported_stage && l.true_stage
+          && !isNaN(parseFloat(l.reported_stage)) && !isNaN(parseFloat(l.true_stage))
+          && parseFloat(l.reported_stage) < parseFloat(l.true_stage));
+        if (heldLots.length) {
+          const htids = [...new Set(heldLots.map(l => l.template_id))].map(encodeURIComponent).join(',');
+          const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=in.(${htids})&select=template_id,name,hold_stage_code,status_message`);
+          const gatesByTpl = {};
+          (gRes.data || []).forEach(g => { (gatesByTpl[g.template_id] = gatesByTpl[g.template_id] || []).push(g); });
+          heldLots.forEach(l => {
+            const gs = (gatesByTpl[l.template_id] || []).filter(g => parseFloat(g.hold_stage_code) === parseFloat(l.reported_stage));
+            if (gs.length) {
+              const names = gs.map(g => g.name).filter(Boolean);
+              const msgs  = gs.map(g => g.status_message).filter(Boolean);
+              l.hold_gate_name = names.length ? names.join('; ') : null;
+              l.hold_message   = msgs.length  ? msgs.join('; ')  : null;
+            }
+          });
+        }
         return { statusCode: 200, body: JSON.stringify(lots) };
       }
 
@@ -685,8 +757,12 @@ exports.handler = async function(event) {
 
         const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=*`);
         const gates = gRes.data || [];
-        if (gates.length) {
-          const gateRows = gates.map(g => ({
+        // Only MANUAL gates (no attached tasks) get a per-lot confirm row. Task-
+        // driven gates release from task completion (derived) — creating a manual
+        // row for them would leave them stuck as a permanent unconfirmed hold.
+        const manualGates = gates.filter(g => !(Array.isArray(g.hold_task_bt_nums) && g.hold_task_bt_nums.length));
+        if (manualGates.length) {
+          const gateRows = manualGates.map(g => ({
             lot_id,
             source_gate_id: g.id,
             gate_name: g.name,
@@ -695,7 +771,7 @@ exports.handler = async function(event) {
           await supabaseRequest('POST', 'sched_lot_gate_state', gateRows);
         }
 
-        return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, task_count: lotTasks.length, gate_count: gates.length }) };
+        return { statusCode: 200, body: JSON.stringify({ success: true, lot_id, task_count: lotTasks.length, gate_count: manualGates.length }) };
       }
 
       case 'updateScheduleLot': {
@@ -926,7 +1002,37 @@ exports.handler = async function(event) {
         }
         const t = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lot_id}&select=*&order=task_order`);
         const g = await supabaseRequest('GET', `sched_lot_gate_state?lot_id=eq.${lot_id}&select=*`);
-        return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates: g.data || [] }) };
+        const lotGateRows = g.data || [];
+        // UNIFIED gates: merge the template gate DEFINITIONS (threshold, attached
+        // tasks, status message) with per-lot MANUAL confirm state. Task-driven
+        // gates have no sched_lot_gate_state row (release is derived from the
+        // lot's own task completion), but still surface here so the client can
+        // compute their release. Manual gates carry their confirm + toggle id.
+        const lotRes = await supabaseRequest('GET', `sched_lots?id=eq.${lot_id}&select=template_id`);
+        const tplId = ((lotRes.data || [])[0] || {}).template_id;
+        let gates = lotGateRows;
+        if (tplId) {
+          const defRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${tplId}&select=id,name,hold_stage_code,hold_task_bt_nums,status_message,gate_order&order=gate_order`);
+          const defs = defRes.data || [];
+          if (defs.length) {
+            const stateBySrc = {};
+            lotGateRows.forEach(r => { stateBySrc[r.source_gate_id] = r; });
+            gates = defs.map(d => {
+              const st = stateBySrc[d.id] || null;
+              return {
+                id: st ? st.id : null,               // lot_gate_state row id (manual toggle target); null for task gates
+                source_gate_id: d.id,
+                gate_name: d.name,
+                hold_stage_code: d.hold_stage_code,
+                hold_task_bt_nums: d.hold_task_bt_nums || [],
+                status_message: d.status_message,
+                confirmed: st ? !!st.confirmed : false,
+                gate_order: d.gate_order
+              };
+            });
+          }
+        }
+        return { statusCode: 200, body: JSON.stringify({ tasks: t.data || [], gates }) };
       }
 
       case 'bulkUpdateLotTasks': {
@@ -1043,7 +1149,7 @@ exports.handler = async function(event) {
           code: s.stage_code, label: s.stage_label, is_manual: s.is_manual, order: s.stage_order,
           triggers: (trig[s.id] || []).filter(x => x != null)
         }));
-        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=name,icon,hold_stage_code,gate_order&order=gate_order`);
+        const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=id,name,icon,hold_stage_code,status_message,hold_task_bt_nums,gate_order&order=gate_order`);
         return { statusCode: 200, body: JSON.stringify({ stages, gates: gRes.data || [] }) };
       }
 
@@ -1378,9 +1484,12 @@ exports.handler = async function(event) {
 
         const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=*`);
         const tgates = gRes.data || [];
-        if (tgates.length) {
+        // Manual gates only get a per-lot confirm row; task-driven gates release
+        // from task completion (derived), same rule as stampLot.
+        const tManual = tgates.filter(tg => !(Array.isArray(tg.hold_task_bt_nums) && tg.hold_task_bt_nums.length));
+        if (tManual.length) {
           const g = gates || {};
-          const gateRows = tgates.map(tg => {
+          const gateRows = tManual.map(tg => {
             const key = (tg.name || '').toLowerCase();
             const conf = !!g[key];
             return { lot_id, source_gate_id: tg.id, gate_name: tg.name, confirmed: conf, confirmed_at: conf ? new Date().toISOString() : null };
