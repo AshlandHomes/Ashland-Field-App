@@ -666,6 +666,29 @@ exports.handler = async function(event) {
           (smRes.data || []).forEach(s => { if (firstByTpl[s.template_id] === undefined) firstByTpl[s.template_id] = s.stage_code; });
           lots.forEach(l => { if (!l.reported_stage && firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id]; });
         }
+        // Hold surfacing (compute-on-read): a lot is HELD when reported_stage is
+        // capped BELOW true_stage. Piece 4 sets reportedCode = the blocking gate's
+        // threshold, so the blocking gate is the template hold gate whose
+        // hold_stage_code == reported_stage — attach its message + name for the
+        // admin status column + export. No stored derived state.
+        const heldLots = lots.filter(l => l.template_id && l.reported_stage && l.true_stage
+          && !isNaN(parseFloat(l.reported_stage)) && !isNaN(parseFloat(l.true_stage))
+          && parseFloat(l.reported_stage) < parseFloat(l.true_stage));
+        if (heldLots.length) {
+          const htids = [...new Set(heldLots.map(l => l.template_id))].map(encodeURIComponent).join(',');
+          const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=in.(${htids})&select=template_id,name,hold_stage_code,status_message`);
+          const gatesByTpl = {};
+          (gRes.data || []).forEach(g => { (gatesByTpl[g.template_id] = gatesByTpl[g.template_id] || []).push(g); });
+          heldLots.forEach(l => {
+            const gs = (gatesByTpl[l.template_id] || []).filter(g => parseFloat(g.hold_stage_code) === parseFloat(l.reported_stage));
+            if (gs.length) {
+              const names = gs.map(g => g.name).filter(Boolean);
+              const msgs  = gs.map(g => g.status_message).filter(Boolean);
+              l.hold_gate_name = names.length ? names.join('; ') : null;
+              l.hold_message   = msgs.length  ? msgs.join('; ')  : null;
+            }
+          });
+        }
         return { statusCode: 200, body: JSON.stringify(lots) };
       }
 
