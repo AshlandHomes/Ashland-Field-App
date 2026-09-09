@@ -3208,19 +3208,37 @@ const XLSX_SUB_PALETTE = ['FFEAF2FB','FFEAF7EE','FFFEF4E6','FFF3EAFB','FFE7F6F6'
 const XLSX_HEADER_FILL = 'FF2C3E50';  // brand slate, white bold text
 const XLSX_HOLD_FILL   = 'FFFFE29A';  // amber accent for held cells (On Hold / Hold Status)
 
-// Lazy-load the styling lib once, on first Export click (kept off every page load).
-let _xlsxLoad = null;
-function ensureXLSX(){
-  if (window.XLSX && window.XLSX.utils && window.XLSX.writeFile) return Promise.resolve(window.XLSX);
-  if (_xlsxLoad) return _xlsxLoad;
-  _xlsxLoad = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
-    s.onload = () => (window.XLSX && window.XLSX.utils) ? resolve(window.XLSX) : reject(new Error('XLSX unavailable after load'));
-    s.onerror = () => { _xlsxLoad = null; reject(new Error('failed to load xlsx-js-style (offline?)')); };
-    document.head.appendChild(s);
-  });
-  return _xlsxLoad;
+// Lazy-load the export libs once, on first Export click (kept off every page load):
+// xlsx-js-style (cell styling) + fflate (tiny zip, used to inject the frozen pane
+// that xlsx-js-style's writer can't emit on its own).
+let _libLoad = null;
+function _loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error('load failed: '+src)); document.head.appendChild(s); }); }
+function ensureExportLibs(){
+  if (window.XLSX && window.XLSX.utils && window.fflate) return Promise.resolve();
+  if (_libLoad) return _libLoad;
+  _libLoad = Promise.all([
+    (window.XLSX && window.XLSX.utils) ? null : _loadScript('https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js'),
+    (window.fflate)                    ? null : _loadScript('https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js')
+  ]).then(()=>{ if(!(window.XLSX && window.XLSX.utils && window.fflate)) throw new Error('export libs unavailable after load'); })
+    .catch(e=>{ _libLoad = null; throw e; });
+  return _libLoad;
+}
+// Inject a frozen pane (row 1 + column A) into the written .xlsx bytes. xlsx-js-style
+// drops !freeze on write, so we patch xl/worksheets/sheet1.xml directly. Styling in
+// styles.xml is untouched.
+function _freezeXlsx(bytes){
+  try {
+    const files = window.fflate.unzipSync(new Uint8Array(bytes));
+    const path = 'xl/worksheets/sheet1.xml';
+    if (!files[path]) return bytes;                 // safety: no sheet1 -> skip, return valid file
+    let xml = new TextDecoder().decode(files[path]);
+    const PANE = '<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>'
+               + '<selection pane="bottomRight" activeCell="B2" sqref="B2"/>';
+    if (/<sheetView[^>]*\/>/.test(xml)) xml = xml.replace(/<sheetView([^>]*)\/>/, '<sheetView$1>'+PANE+'</sheetView>');
+    else                               xml = xml.replace(/(<sheetView[^>]*>)/, '$1'+PANE);
+    files[path] = new TextEncoder().encode(xml);
+    return window.fflate.zipSync(files);
+  } catch(e){ return bytes; }                        // if patch fails, still deliver the styled (unfrozen) file
 }
 function _xlHash(str,mod){ let h=0; str=String(str||''); for(let i=0;i<str.length;i++) h=(h*31+str.charCodeAt(i))>>>0; return h%mod; }
 function _xlFont(extra){ return Object.assign({ name:XLSX_STYLE.fontName, sz:XLSX_STYLE.fontSize }, extra||{}); }
@@ -3232,10 +3250,10 @@ async function exportXLSX() {
   if (!data.length) { alert('No lots match your current filters — nothing to export.'); return; }
 
   const btn = document.querySelector('.topbar-btn.primary'); const label = btn ? btn.textContent : '';
-  let XLSX;
-  try { if (btn) btn.textContent = '↓ Loading…'; XLSX = await ensureXLSX(); }
+  try { if (btn) btn.textContent = '↓ Loading…'; await ensureExportLibs(); }
   catch(e){ if (btn) btn.textContent = label; alert('Excel export needs an internet connection to load the formatter. Connect and try again.'); return; }
   if (btn) btn.textContent = label;
+  const XLSX = window.XLSX;
 
   // Group by subdivision so the per-subdivision colors form contiguous bands.
   data = data.slice().sort((a,b)=> String(a.community||'').localeCompare(String(b.community||''))
@@ -3284,7 +3302,12 @@ async function exportXLSX() {
   try { const cid=getActiveCompanyId&&getActiveCompanyId(); if(cid){ const co=(companies||[]).find(c=>c.id===cid); if(co&&co.name) tag=co.name.replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,''); } } catch(e){}
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Lots');
-  XLSX.writeFile(wb, tag+'_Lots_'+today+'.xlsx');
+  // write to bytes, inject frozen pane (row 1 + col A), then download
+  const bytes = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+  const frozen = _freezeXlsx(bytes);
+  const blob = new Blob([frozen], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = Object.assign(document.createElement('a'), { href:URL.createObjectURL(blob), download: tag+'_Lots_'+today+'.xlsx' });
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 }
 
 // ── UTILITY ──
