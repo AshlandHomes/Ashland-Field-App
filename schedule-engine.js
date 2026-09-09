@@ -514,10 +514,43 @@
     if (!trueStage && stageMap.length) {
       trueStage = stageMap.reduce(function (a, b) { return b.order < a.order ? b : a; });
     }
-    var gatesOpen = !!gateState.open;
+
+    // ── HOLD GATES (generalized; BUILD_SPEC §2.7) ────────────────────────────
+    // A hold gate BLOCKS advancement past its threshold stage until it releases.
+    // The reported stage is the TRUE computed stage, capped at the LOWEST ENGAGED
+    // threshold — a gate that is (a) unreleased AND (b) already passed by the true
+    // stage. When nothing is engaged, reported == true (snap forward).
+    //
+    //   gateState.gates: [{ threshold, released, name, statusMessage }]
+    //     threshold   stage code the gate blocks past; blank/undefined => '5.9'
+    //                 (the legacy utility default, so old data needs no backfill)
+    //     released    caller-computed: TASK mode = all attached tasks finished;
+    //                 MANUAL mode = sched_lot_gate_state.confirmed
+    //
+    // BACKWARD COMPATIBILITY: the old single-utility-hold is exactly the special
+    // case of manual gate(s) at threshold 5.9. When no gates[] is supplied we fall
+    // back to the legacy { open } boolean as one 5.9 gate, so this reduces to the
+    // previous `trueStage>5.9 -> cap 5.9` behavior byte-for-byte (see test/hold-gates.js).
+    var gates = gateState.gates;
+    if (!gates) {
+      gates = ('open' in gateState) ? [{ threshold: '5.9', released: !gateState.open, name: 'Utility Hold' }] : [];
+    }
+    var tc = trueStage ? parseFloat(trueStage.code) : null;
+    var cap = null, blocking = null, blockingThr = null;
+    gates.forEach(function (g) {
+      var thrStr = (g.threshold != null && String(g.threshold).trim() !== '') ? String(g.threshold).trim() : '5.9';
+      var thr = parseFloat(thrStr);
+      if (isNaN(thr)) return;                       // no valid threshold -> never blocks
+      if (!g.released && tc !== null && tc > thr && (cap === null || thr < cap)) {
+        cap = thr; blocking = g; blockingThr = thrStr;
+      }
+    });
+
     var held = false, reportedCode, reportedLabel;
-    if (trueStage && gatesOpen && parseFloat(trueStage.code) > 5.9) {
-      held = true; reportedCode = '5.9'; reportedLabel = 'Utility Hold';
+    if (blocking) {
+      held = true;
+      reportedCode = blockingThr;                   // original code string (e.g. '5.9', '6.0')
+      reportedLabel = (blocking.name && String(blocking.name).trim() !== '') ? blocking.name : 'Utility Hold';
     } else {
       reportedCode = trueStage ? trueStage.code : '—';
       reportedLabel = trueStage ? trueStage.label : 'Pre-construction';
@@ -526,7 +559,9 @@
       reportedCode: reportedCode, reportedLabel: reportedLabel, held: held,
       trueCode: trueStage ? trueStage.code : null,
       trueLabel: trueStage ? trueStage.label : null,
-      gatesOpen: gatesOpen
+      gatesOpen: gates.some(function (g) { return !g.released; }),
+      blockingName: blocking ? (blocking.name || null) : null,
+      blockingMessage: blocking ? (blocking.statusMessage || null) : null
     };
   }
 
