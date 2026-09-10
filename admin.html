@@ -178,7 +178,7 @@ tr:hover td{background:#e5e7eb}
         <option value="">All Companies</option>
       </select>
       <button class="topbar-btn" onclick="refreshAll()">↻ Refresh</button>
-      <button class="topbar-btn primary" onclick="exportCSV()">↓ Export</button>
+      <button class="topbar-btn primary" onclick="exportXLSX()">↓ Export</button>
       <button class="topbar-btn" onclick="logout()">Sign Out</button>
     </div>
   </div>
@@ -3195,22 +3195,73 @@ function showSection(name, tabEl) {
 }
 
 // ── EXPORT ──
-function exportCSV() {
+// ── EXCEL EXPORT (xlsx-js-style, lazy-loaded from CDN; online-only) ─────────
+// The single "Export" button produces a styled .xlsx. CSV is gone.
+// Style config — flip these without touching logic:
+const XLSX_STYLE = { fontName:'Calibri', fontSize:11, rowHeight:18, headerHeight:22 };
+// Curated LIGHT pastel palette — each subdivision gets one, readable behind black text + borders.
+const XLSX_SUB_PALETTE = ['FFEAF2FB','FFEAF7EE','FFFEF4E6','FFF3EAFB','FFE7F6F6','FFFDECEC','FFF6F3E4','FFEFEFEF','FFFBEAF3','FFEAF0F6'];
+const XLSX_HEADER_FILL = 'FF2C3E50';  // brand slate, white bold text
+const XLSX_HOLD_FILL   = 'FFFFE29A';  // amber accent for held cells (On Hold / Hold Status)
+
+// Lazy-load the export libs once, on first Export click (kept off every page load):
+// xlsx-js-style (cell styling) + fflate (tiny zip, used to inject the frozen pane
+// that xlsx-js-style's writer can't emit on its own).
+let _libLoad = null;
+function _loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error('load failed: '+src)); document.head.appendChild(s); }); }
+function ensureExportLibs(){
+  if (window.XLSX && window.XLSX.utils && window.fflate) return Promise.resolve();
+  if (_libLoad) return _libLoad;
+  _libLoad = Promise.all([
+    (window.XLSX && window.XLSX.utils) ? null : _loadScript('https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js'),
+    (window.fflate)                    ? null : _loadScript('https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js')
+  ]).then(()=>{ if(!(window.XLSX && window.XLSX.utils && window.fflate)) throw new Error('export libs unavailable after load'); })
+    .catch(e=>{ _libLoad = null; throw e; });
+  return _libLoad;
+}
+// Inject a frozen pane (row 1 + column A) into the written .xlsx bytes. xlsx-js-style
+// drops !freeze on write, so we patch xl/worksheets/sheet1.xml directly. Styling in
+// styles.xml is untouched.
+function _freezeXlsx(bytes){
+  try {
+    const files = window.fflate.unzipSync(new Uint8Array(bytes));
+    const path = 'xl/worksheets/sheet1.xml';
+    if (!files[path]) return bytes;                 // safety: no sheet1 -> skip, return valid file
+    let xml = new TextDecoder().decode(files[path]);
+    const PANE = '<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>'
+               + '<selection pane="bottomRight" activeCell="B2" sqref="B2"/>';
+    if (/<sheetView[^>]*\/>/.test(xml)) xml = xml.replace(/<sheetView([^>]*)\/>/, '<sheetView$1>'+PANE+'</sheetView>');
+    else                               xml = xml.replace(/(<sheetView[^>]*>)/, '$1'+PANE);
+    files[path] = new TextEncoder().encode(xml);
+    return window.fflate.zipSync(files);
+  } catch(e){ return bytes; }                        // if patch fails, still deliver the styled (unfrozen) file
+}
+function _xlHash(str,mod){ let h=0; str=String(str||''); for(let i=0;i<str.length;i++) h=(h*31+str.charCodeAt(i))>>>0; return h%mod; }
+function _xlFont(extra){ return Object.assign({ name:XLSX_STYLE.fontName, sz:XLSX_STYLE.fontSize }, extra||{}); }
+function _xlMerge(XLSX, ws, r, c, style){ const cell = ws[XLSX.utils.encode_cell({r,c})]; if(!cell) return; cell.s = Object.assign({}, cell.s, style); }
+
+async function exportXLSX() {
   const today = new Date().toISOString().split('T')[0];
-  // Mirror the on-screen table exactly — same filters, same sort.
-  const data = getFilteredLots();
+  let data = getFilteredLots();
   if (!data.length) { alert('No lots match your current filters — nothing to export.'); return; }
-  // ISO helper: spreadsheets read YYYY-MM-DD as a real date (no more "2-OCT-26").
+
+  const btn = document.querySelector('.topbar-btn.primary'); const label = btn ? btn.textContent : '';
+  try { if (btn) btn.textContent = '↓ Loading…'; await ensureExportLibs(); }
+  catch(e){ if (btn) btn.textContent = label; alert('Excel export needs an internet connection to load the formatter. Connect and try again.'); return; }
+  if (btn) btn.textContent = label;
+  const XLSX = window.XLSX;
+
+  // Group by subdivision so the per-subdivision colors form contiguous bands.
+  data = data.slice().sort((a,b)=> String(a.community||'').localeCompare(String(b.community||''))
+    || String(a.lot_number||'').localeCompare(String(b.lot_number||''), undefined, {numeric:true}));
+
   const iso = d => d ? (typeof d==='string' ? d.slice(0,10)
     : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))) : '';
   const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Projected Completion','Baseline Completion','Close Status','Scheduled Close','Hold Status'];
+  const COMM=0, CLOSE=9, HOLD=11;
   const rows = data.map(l => {
-    // Engine-computed completion from lotPhases (KI-2 fix) — same source as the
-    // on-screen table and the field app. Blank for non-active lots (not projected).
     const lp = lotPhases[l.id] || {};
-    // Held = reported stage capped below true. A held lot must NOT read "Ready" —
-    // that is the trap this fixes (a 6.0 hold caps reported at 6.0, which would
-    // otherwise pass the >=6 "Ready" test). On Hold overrides every close status.
+    // Held = reported stage capped below true -> must NOT read "Ready".
     const isHeld = l.reported_stage && l.true_stage
       && !isNaN(parseFloat(l.reported_stage)) && !isNaN(parseFloat(l.true_stage))
       && parseFloat(l.reported_stage) < parseFloat(l.true_stage);
@@ -3222,12 +3273,37 @@ function exportCSV() {
     const holdStatus = isHeld ? (l.hold_message || l.hold_gate_name || 'On hold') : '';
     return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
   });
-  const csv = [hdrs,...rows].map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+
+  // Build the sheet from data, then an ADDITIVE style pass (merge onto existing cells).
+  const BC = { style:'thin', color:{rgb:'FFB8C0C8'} };
+  const BORDERS = { top:BC, bottom:BC, left:BC, right:BC };
+  const ws = XLSX.utils.aoa_to_sheet([hdrs, ...rows]);
+  const nC = hdrs.length, nR = rows.length;
+  for (let c=0;c<nC;c++) _xlMerge(XLSX, ws, 0, c,
+    { font:_xlFont({bold:true,color:{rgb:'FFFFFFFF'}}), fill:{fgColor:{rgb:XLSX_HEADER_FILL}}, alignment:{vertical:'center'}, border:BORDERS });
+  for (let r=0;r<nR;r++){
+    const tint = XLSX_SUB_PALETTE[_xlHash(rows[r][COMM], XLSX_SUB_PALETTE.length)];  // stable by subdivision name
+    for (let c=0;c<nC;c++){
+      const held = (c===HOLD && rows[r][HOLD]) || (c===CLOSE && String(rows[r][CLOSE]).toLowerCase()==='on hold');
+      _xlMerge(XLSX, ws, r+1, c,
+        { font:_xlFont(held?{bold:true,color:{rgb:'FF9C6500'}}:{}), fill:{fgColor:{rgb: held?XLSX_HOLD_FILL:tint}}, alignment:{vertical:'center'}, border:BORDERS });
+    }
+  }
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:nR,c:nC-1}}) };
+  ws['!rows'] = [{hpt:XLSX_STYLE.headerHeight}].concat(rows.map(()=>({hpt:XLSX_STYLE.rowHeight})));
+  ws['!cols'] = hdrs.map((h,c)=>{ let w=String(h).length; for(let r=0;r<nR;r++){ const v=rows[r][c]; if(v!=null) w=Math.max(w, String(v).length); } return {wch:Math.min(Math.max(w+2,8),60)}; });
+
   // filename reflects the active company filter when one is set
   let tag = 'All';
   try { const cid=getActiveCompanyId&&getActiveCompanyId(); if(cid){ const co=(companies||[]).find(c=>c.id===cid); if(co&&co.name) tag=co.name.replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,''); } } catch(e){}
-  const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:tag+'_Lots_'+today+'.csv'});
-  a.click();
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Lots');
+  // write to bytes, inject frozen pane (row 1 + col A), then download
+  const bytes = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+  const frozen = _freezeXlsx(bytes);
+  const blob = new Blob([frozen], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = Object.assign(document.createElement('a'), { href:URL.createObjectURL(blob), download: tag+'_Lots_'+today+'.xlsx' });
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 }
 
 // ── UTILITY ──
