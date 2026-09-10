@@ -3269,10 +3269,15 @@ async function exportXLSX() {
   const rows = data.map(l => {
     const lp = lotPhases[l.id] || {};
     // Held = reported stage capped below true -> must NOT read "Ready".
-    const isHeld = l.reported_stage && l.true_stage
+    // Only ACTIVE lots are ever "held" or date-status'd — a closed/canceled lot is done.
+    const isHeld = l.status==='active' && l.reported_stage && l.true_stage
       && !isNaN(parseFloat(l.reported_stage)) && !isNaN(parseFloat(l.true_stage))
       && parseFloat(l.reported_stage) < parseFloat(l.true_stage);
-    const closeStatus = isHeld ? 'On Hold'
+    // Short-circuit terminal statuses FIRST — a closed lot must never read Past Due/etc.
+    const closeStatus =
+        l.status==='closed'   ? 'Closed'
+      : l.status==='canceled' ? 'Canceled'
+      : isHeld ? 'On Hold'
       : l.scheduled_close_date && l.scheduled_close_date<today ? 'Past Due'
       : l.scheduled_close_date ? 'Scheduled'
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
