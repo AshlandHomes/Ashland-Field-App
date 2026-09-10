@@ -3204,10 +3204,11 @@ function showSection(name, tabEl) {
 // Style config — flip these without touching logic:
 const XLSX_STYLE = { fontName:'Calibri', fontSize:11, rowHeight:18, headerHeight:22 };
 // Curated LIGHT pastel palette — each subdivision gets one, readable behind black text + borders.
-// Distinct pastel hues, ORDERED so consecutive subdivisions contrast (cool/warm alternating).
-// Assigned by distinct-subdivision order (not hash) so no two subdivisions share a color
-// until there are more than palette.length of them.
-const XLSX_SUB_PALETTE = ['FFDCEAFB','FFFDE7C3','FFDDF3E0','FFEFDCF6','FFFBD8E1','FFD0EEF0','FFFBE0C6','FFEAF2C6','FFE1E5EC','FFF3D9C9'];
+// Soft pastels in distinct hue families, ORDERED warm/cool alternating so neighbours
+// contrast even when pale. Assigned by distinct-subdivision order (not hash), so no two
+// subdivisions share a color until there are more than palette.length of them — and since
+// rows are sorted by subdivision, adjacent bands always get consecutive (different) slots.
+const XLSX_SUB_PALETTE = ['FFEAF1FB','FFFCEEDD','FFE7F5EB','FFFCE8EF','FFECEDF6','FFFAF3DA','FFE3F3F3','FFF6ECE0','FFF1E9F8','FFEFF5DE'];
 const XLSX_HEADER_FILL = 'FF2C3E50';  // brand slate, white bold text
 const XLSX_HOLD_FILL   = 'FFFFE29A';  // amber accent for held cells (On Hold / Hold Status)
 
