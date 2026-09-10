@@ -3204,7 +3204,10 @@ function showSection(name, tabEl) {
 // Style config — flip these without touching logic:
 const XLSX_STYLE = { fontName:'Calibri', fontSize:11, rowHeight:18, headerHeight:22 };
 // Curated LIGHT pastel palette — each subdivision gets one, readable behind black text + borders.
-const XLSX_SUB_PALETTE = ['FFEAF2FB','FFEAF7EE','FFFEF4E6','FFF3EAFB','FFE7F6F6','FFFDECEC','FFF6F3E4','FFEFEFEF','FFFBEAF3','FFEAF0F6'];
+// Distinct pastel hues, ORDERED so consecutive subdivisions contrast (cool/warm alternating).
+// Assigned by distinct-subdivision order (not hash) so no two subdivisions share a color
+// until there are more than palette.length of them.
+const XLSX_SUB_PALETTE = ['FFDCEAFB','FFFDE7C3','FFDDF3E0','FFEFDCF6','FFFBD8E1','FFD0EEF0','FFFBE0C6','FFEAF2C6','FFE1E5EC','FFF3D9C9'];
 const XLSX_HEADER_FILL = 'FF2C3E50';  // brand slate, white bold text
 const XLSX_HOLD_FILL   = 'FFFFE29A';  // amber accent for held cells (On Hold / Hold Status)
 
@@ -3240,7 +3243,6 @@ function _freezeXlsx(bytes){
     return window.fflate.zipSync(files);
   } catch(e){ return bytes; }                        // if patch fails, still deliver the styled (unfrozen) file
 }
-function _xlHash(str,mod){ let h=0; str=String(str||''); for(let i=0;i<str.length;i++) h=(h*31+str.charCodeAt(i))>>>0; return h%mod; }
 function _xlFont(extra){ return Object.assign({ name:XLSX_STYLE.fontName, sz:XLSX_STYLE.fontSize }, extra||{}); }
 function _xlMerge(XLSX, ws, r, c, style){ const cell = ws[XLSX.utils.encode_cell({r,c})]; if(!cell) return; cell.s = Object.assign({}, cell.s, style); }
 
@@ -3285,8 +3287,13 @@ async function exportXLSX() {
   const nC = hdrs.length, nR = rows.length;
   for (let c=0;c<nC;c++) _xlMerge(XLSX, ws, 0, c,
     { font:_xlFont({bold:true,color:{rgb:'FFFFFFFF'}}), fill:{fgColor:{rgb:XLSX_HEADER_FILL}}, alignment:{vertical:'center'}, border:BORDERS });
+  // One palette slot per DISTINCT subdivision, in appearance order (rows are already
+  // sorted by subdivision) — guarantees adjacent subdivisions never share a color
+  // until there are more than palette.length subdivisions.
+  const _distinctComm = [...new Set(rows.map(rr => rr[COMM]))];
+  const colorByComm = {}; _distinctComm.forEach((c,i)=>{ colorByComm[c] = XLSX_SUB_PALETTE[i % XLSX_SUB_PALETTE.length]; });
   for (let r=0;r<nR;r++){
-    const tint = XLSX_SUB_PALETTE[_xlHash(rows[r][COMM], XLSX_SUB_PALETTE.length)];  // stable by subdivision name
+    const tint = colorByComm[rows[r][COMM]] || XLSX_SUB_PALETTE[0];
     for (let c=0;c<nC;c++){
       const held = (c===HOLD && rows[r][HOLD]) || (c===CLOSE && String(rows[r][CLOSE]).toLowerCase()==='on hold');
       _xlMerge(XLSX, ws, r+1, c,
