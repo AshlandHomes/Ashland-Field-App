@@ -48,7 +48,7 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .nav-legend:hover{background:var(--brand-dark,#0082A0)}
 
 
-.content{flex:1;padding:28px 32px;max-width:1680px;width:100%;margin:0 auto}
+.content{flex:1;padding:28px 0;max-width:1680px;width:100%;margin:0 auto}
 .section{display:none}.section.active{display:block}
 
 /* ── STAT CARDS ── */
@@ -1510,7 +1510,7 @@ function renderLotsTable() {
     const expanded = searchActive || !communityCollapsed.has(g.code);
     const name = (typeof SUB_NAMES !== 'undefined' && SUB_NAMES[g.code]) ? ' · ' + SUB_NAMES[g.code] : '';
     const hdr = '<tr onclick="toggleCommunityGroup(\'' + String(g.code).replace(/'/g, "\\'") + '\')" style="cursor:pointer;background:#eef2f7">'
-      + '<td colspan="12" style="padding:8px 12px;font-weight:700;color:#334155;border-top:1px solid #e5e7eb">'
+      + '<td colspan="13" style="padding:8px 12px;font-weight:700;color:#334155;border-top:1px solid #e5e7eb">'
       + (expanded ? '▾' : '▸') + ' ' + g.code + name + ' (' + g.lots.length + ')</td></tr>';
     return hdr + (expanded ? g.lots.map(buildRow).join('') : '');
   }).join('');
@@ -1519,7 +1519,7 @@ function renderLotsTable() {
   let closedBlock = '';
   if (closedLots.length) {
     const hdr = '<tr onclick="toggleClosedGroup()" style="cursor:pointer;background:#f3f4f6">'
-      + '<td colspan="12" style="padding:9px 12px;font-weight:700;color:#4C4C4C;border-top:2px solid #e5e7eb">'
+      + '<td colspan="13" style="padding:9px 12px;font-weight:700;color:#4C4C4C;border-top:2px solid #e5e7eb">'
       + (expandClosed ? '▾' : '▸') + ' 🏠 Closed (' + closedLots.length + ')</td></tr>';
     closedBlock = hdr + (expandClosed ? closedLots.map(buildRow).join('') : '');
   }
