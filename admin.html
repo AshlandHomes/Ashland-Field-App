@@ -40,7 +40,7 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .topbar-btn:hover{background:rgba(255,255,255,.1)}
 .topbar-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
 
-.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex;align-items:center}
+.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex;align-items:center;max-width:1680px;width:100%;margin:0 auto}
 .nav-tab{padding:14px 20px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap}
 .nav-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
 .nav-tab:hover:not(.active){color:var(--ink)}
@@ -48,7 +48,7 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .nav-legend:hover{background:var(--brand-dark,#0082A0)}
 
 
-.content{flex:1;padding:28px 32px;max-width:1440px;width:100%}
+.content{flex:1;padding:28px 0;max-width:1680px;width:100%;margin:0 auto}
 .section{display:none}.section.active{display:block}
 
 /* ── STAT CARDS ── */
@@ -106,6 +106,14 @@ tr:hover td{background:#e5e7eb}
 .modal-overlay.open{display:flex}
 .modal{background:#fff;border-radius:16px;padding:28px;width:520px;max-width:100%}
 .modal-wide{width:820px}
+/* Reusable sticky-header modal: frozen title + × up top, body scrolls beneath. */
+.modal.sticky{padding:0;display:flex;flex-direction:column;max-height:calc(100vh - 80px);overflow:hidden}
+.modal.sticky .modal-head{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 28px 14px;border-bottom:1px solid var(--rule);background:#fff;border-radius:16px 16px 0 0}
+.modal.sticky .modal-head>div{min-width:0}
+.modal.sticky .modal-head h2,.modal.sticky .modal-head h3{margin:0}
+.modal.sticky .modal-body{flex:1 1 auto;overflow-y:auto;padding:18px 28px 24px}
+.modal-x{flex:0 0 auto;background:none;border:none;font-size:26px;line-height:1;color:var(--muted);cursor:pointer;padding:0 2px;margin:-4px -6px 0 0}
+.modal-x:hover{color:var(--ink)}
 .modal h2{font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:4px}
 .modal-sub{color:var(--muted);font-size:13px;margin-bottom:22px}
 .field{margin-bottom:14px}
@@ -1193,14 +1201,11 @@ function subBadge(community) {
 
 function stageCell(lot) {
   if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
-  // Held = reported capped below true (any hold gate / threshold), generalized from the old 5.9 check.
+  // Held = reported capped below true (any hold gate / threshold). Cell shows only the
+  // stage + a small hold icon; the WHY (gate + message) lives in the click-through legend.
   const held = lot.reported_stage && lot.true_stage && lot.reported_stage!==lot.true_stage && parseFloat(lot.reported_stage)<parseFloat(lot.true_stage);
-  const h = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;');   // guard user-entered message
-  const holdDetail = held
-    ? (lot.hold_gate_name ? ' — ' + h(lot.hold_gate_name) : '') + (lot.hold_message ? ': ' + h(lot.hold_message) : '')
-    : '';
   return '<span class="badge" style="background:#e0f2fe;color:#0369a1;cursor:pointer" onclick="openStageModal(\''+lot.id+'\')" title="View stage legend">' + lot.reported_stage + '</span>'
-    + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + lot.true_stage + holdDetail + '</div>' : '');
+    + (held ? ' <span onclick="openStageModal(\''+lot.id+'\')" title="Held — click the stage for details" style="color:var(--amber);font-weight:700;cursor:pointer">⚡</span>' : '');
 }
 
 async function openStageModal(lotId){
@@ -1275,8 +1280,22 @@ async function openStageModal(lotId){
       +'<div id="astg-'+i+'" style="display:none;padding:2px 11px 9px 27px">'+tasksHtml+'</div>'
       +'</div>';
   }).join('');
+  // Generalized hold detail (any gate/threshold) — the WHY the cell no longer shows.
+  // Blocking gate = the one whose hold_stage_code == reported_stage (the cap).
+  let heldDetailHtml = '';
+  if (rep && tru && !isNaN(parseFloat(rep)) && !isNaN(parseFloat(tru)) && parseFloat(rep) < parseFloat(tru)) {
+    const esc2 = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    const blockers = gates.filter(g => !isNaN(parseFloat(g.hold_stage_code)) && parseFloat(g.hold_stage_code) === parseFloat(rep));
+    const names = blockers.map(g=>g.gate_name).filter(Boolean);
+    const msgs  = blockers.map(g=>g.status_message).filter(Boolean);
+    heldDetailHtml = '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px">'
+      + '<div style="font-weight:700;color:#b45309">⚡ Held at '+esc2(rep)+' — actually at stage '+esc2(tru)+'</div>'
+      + (names.length ? '<div style="font-size:13px;color:#92400e;margin-top:4px"><strong>Blocked by:</strong> '+names.map(esc2).join('; ')+'</div>' : '')
+      + (msgs.length  ? '<div style="font-size:13px;color:#92400e;margin-top:2px">'+msgs.map(esc2).join('; ')+'</div>' : '')
+      + '</div>';
+  }
   box.innerHTML = gateHtml
-    + (tru&&tru!==rep ? '<div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚡ This lot is actually at stage '+tru+' but reports 5.9 because utility gates are open.</div>' : '')
+    + heldDetailHtml
     + (stages.length ? '<div style="font-size:11px;color:var(--muted);margin:2px 0 6px">Tap a stage to see the tasks that drive it.</div>' : '')
     + (ladder || '<p style="color:var(--muted);text-align:center;padding:20px">No stage map for this lot\'s template</p>');
 }
@@ -1450,7 +1469,8 @@ function renderLotsTable() {
     const id = lot.id; const num = (lot.lot_number||'').replace(/'/g,"\\'");
     return `<tr>
       <td>${subBadge(lot.community)}</td>
-      <td><strong>${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
+      <td><strong style="white-space:nowrap">${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
+      <td>${lot.plan_name ? esc(lot.plan_name) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${lot.builder_name||'<span style="color:var(--muted)">—</span>'}</td>
       <td>${stageCell(lot)}</td>
       <td>${phaseCell(lot)}</td>
@@ -1494,7 +1514,7 @@ function renderLotsTable() {
     const expanded = searchActive || !communityCollapsed.has(g.code);
     const name = (typeof SUB_NAMES !== 'undefined' && SUB_NAMES[g.code]) ? ' · ' + SUB_NAMES[g.code] : '';
     const hdr = '<tr onclick="toggleCommunityGroup(\'' + String(g.code).replace(/'/g, "\\'") + '\')" style="cursor:pointer;background:#eef2f7">'
-      + '<td colspan="12" style="padding:8px 12px;font-weight:700;color:#334155;border-top:1px solid #e5e7eb">'
+      + '<td colspan="13" style="padding:8px 12px;font-weight:700;color:#334155;border-top:1px solid #e5e7eb">'
       + (expanded ? '▾' : '▸') + ' ' + g.code + name + ' (' + g.lots.length + ')</td></tr>';
     return hdr + (expanded ? g.lots.map(buildRow).join('') : '');
   }).join('');
@@ -1503,14 +1523,14 @@ function renderLotsTable() {
   let closedBlock = '';
   if (closedLots.length) {
     const hdr = '<tr onclick="toggleClosedGroup()" style="cursor:pointer;background:#f3f4f6">'
-      + '<td colspan="12" style="padding:9px 12px;font-weight:700;color:#4C4C4C;border-top:2px solid #e5e7eb">'
+      + '<td colspan="13" style="padding:9px 12px;font-weight:700;color:#4C4C4C;border-top:2px solid #e5e7eb">'
       + (expandClosed ? '▾' : '▸') + ' 🏠 Closed (' + closedLots.length + ')</td></tr>';
     closedBlock = hdr + (expandClosed ? closedLots.map(buildRow).join('') : '');
   }
 
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
-      <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
+      <th>Sub</th><th>Lot</th><th>Plan Name</th><th>Builder</th><th>Stage</th><th>Phase</th>
       <th>Start</th><th>Completion<div style="font-size:10px;font-weight:400;color:var(--muted)">proj / baseline</div></th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
     </tr></thead>
     <tbody>${activeRows}${closedBlock}</tbody>
@@ -2622,13 +2642,16 @@ function renderStagesModal(){
     }
     return h+'</div>';
   }).join('');
-  ov.innerHTML='<div class="modal" style="max-width:620px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-    +  '<h3 style="margin:0">Stage Gates</h3>'
-    +  '<div style="display:flex;gap:6px"><button class="btn" style="background:#0369a1;color:#fff" onclick="openStageEdit(-1)">+ Add Stage</button>'
-    +  '<button class="btn btn-secondary" onclick="closeStagesModal()">Close</button></div></div>'
+  ov.innerHTML='<div class="modal sticky" style="max-width:620px">'
+    +'<div class="modal-head">'
+    +  '<div><h3 style="margin:0">Stage Gates</h3></div>'
+    +  '<div style="display:flex;gap:6px;align-items:center"><button class="btn" style="background:#0369a1;color:#fff" onclick="openStageEdit(-1)">+ Add Stage</button>'
+    +  '<button class="modal-x" type="button" aria-label="Close" onclick="closeStagesModal()">&times;</button></div>'
+    +'</div>'
+    +'<div class="modal-body">'
     +'<p style="color:var(--muted);font-size:12px;margin:0 0 10px">Top→bottom = progression; first stage = new-lot start. Click ▸ to peek at linked tasks; Edit to change name / number / links. Changes save immediately.</p>'
     +(rows||'<p style="color:var(--muted);padding:12px">No stages yet — add one.</p>')
+    +'</div>'
     +'</div>';
 }
 function toggleStagePeek(i){ _stageExpanded=(_stageExpanded===i?-1:i); renderStagesModal(); }
@@ -2748,13 +2771,16 @@ function renderHoldGatesModal(){
     }
     return h+'</div>';
   }).join('');
-  ov.innerHTML='<div class="modal" style="max-width:640px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-    +  '<h3 style="margin:0">Hold Gates</h3>'
-    +  '<div style="display:flex;gap:6px"><button class="btn" style="background:var(--amber);color:#fff" onclick="openHoldGateEdit(-1)">+ Add Hold Gate</button>'
-    +  '<button class="btn btn-secondary" onclick="closeHoldGatesModal()">Close</button></div></div>'
+  ov.innerHTML='<div class="modal sticky" style="max-width:640px">'
+    +'<div class="modal-head">'
+    +  '<div><h3 style="margin:0">Hold Gates</h3></div>'
+    +  '<div style="display:flex;gap:6px;align-items:center"><button class="btn" style="background:var(--amber);color:#fff" onclick="openHoldGateEdit(-1)">+ Add Hold Gate</button>'
+    +  '<button class="modal-x" type="button" aria-label="Close" onclick="closeHoldGatesModal()">&times;</button></div>'
+    +'</div>'
+    +'<div class="modal-body">'
     +'<p style="color:var(--muted);font-size:12px;margin:0 0 10px">Each hold gate blocks a lot from advancing past its threshold stage until every attached task is complete. The status message is what sales sees in the status column &amp; export. Click ▸ to peek; Edit to change. Changes save immediately.</p>'
     +(rows||'<p style="color:var(--muted);padding:12px">No hold gates yet — add one.</p>')
+    +'</div>'
     +'</div>';
 }
 function toggleHoldPeek(i){ _holdExpanded=(_holdExpanded===i?-1:i); renderHoldGatesModal(); }
@@ -3337,8 +3363,8 @@ async function _generateXlsx(data, tagName) {
 
   const iso = d => d ? (typeof d==='string' ? d.slice(0,10)
     : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))) : '';
-  const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Projected Completion','Baseline Completion','Close Status','Scheduled Close','Hold Status'];
-  const COMM=0, CLOSE=9, HOLD=11;
+  const hdrs = ['Community','Lot Number','Plan Name','Address','Builder','Stage','True Stage','Start Date','Projected Completion','Baseline Completion','Close Status','Scheduled Close','Hold Status'];
+  const COMM=0, CLOSE=10, HOLD=12;   // shifted +1 by the inserted Plan Name column
   const rows = data.map(l => {
     const lp = lotPhases[l.id] || {};
     // Held = reported stage capped below true -> must NOT read "Ready".
@@ -3356,7 +3382,7 @@ async function _generateXlsx(data, tagName) {
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
       : 'Not Yet';
     const holdStatus = isHeld ? (l.hold_message || l.hold_gate_name || 'On hold') : '';
-    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
+    return [l.community||'',l.lot_number||'',l.plan_name||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
   });
 
   // Build the sheet from data, then an ADDITIVE style pass (merge onto existing cells).
@@ -3397,6 +3423,32 @@ async function _generateXlsx(data, tagName) {
 
 // ── UTILITY ──
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── Reusable sticky-header modal pattern ────────────────────────────────────
+// Frozen title + × close up top, body scrolls beneath, redundant bottom Close removed.
+// Applied once to the static read/scroll modals; the dynamic gate modals build the
+// same .modal.sticky structure directly in their render functions.
+function stickifyModal(id){
+  const ov=document.getElementById(id); if(!ov) return;
+  const modal=ov.querySelector('.modal'); if(!modal||modal.dataset.sticky) return;
+  const title=modal.querySelector('h2,h3'); if(!title) return;
+  modal.dataset.sticky='1'; modal.classList.add('sticky');
+  const sub=(title.nextElementSibling&&title.nextElementSibling.classList&&title.nextElementSibling.classList.contains('modal-sub'))?title.nextElementSibling:null;
+  const body=document.createElement('div'); body.className='modal-body';
+  while(modal.firstChild) body.appendChild(modal.firstChild);          // move everything into the scroll body
+  body.querySelectorAll('.modal-btns').forEach(bt=>{                   // drop the redundant bottom "Close"
+    const bs=[...bt.querySelectorAll('button')];
+    if(bs.length && bs.every(b=>/close/i.test(b.textContent))) bt.remove();
+    else bs.filter(b=>/^\s*close\s*$/i.test(b.textContent)).forEach(b=>b.remove());
+  });
+  const head=document.createElement('div'); head.className='modal-head';
+  const tw=document.createElement('div');
+  tw.appendChild(title); if(sub) tw.appendChild(sub);                  // title (+subtitle) into the frozen head
+  const x=document.createElement('button'); x.className='modal-x'; x.type='button'; x.setAttribute('aria-label','Close'); x.innerHTML='&times;'; x.onclick=function(){ closeModal(id); };
+  head.appendChild(tw); head.appendChild(x);
+  modal.appendChild(head); modal.appendChild(body);
+}
+['modal-lot-stage','modal-lot-phase','modal-lot-flags','modal-lot-stale','modal-dependents','modal-icon-legend','modal-sub-detail','modal-pred-picker','modal-task','modal-edit-lot'].forEach(stickifyModal);
 </script>
 </body>
 </html>
