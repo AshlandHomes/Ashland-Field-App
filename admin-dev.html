@@ -3251,11 +3251,26 @@ function _xlMerge(XLSX, ws, r, c, style){ const cell = ws[XLSX.utils.encode_cell
 // Explicit per-export choice (status / company / subdivisions), decoupled from the
 // console's live filters. Opens on the Export button; builds the lot set, then _generateXlsx.
 const EXPORT_STATUSES = [{ key:'active', label:'Active' }, { key:'closed', label:'Closed' }, { key:'canceled', label:'Inactive' }];
+// Remember-last-used: persist the last export's picks; first-ever open uses defaults.
+function _loadExportPrefs(){
+  try {
+    const p = JSON.parse(localStorage.getItem('ashland_export_prefs')||'null');
+    if(!p || !p.status) return null;
+    if(p.companyId && !(companies||[]).some(c=>c.id===p.companyId)) p.companyId='';  // drop a deleted company
+    return p;
+  } catch(e){ return null; }
+}
+function _saveExportPrefs(status, companyId, allSubs, pickedArr){
+  try { localStorage.setItem('ashland_export_prefs', JSON.stringify({ status, companyId, allSubs, picked: allSubs?[]:(pickedArr||[]) })); } catch(e){}
+}
 function openExportDialog(){
   let ov = document.getElementById('modal-export');
   if(!ov){ ov = document.createElement('div'); ov.className='modal-overlay'; ov.id='modal-export'; document.body.appendChild(ov); }
-  const defCompany = (document.getElementById('company-filter')||{}).value || '';   // default = top-bar company
-  renderExportDialog(defCompany, { active:true, closed:false, canceled:false }, null); // null picked = All subs
+  const prefs = _loadExportPrefs();
+  const companyId = prefs ? (prefs.companyId||'') : ((document.getElementById('company-filter')||{}).value || '');  // default = top-bar company
+  const status    = prefs ? prefs.status : { active:true, closed:false, canceled:false };                            // default = Active only
+  const picked    = prefs ? (prefs.allSubs ? null : new Set(prefs.picked||[])) : null;                               // default = All subs (null)
+  renderExportDialog(companyId, status, picked);
   ov.classList.add('open');
 }
 function closeExportDialog(){ const ov=document.getElementById('modal-export'); if(ov) ov.classList.remove('open'); }
@@ -3304,6 +3319,7 @@ async function runExportFromDialog(){
     if(pickedCodes && !pickedCodes.has(l.community)) return false;
     return true;
   });
+  _saveExportPrefs(status, companyId, allSubs, pickedCodes ? [...pickedCodes] : []);   // remember for next time
   const co = companyId ? (companies||[]).find(c=>c.id===companyId) : null;
   closeExportDialog();
   await _generateXlsx(data, co ? co.name : 'All');
