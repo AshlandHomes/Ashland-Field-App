@@ -178,7 +178,7 @@ tr:hover td{background:#e5e7eb}
         <option value="">All Companies</option>
       </select>
       <button class="topbar-btn" onclick="refreshAll()">↻ Refresh</button>
-      <button class="topbar-btn primary" onclick="exportXLSX()">↓ Export</button>
+      <button class="topbar-btn primary" onclick="openExportDialog()">↓ Export</button>
       <button class="topbar-btn" onclick="logout()">Sign Out</button>
     </div>
   </div>
@@ -3243,10 +3243,87 @@ function _freezeXlsx(bytes){
 function _xlFont(extra){ return Object.assign({ name:XLSX_STYLE.fontName, sz:XLSX_STYLE.fontSize }, extra||{}); }
 function _xlMerge(XLSX, ws, r, c, style){ const cell = ws[XLSX.utils.encode_cell({r,c})]; if(!cell) return; cell.s = Object.assign({}, cell.s, style); }
 
-async function exportXLSX() {
+// ── EXPORT DIALOG ───────────────────────────────────────────────────────────
+// Explicit per-export choice (status / company / subdivisions), decoupled from the
+// console's live filters. Opens on the Export button; builds the lot set, then _generateXlsx.
+const EXPORT_STATUSES = [{ key:'active', label:'Active' }, { key:'closed', label:'Closed' }, { key:'canceled', label:'Canceled' }];
+// Remember-last-used: persist the last export's picks; first-ever open uses defaults.
+function _loadExportPrefs(){
+  try {
+    const p = JSON.parse(localStorage.getItem('ashland_export_prefs')||'null');
+    if(!p || !p.status) return null;
+    if(p.companyId && !(companies||[]).some(c=>c.id===p.companyId)) p.companyId='';  // drop a deleted company
+    return p;
+  } catch(e){ return null; }
+}
+function _saveExportPrefs(status, companyId, allSubs, pickedArr){
+  try { localStorage.setItem('ashland_export_prefs', JSON.stringify({ status, companyId, allSubs, picked: allSubs?[]:(pickedArr||[]) })); } catch(e){}
+}
+function openExportDialog(){
+  let ov = document.getElementById('modal-export');
+  if(!ov){ ov = document.createElement('div'); ov.className='modal-overlay'; ov.id='modal-export'; document.body.appendChild(ov); }
+  const prefs = _loadExportPrefs();
+  const companyId = prefs ? (prefs.companyId||'') : ((document.getElementById('company-filter')||{}).value || '');  // default = top-bar company
+  const status    = prefs ? prefs.status : { active:true, closed:false, canceled:false };                            // default = Active only
+  const picked    = prefs ? (prefs.allSubs ? null : new Set(prefs.picked||[])) : null;                               // default = All subs (null)
+  renderExportDialog(companyId, status, picked);
+  ov.classList.add('open');
+}
+function closeExportDialog(){ const ov=document.getElementById('modal-export'); if(ov) ov.classList.remove('open'); }
+function _readExportStatus(){ const st={}; EXPORT_STATUSES.forEach(s=>{ const el=document.getElementById('exp-st-'+s.key); st[s.key]= el?el.checked:false; }); return st; }
+function renderExportDialog(companyId, status, picked){   // picked: null = All subdivisions; else Set of codes
+  const ov = document.getElementById('modal-export'); if(!ov) return;
+  const lbl='display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#475569;margin-bottom:6px';
+  const allChecked = picked===null;
+  const subs = (subdivisions||[]).filter(s => !companyId || s.company_id===companyId)
+                 .slice().sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
+  const coOpts = '<option value="">All companies</option>' +
+    (companies||[]).map(c=>'<option value="'+c.id+'"'+(c.id===companyId?' selected':'')+'>'+esc(c.name)+'</option>').join('');
+  const statusBoxes = EXPORT_STATUSES.map(s=>
+    '<label style="display:inline-flex;align-items:center;gap:7px;margin-right:16px;font-size:14px"><input type="checkbox" id="exp-st-'+s.key+'"'+(status[s.key]?' checked':'')+'> '+s.label+'</label>').join('');
+  const subList = subs.length
+    ? subs.map(s=>'<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #e2e8f0"><input type="checkbox" class="exp-sub" value="'+esc(s.code)+'"'+((allChecked||(picked&&picked.has(s.code)))?' checked':'')+(allChecked?' disabled':'')+'><span>'+esc(s.code)+' — '+esc(s.name||'')+'</span></label>').join('')
+    : '<p style="color:var(--muted);padding:8px">No subdivisions for this company.</p>';
+  ov.innerHTML = '<div class="modal" style="max-width:520px">'
+    +'<h3 style="margin:0 0 14px">Export Lots</h3>'
+    +'<div style="margin-bottom:16px"><label style="'+lbl+'">Status</label>'+statusBoxes+'</div>'
+    +'<div style="margin-bottom:16px"><label style="'+lbl+'">Company</label>'
+    +  '<select id="exp-company" onchange="onExportCompanyChange()" style="width:100%;padding:9px 10px;border:1.5px solid #94a3b8;border-radius:6px;font-size:14px;background:#fff">'+coOpts+'</select></div>'
+    +'<div style="margin-bottom:6px"><label style="'+lbl+'">Subdivisions</label>'
+    +  '<label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;margin-bottom:6px"><input type="checkbox" id="exp-all-subs"'+(allChecked?' checked':'')+' onchange="onExportAllSubsToggle()"> All subdivisions</label>'
+    +  '<div id="exp-sub-list" style="max-height:34vh;overflow:auto;border:1.5px solid #94a3b8;border-radius:8px;background:#f8fafc;padding:4px 10px'+(allChecked?';opacity:.55':'')+'">'+subList+'</div></div>'
+    +'<div style="display:flex;gap:8px;margin-top:18px"><button class="btn btn-secondary" style="flex:1" onclick="closeExportDialog()">Cancel</button>'
+    +'<button class="btn" style="flex:1;background:#0369a1;color:#fff" onclick="runExportFromDialog()">↓ Export</button></div>'
+    +'</div>';
+}
+function onExportCompanyChange(){ renderExportDialog(document.getElementById('exp-company').value, _readExportStatus(), null); }  // reset subs to All on company change
+function onExportAllSubsToggle(){
+  const on = document.getElementById('exp-all-subs').checked;
+  renderExportDialog(document.getElementById('exp-company').value, _readExportStatus(), on ? null : new Set());
+}
+async function runExportFromDialog(){
+  const status = _readExportStatus();
+  if(!Object.keys(status).some(k=>status[k])){ alert('Pick at least one status to export.'); return; }
+  const companyId = document.getElementById('exp-company').value;
+  const allSubs = document.getElementById('exp-all-subs').checked;
+  const pickedCodes = allSubs ? null : new Set([...document.querySelectorAll('#exp-sub-list .exp-sub:checked')].map(c=>c.value));
+  if(pickedCodes && !pickedCodes.size){ alert('Pick at least one subdivision, or check "All subdivisions".'); return; }
+  const companyCodes = companyId ? new Set((subdivisions||[]).filter(s=>s.company_id===companyId).map(s=>s.code)) : null;
+  const data = (scheduleLots||[]).filter(l => {
+    if(!status[l.status]) return false;                     // status not selected
+    if(companyCodes && !companyCodes.has(l.community)) return false;
+    if(pickedCodes && !pickedCodes.has(l.community)) return false;
+    return true;
+  });
+  _saveExportPrefs(status, companyId, allSubs, pickedCodes ? [...pickedCodes] : []);   // remember for next time
+  const co = companyId ? (companies||[]).find(c=>c.id===companyId) : null;
+  closeExportDialog();
+  await _generateXlsx(data, co ? co.name : 'All');
+}
+
+async function _generateXlsx(data, tagName) {
   const today = new Date().toISOString().split('T')[0];
-  let data = getFilteredLots();
-  if (!data.length) { alert('No lots match your current filters — nothing to export.'); return; }
+  if (!data || !data.length) { alert('No lots match your selections — nothing to export.'); return; }
 
   const btn = document.querySelector('.topbar-btn.primary'); const label = btn ? btn.textContent : '';
   try { if (btn) btn.textContent = '↓ Loading…'; await ensureExportLibs(); }
@@ -3265,10 +3342,15 @@ async function exportXLSX() {
   const rows = data.map(l => {
     const lp = lotPhases[l.id] || {};
     // Held = reported stage capped below true -> must NOT read "Ready".
-    const isHeld = l.reported_stage && l.true_stage
+    // Only ACTIVE lots are ever "held" or date-status'd — a closed/canceled lot is done.
+    const isHeld = l.status==='active' && l.reported_stage && l.true_stage
       && !isNaN(parseFloat(l.reported_stage)) && !isNaN(parseFloat(l.true_stage))
       && parseFloat(l.reported_stage) < parseFloat(l.true_stage);
-    const closeStatus = isHeld ? 'On Hold'
+    // Short-circuit terminal statuses FIRST — a closed lot must never read Past Due/etc.
+    const closeStatus =
+        l.status==='closed'   ? 'Closed'
+      : l.status==='canceled' ? 'Canceled'
+      : isHeld ? 'On Hold'
       : l.scheduled_close_date && l.scheduled_close_date<today ? 'Past Due'
       : l.scheduled_close_date ? 'Scheduled'
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
@@ -3302,8 +3384,7 @@ async function exportXLSX() {
   ws['!cols'] = hdrs.map((h,c)=>{ let w=String(h).length; for(let r=0;r<nR;r++){ const v=rows[r][c]; if(v!=null) w=Math.max(w, String(v).length); } return {wch:Math.min(Math.max(w+2,8),60)}; });
 
   // filename reflects the active company filter when one is set
-  let tag = 'All';
-  try { const cid=getActiveCompanyId&&getActiveCompanyId(); if(cid){ const co=(companies||[]).find(c=>c.id===cid); if(co&&co.name) tag=co.name.replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,''); } } catch(e){}
+  const tag = String(tagName||'All').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'') || 'All';
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Lots');
   // write to bytes, inject frozen pane (row 1 + col A), then download
