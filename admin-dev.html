@@ -1197,14 +1197,11 @@ function subBadge(community) {
 
 function stageCell(lot) {
   if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
-  // Held = reported capped below true (any hold gate / threshold), generalized from the old 5.9 check.
+  // Held = reported capped below true (any hold gate / threshold). Cell shows only the
+  // stage + a small hold icon; the WHY (gate + message) lives in the click-through legend.
   const held = lot.reported_stage && lot.true_stage && lot.reported_stage!==lot.true_stage && parseFloat(lot.reported_stage)<parseFloat(lot.true_stage);
-  const h = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;');   // guard user-entered message
-  const holdDetail = held
-    ? (lot.hold_gate_name ? ' — ' + h(lot.hold_gate_name) : '') + (lot.hold_message ? ': ' + h(lot.hold_message) : '')
-    : '';
   return '<span class="badge" style="background:#e0f2fe;color:#0369a1;cursor:pointer" onclick="openStageModal(\''+lot.id+'\')" title="View stage legend">' + lot.reported_stage + '</span>'
-    + (held ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚡ held · true ' + lot.true_stage + holdDetail + '</div>' : '');
+    + (held ? ' <span onclick="openStageModal(\''+lot.id+'\')" title="Held — click the stage for details" style="color:var(--amber);font-weight:700;cursor:pointer">⚡</span>' : '');
 }
 
 async function openStageModal(lotId){
@@ -1279,8 +1276,22 @@ async function openStageModal(lotId){
       +'<div id="astg-'+i+'" style="display:none;padding:2px 11px 9px 27px">'+tasksHtml+'</div>'
       +'</div>';
   }).join('');
+  // Generalized hold detail (any gate/threshold) — the WHY the cell no longer shows.
+  // Blocking gate = the one whose hold_stage_code == reported_stage (the cap).
+  let heldDetailHtml = '';
+  if (rep && tru && !isNaN(parseFloat(rep)) && !isNaN(parseFloat(tru)) && parseFloat(rep) < parseFloat(tru)) {
+    const esc2 = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    const blockers = gates.filter(g => !isNaN(parseFloat(g.hold_stage_code)) && parseFloat(g.hold_stage_code) === parseFloat(rep));
+    const names = blockers.map(g=>g.gate_name).filter(Boolean);
+    const msgs  = blockers.map(g=>g.status_message).filter(Boolean);
+    heldDetailHtml = '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px">'
+      + '<div style="font-weight:700;color:#b45309">⚡ Held at '+esc2(rep)+' — actually at stage '+esc2(tru)+'</div>'
+      + (names.length ? '<div style="font-size:13px;color:#92400e;margin-top:4px"><strong>Blocked by:</strong> '+names.map(esc2).join('; ')+'</div>' : '')
+      + (msgs.length  ? '<div style="font-size:13px;color:#92400e;margin-top:2px">'+msgs.map(esc2).join('; ')+'</div>' : '')
+      + '</div>';
+  }
   box.innerHTML = gateHtml
-    + (tru&&tru!==rep ? '<div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚡ This lot is actually at stage '+tru+' but reports 5.9 because utility gates are open.</div>' : '')
+    + heldDetailHtml
     + (stages.length ? '<div style="font-size:11px;color:var(--muted);margin:2px 0 6px">Tap a stage to see the tasks that drive it.</div>' : '')
     + (ladder || '<p style="color:var(--muted);text-align:center;padding:20px">No stage map for this lot\'s template</p>');
 }
