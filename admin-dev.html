@@ -106,6 +106,14 @@ tr:hover td{background:#e5e7eb}
 .modal-overlay.open{display:flex}
 .modal{background:#fff;border-radius:16px;padding:28px;width:520px;max-width:100%}
 .modal-wide{width:820px}
+/* Reusable sticky-header modal: frozen title + × up top, body scrolls beneath. */
+.modal.sticky{padding:0;display:flex;flex-direction:column;max-height:calc(100vh - 80px);overflow:hidden}
+.modal.sticky .modal-head{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 28px 14px;border-bottom:1px solid var(--rule);background:#fff;border-radius:16px 16px 0 0}
+.modal.sticky .modal-head>div{min-width:0}
+.modal.sticky .modal-head h2,.modal.sticky .modal-head h3{margin:0}
+.modal.sticky .modal-body{flex:1 1 auto;overflow-y:auto;padding:18px 28px 24px}
+.modal-x{flex:0 0 auto;background:none;border:none;font-size:26px;line-height:1;color:var(--muted);cursor:pointer;padding:0 2px;margin:-4px -6px 0 0}
+.modal-x:hover{color:var(--ink)}
 .modal h2{font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:4px}
 .modal-sub{color:var(--muted);font-size:13px;margin-bottom:22px}
 .field{margin-bottom:14px}
@@ -2638,13 +2646,16 @@ function renderStagesModal(){
     }
     return h+'</div>';
   }).join('');
-  ov.innerHTML='<div class="modal" style="max-width:620px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-    +  '<h3 style="margin:0">Stage Gates</h3>'
-    +  '<div style="display:flex;gap:6px"><button class="btn" style="background:#0369a1;color:#fff" onclick="openStageEdit(-1)">+ Add Stage</button>'
-    +  '<button class="btn btn-secondary" onclick="closeStagesModal()">Close</button></div></div>'
+  ov.innerHTML='<div class="modal sticky" style="max-width:620px">'
+    +'<div class="modal-head">'
+    +  '<div><h3 style="margin:0">Stage Gates</h3></div>'
+    +  '<div style="display:flex;gap:6px;align-items:center"><button class="btn" style="background:#0369a1;color:#fff" onclick="openStageEdit(-1)">+ Add Stage</button>'
+    +  '<button class="modal-x" type="button" aria-label="Close" onclick="closeStagesModal()">&times;</button></div>'
+    +'</div>'
+    +'<div class="modal-body">'
     +'<p style="color:var(--muted);font-size:12px;margin:0 0 10px">Top→bottom = progression; first stage = new-lot start. Click ▸ to peek at linked tasks; Edit to change name / number / links. Changes save immediately.</p>'
     +(rows||'<p style="color:var(--muted);padding:12px">No stages yet — add one.</p>')
+    +'</div>'
     +'</div>';
 }
 function toggleStagePeek(i){ _stageExpanded=(_stageExpanded===i?-1:i); renderStagesModal(); }
@@ -2764,13 +2775,16 @@ function renderHoldGatesModal(){
     }
     return h+'</div>';
   }).join('');
-  ov.innerHTML='<div class="modal" style="max-width:640px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-    +  '<h3 style="margin:0">Hold Gates</h3>'
-    +  '<div style="display:flex;gap:6px"><button class="btn" style="background:var(--amber);color:#fff" onclick="openHoldGateEdit(-1)">+ Add Hold Gate</button>'
-    +  '<button class="btn btn-secondary" onclick="closeHoldGatesModal()">Close</button></div></div>'
+  ov.innerHTML='<div class="modal sticky" style="max-width:640px">'
+    +'<div class="modal-head">'
+    +  '<div><h3 style="margin:0">Hold Gates</h3></div>'
+    +  '<div style="display:flex;gap:6px;align-items:center"><button class="btn" style="background:var(--amber);color:#fff" onclick="openHoldGateEdit(-1)">+ Add Hold Gate</button>'
+    +  '<button class="modal-x" type="button" aria-label="Close" onclick="closeHoldGatesModal()">&times;</button></div>'
+    +'</div>'
+    +'<div class="modal-body">'
     +'<p style="color:var(--muted);font-size:12px;margin:0 0 10px">Each hold gate blocks a lot from advancing past its threshold stage until every attached task is complete. The status message is what sales sees in the status column &amp; export. Click ▸ to peek; Edit to change. Changes save immediately.</p>'
     +(rows||'<p style="color:var(--muted);padding:12px">No hold gates yet — add one.</p>')
+    +'</div>'
     +'</div>';
 }
 function toggleHoldPeek(i){ _holdExpanded=(_holdExpanded===i?-1:i); renderHoldGatesModal(); }
@@ -3413,6 +3427,32 @@ async function _generateXlsx(data, tagName) {
 
 // ── UTILITY ──
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── Reusable sticky-header modal pattern ────────────────────────────────────
+// Frozen title + × close up top, body scrolls beneath, redundant bottom Close removed.
+// Applied once to the static read/scroll modals; the dynamic gate modals build the
+// same .modal.sticky structure directly in their render functions.
+function stickifyModal(id){
+  const ov=document.getElementById(id); if(!ov) return;
+  const modal=ov.querySelector('.modal'); if(!modal||modal.dataset.sticky) return;
+  const title=modal.querySelector('h2,h3'); if(!title) return;
+  modal.dataset.sticky='1'; modal.classList.add('sticky');
+  const sub=(title.nextElementSibling&&title.nextElementSibling.classList&&title.nextElementSibling.classList.contains('modal-sub'))?title.nextElementSibling:null;
+  const body=document.createElement('div'); body.className='modal-body';
+  while(modal.firstChild) body.appendChild(modal.firstChild);          // move everything into the scroll body
+  body.querySelectorAll('.modal-btns').forEach(bt=>{                   // drop the redundant bottom "Close"
+    const bs=[...bt.querySelectorAll('button')];
+    if(bs.length && bs.every(b=>/close/i.test(b.textContent))) bt.remove();
+    else bs.filter(b=>/^\s*close\s*$/i.test(b.textContent)).forEach(b=>b.remove());
+  });
+  const head=document.createElement('div'); head.className='modal-head';
+  const tw=document.createElement('div');
+  tw.appendChild(title); if(sub) tw.appendChild(sub);                  // title (+subtitle) into the frozen head
+  const x=document.createElement('button'); x.className='modal-x'; x.type='button'; x.setAttribute('aria-label','Close'); x.innerHTML='&times;'; x.onclick=function(){ closeModal(id); };
+  head.appendChild(tw); head.appendChild(x);
+  modal.appendChild(head); modal.appendChild(body);
+}
+['modal-lot-stage','modal-lot-phase','modal-lot-flags','modal-lot-stale','modal-dependents','modal-icon-legend','modal-sub-detail','modal-pred-picker','modal-task','modal-edit-lot'].forEach(stickifyModal);
 </script>
 </body>
 </html>
