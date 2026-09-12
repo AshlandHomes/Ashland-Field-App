@@ -1455,6 +1455,7 @@ function renderLotsTable() {
     return `<tr>
       <td>${subBadge(lot.community)}</td>
       <td><strong>${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
+      <td>${lot.plan_name ? esc(lot.plan_name) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${lot.builder_name||'<span style="color:var(--muted)">—</span>'}</td>
       <td>${stageCell(lot)}</td>
       <td>${phaseCell(lot)}</td>
@@ -1514,7 +1515,7 @@ function renderLotsTable() {
 
   document.getElementById('lots-table-body').innerHTML = `<table>
     <thead><tr>
-      <th>Sub</th><th>Lot</th><th>Builder</th><th>Stage</th><th>Phase</th>
+      <th>Sub</th><th>Lot</th><th>Plan Name</th><th>Builder</th><th>Stage</th><th>Phase</th>
       <th>Start</th><th>Completion<div style="font-size:10px;font-weight:400;color:var(--muted)">proj / baseline</div></th><th>Close</th><th>Activity</th><th>Flags</th><th>Stale</th><th></th>
     </tr></thead>
     <tbody>${activeRows}${closedBlock}</tbody>
@@ -3341,8 +3342,8 @@ async function _generateXlsx(data, tagName) {
 
   const iso = d => d ? (typeof d==='string' ? d.slice(0,10)
     : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))) : '';
-  const hdrs = ['Community','Lot Number','Address','Builder','Stage','True Stage','Start Date','Projected Completion','Baseline Completion','Close Status','Scheduled Close','Hold Status'];
-  const COMM=0, CLOSE=9, HOLD=11;
+  const hdrs = ['Community','Lot Number','Plan Name','Address','Builder','Stage','True Stage','Start Date','Projected Completion','Baseline Completion','Close Status','Scheduled Close','Hold Status'];
+  const COMM=0, CLOSE=10, HOLD=12;   // shifted +1 by the inserted Plan Name column
   const rows = data.map(l => {
     const lp = lotPhases[l.id] || {};
     // Held = reported stage capped below true -> must NOT read "Ready".
@@ -3360,7 +3361,7 @@ async function _generateXlsx(data, tagName) {
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
       : 'Not Yet';
     const holdStatus = isHeld ? (l.hold_message || l.hold_gate_name || 'On hold') : '';
-    return [l.community||'',l.lot_number||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
+    return [l.community||'',l.lot_number||'',l.plan_name||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
   });
 
   // Build the sheet from data, then an ADDITIVE style pass (merge onto existing cells).
