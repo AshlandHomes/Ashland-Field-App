@@ -3250,7 +3250,7 @@ function _xlMerge(XLSX, ws, r, c, style){ const cell = ws[XLSX.utils.encode_cell
 // ── EXPORT DIALOG ───────────────────────────────────────────────────────────
 // Explicit per-export choice (status / company / subdivisions), decoupled from the
 // console's live filters. Opens on the Export button; builds the lot set, then _generateXlsx.
-const EXPORT_STATUSES = [{ key:'active', label:'Active' }, { key:'closed', label:'Closed' }, { key:'canceled', label:'Inactive' }];
+const EXPORT_STATUSES = [{ key:'active', label:'Active' }, { key:'closed', label:'Closed' }, { key:'canceled', label:'Canceled' }];
 // Remember-last-used: persist the last export's picks; first-ever open uses defaults.
 function _loadExportPrefs(){
   try {
