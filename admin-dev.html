@@ -40,7 +40,7 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .topbar-btn:hover{background:rgba(255,255,255,.1)}
 .topbar-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
 
-.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex;align-items:center}
+.nav-tabs{background:#fff;border-bottom:2px solid var(--rule);padding:0 32px;display:flex;align-items:center;max-width:1680px;width:100%;margin:0 auto}
 .nav-tab{padding:14px 20px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap}
 .nav-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
 .nav-tab:hover:not(.active){color:var(--ink)}
@@ -48,7 +48,7 @@ body{font-family:'Instrument Sans',sans-serif;background:#f3f4f6;color:var(--ink
 .nav-legend:hover{background:var(--brand-dark,#0082A0)}
 
 
-.content{flex:1;padding:28px 32px;max-width:1440px;width:100%}
+.content{flex:1;padding:28px 32px;max-width:1680px;width:100%;margin:0 auto}
 .section{display:none}.section.active{display:block}
 
 /* ── STAT CARDS ── */
@@ -1454,7 +1454,7 @@ function renderLotsTable() {
     const id = lot.id; const num = (lot.lot_number||'').replace(/'/g,"\\'");
     return `<tr>
       <td>${subBadge(lot.community)}</td>
-      <td><strong>${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
+      <td><strong style="white-space:nowrap">${lot.lot_number||'—'}</strong>${lot.address?'<div style="font-size:11px;color:var(--muted)">'+lot.address+'</div>':''}</td>
       <td>${lot.plan_name ? esc(lot.plan_name) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${lot.builder_name||'<span style="color:var(--muted)">—</span>'}</td>
       <td>${stageCell(lot)}</td>
