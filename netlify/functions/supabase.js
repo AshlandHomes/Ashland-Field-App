@@ -664,7 +664,12 @@ exports.handler = async function(event) {
           const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=in.(${tids})&select=template_id,stage_code,stage_order&order=stage_order`);
           const firstByTpl = {};
           (smRes.data || []).forEach(s => { if (firstByTpl[s.template_id] === undefined) firstByTpl[s.template_id] = s.stage_code; });
-          lots.forEach(l => { if (!l.reported_stage && firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id]; });
+          lots.forEach(l => {
+            if (!l.reported_stage && l.template_id) {
+              if (firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id];
+              else l.no_stages = true;   // template defines NO stages -> opted out (admin/export/field show "N/A")
+            }
+          });
         }
         // Hold surfacing (compute-on-read): a lot is HELD when reported_stage is
         // capped BELOW true_stage. Piece 4 sets reportedCode = the blocking gate's

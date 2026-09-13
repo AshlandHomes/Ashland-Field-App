@@ -607,7 +607,7 @@ function renderLots(){
     const held=(l.reported_stage&&l.true_stage&&l.reported_stage!==l.true_stage&&parseFloat(l.reported_stage)<parseFloat(l.true_stage));
     return '<div class="lotcard" onclick="openLot(\''+l.id+'\')">'
       +'<div class="lh"><div><div class="num">'+l.lot_number+'</div>'+(l.community?'<div class="comm">'+l.community+'</div>':'')+'</div>'
-      +'<span class="stagebadge'+(held?' held':'')+'">'+l.reported_stage+'</span></div>'
+      +(l.no_stages?'':'<span class="stagebadge'+(held?' held':'')+'">'+l.reported_stage+'</span>')+'</div>'
       +'<div class="lotmeta">'+(l.construction_start_date?'Start: '+l.construction_start_date:'No start date set')+(held?' · ⚡ held at '+l.reported_stage:'')+'</div>'
       +'</div>';
   }).join('');
@@ -762,12 +762,13 @@ function renderSchedule(){
   // Health delta: positive = ahead, negative = behind. Freeze at stamp if all done.
   const healthDelta=isStamped?(curLot.completion_health_delta||0):(planEnd-projEnd);
   const stageNum=parseFloat(st.reportedCode)||0;
+  const noStages=!!curLot.no_stages;   // template defines no stage milestones -> "N/A" (matches admin table + export)
 
   // ── Header bar ──
   let h='<div class="sbar"><div class="r"><div class="num">'+curLot.lot_number
     +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
-    +'</div><div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div></div>'
-    +'<div class="sub">'+(st.held?'⚡ Held at '+st.reportedCode+(st.blockingName?' ('+st.blockingName+')':'')+' — actually '+st.trueCode:st.reportedLabel)+' · finish '+fmt(projEndDate)+'</div></div>';
+    +'</div>'+(noStages?'':'<div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div>')+'</div>'
+    +'<div class="sub">'+(noStages?'No stages defined for this template':(st.held?'⚡ Held at '+st.reportedCode+(st.blockingName?' ('+st.blockingName+')':'')+' — actually '+st.trueCode:st.reportedLabel))+' · finish '+fmt(projEndDate)+'</div></div>';
   h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button></div>';
 
   // ── Stat cards (Items 5+6) ──

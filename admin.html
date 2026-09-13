@@ -1200,6 +1200,7 @@ function subBadge(community) {
 }
 
 function stageCell(lot) {
+  if (lot.no_stages) return '<span style="color:var(--muted)" title="This template has no stages">N/A</span>';
   if (!lot.reported_stage) return '<span style="color:var(--muted)">—</span>';
   // Held = reported capped below true (any hold gate / threshold). Cell shows only the
   // stage + a small hold icon; the WHY (gate + message) lives in the click-through legend.
@@ -3382,7 +3383,8 @@ async function _generateXlsx(data, tagName) {
       : parseFloat(l.reported_stage||0)>=6 ? 'Ready'
       : 'Not Yet';
     const holdStatus = isHeld ? (l.hold_message || l.hold_gate_name || 'On hold') : '';
-    return [l.community||'',l.lot_number||'',l.plan_name||'',l.address||'',l.builder_name||'',l.reported_stage||'',l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
+    const stageCell = l.no_stages ? 'N/A' : (l.reported_stage||'');
+    return [l.community||'',l.lot_number||'',l.plan_name||'',l.address||'',l.builder_name||'',stageCell,l.true_stage||'',iso(l.construction_start_date),iso(lp.projEndDate||''),iso(lp.planEndDate||''),closeStatus,iso(l.scheduled_close_date),holdStatus];
   });
 
   // Build the sheet from data, then an ADDITIVE style pass (merge onto existing cells).
