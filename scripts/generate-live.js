@@ -48,9 +48,16 @@ function generate(src, dst) {
   // 2) strip the "(DEV)" title suffix (field app; admin title has none — no-op there)
   html = html.replace(/<title>([^<]*?)\s*\(DEV\)<\/title>/, '<title>$1</title>');
 
+  // 2b) point the live file at the LIVE manifest. The -dev field app links a
+  //     dev-only manifest (manifest-dev.json: dev start_url + distinct install
+  //     identity) so it installs as its own app; live must use manifest.json.
+  //     Admin has no manifest link — this is a no-op there.
+  html = html.replace(/href="manifest-dev\.json"/g, 'href="manifest.json"');
+
   // 3) hard assertions — never ship a live file with a dev marker
   if (/DEVELOPMENT \/ UAT — NOT FOR BUILDER USE/.test(html)) throw new Error(`${src}: banner text still present after strip`);
   if (/<title>[^<]*\(DEV\)<\/title>/.test(html)) throw new Error(`${src}: "(DEV)" still in title after strip`);
+  if (/manifest-dev\.json/.test(html)) throw new Error(`${src}: dev manifest reference survived — live would install with the dev identity/start_url`);
   if (!/schedule-engine\.js/.test(html)) throw new Error(`${src}: shared engine <script> tag missing — would ship a live file with no engine`);
 
   const outPath = path.join(OUT, dst);

@@ -5,8 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Ashland Field (DEV)</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest-dev.json">
 <meta name="theme-color" content="#00A9D1">
+<!-- Installable-app / standalone launch. apple-* tags cover iOS (which ignores the
+     manifest's display mode on older versions); mobile-web-app-capable is the modern
+     standard. No apple-mobile-web-app-title on purpose — iOS then falls back to the
+     page <title>, so the DEV build's home-screen label reads "(DEV)" and stays
+     visibly distinct from the live app. generate-live.js rewrites the manifest link
+     back to manifest.json for the live file. -->
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--brand:#00A9D1;--brand-light:#e0f6fb;--brand-border:#b3e5f0;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b}
