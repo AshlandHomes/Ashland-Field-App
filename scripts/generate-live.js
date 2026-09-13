@@ -48,16 +48,24 @@ function generate(src, dst) {
   // 2) strip the "(DEV)" title suffix (field app; admin title has none — no-op there)
   html = html.replace(/<title>([^<]*?)\s*\(DEV\)<\/title>/, '<title>$1</title>');
 
-  // 2b) point the live file at the LIVE manifest. The -dev field app links a
-  //     dev-only manifest (manifest-dev.json: dev start_url + distinct install
-  //     identity) so it installs as its own app; live must use manifest.json.
-  //     Admin has no manifest link — this is a no-op there.
+  // 2b) point the live file at LIVE install identity. The -dev field app installs
+  //     as its own app (distinct manifest, icon, home-screen name) so it sits on the
+  //     home screen next to live without confusion; the live file must use the live
+  //     manifest, the live apple-touch icon, and the live home-screen title.
+  //     Admin has none of these links — the replaces are no-ops there.
   html = html.replace(/href="manifest-dev\.json"/g, 'href="manifest.json"');
+  html = html.replace(/href="apple-touch-icon-dev\.png"/g, 'href="apple-touch-icon.png"');
+  html = html.replace(/(<meta name="apple-mobile-web-app-title" content=")Ashland DEV("\s*\/?>)/, '$1Ashland Field$2');
 
   // 3) hard assertions — never ship a live file with a dev marker
   if (/DEVELOPMENT \/ UAT — NOT FOR BUILDER USE/.test(html)) throw new Error(`${src}: banner text still present after strip`);
   if (/<title>[^<]*\(DEV\)<\/title>/.test(html)) throw new Error(`${src}: "(DEV)" still in title after strip`);
-  if (/manifest-dev\.json/.test(html)) throw new Error(`${src}: dev manifest reference survived — live would install with the dev identity/start_url`);
+  // Assert on the REFERENCE forms (href=/content=), not bare substrings — a comment
+  // that merely names a dev asset is harmless; only a live-loaded href or an install
+  // identity would actually leak.
+  if (/href="manifest-dev\.json"/.test(html)) throw new Error(`${src}: dev manifest link survived — live would install with the dev identity/start_url`);
+  if (/href="[^"]*-dev\.png"/.test(html)) throw new Error(`${src}: a dev icon (*-dev.png) link survived — live would show the DEV icon`);
+  if (/content="Ashland DEV"/.test(html)) throw new Error(`${src}: "Ashland DEV" home-screen title survived — live would install labeled DEV`);
   if (!/schedule-engine\.js/.test(html)) throw new Error(`${src}: shared engine <script> tag missing — would ship a live file with no engine`);
 
   const outPath = path.join(OUT, dst);
