@@ -142,28 +142,24 @@
         });
         var a = actualsOf(t);
         var aStartOff = (mode === 'projected' && a.started && a.start) ? actOffset(a.start, startDate) : null;
+        var estOff = (mode === 'projected' && !a.started && t.estStartDate) ? actOffset(t.estStartDate, startDate) : null;
         var start;
         if (aStartOff !== null) {
-          start = aStartOff;                          // actuals are truth — bypass projection & floor
+          start = aStartOff;                          // actuals are truth — bypass projection, override & floor
+        } else if (estOff !== null) {
+          // A manual override WINS over EVERY computed start — the forward driver (pd) AND
+          // the lead-time driver (backDriver, from a negative-lag/procurement link) alike.
+          // Clamp only to the hard floor for the task's dependency kind: a FORWARD-dependent
+          // task can't begin before its predecessors finish (pd); a lead-time or
+          // predecessor-less task may move freely, down to construction start (the start<1
+          // floor below). Successors recompute off this task's finish, so the override
+          // cascades. (Before: the lag<0 branch used backDriver and never read
+          // est_start_date, so overrides on lead-time tasks were silently ignored.)
+          start = (pd !== null) ? Math.max(pd, estOff) : estOff;
+        } else if (t.lag < 0 && backDriver !== null) {
+          start = backDriver;                         // lead-time computed start (no override)
         } else {
-          if (t.lag < 0 && backDriver !== null) {
-            start = backDriver;
-          } else {
-            var baseline = (pd !== null) ? pd : (t.relativeStart != null ? t.relativeStart : 1); // relative_start = FALLBACK only
-            var estOff = (mode === 'projected' && !a.started && t.estStartDate) ? actOffset(t.estStartDate, startDate) : null;
-            if (estOff !== null) {
-              // A manual override DRIVES this task's start and cascades through the normal
-              // forward pass (successors recompute off its finish; completion moves). Clamp
-              // only to the HARD floor: a task WITH predecessors can't begin before they
-              // finish (pd); a task with NO predecessor may move freely — down to
-              // construction start, applied by the start<1 floor below. Previously this was
-              // Math.max(baseline, estOff), which floored an UNCHAINED task at its template
-              // relative-start (rs) and silently swallowed any earlier override — the bug.
-              start = (pd !== null) ? Math.max(pd, estOff) : estOff;
-            } else {
-              start = baseline;
-            }
-          }
+          start = (pd !== null) ? pd : (t.relativeStart != null ? t.relativeStart : 1); // relative_start = FALLBACK only
         }
         if (start < 1) start = 1;                     // global floor: nothing before construction start. Ever.
         var aFinOff = (mode === 'projected' && a.finished && a.finish) ? actOffset(a.finish, startDate) : null;
