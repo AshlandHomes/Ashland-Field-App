@@ -1037,7 +1037,20 @@ async function executePushLot(a){
   // 5) optional note (frozen), then 6) inherited delays (frozen). NOTE: these are
   //    inserts — piece 4 makes them retry-safe; for now they run once per successful drain.
   if (a.note && a.note.text) { const tgt = byNum[a.note.bt_num]; if (tgt) await sbCallRaw('addTaskNote', { lot_task_id:tgt.id, lot_id:a.target.lot_id, bt_num:a.note.bt_num, note:a.note.text, flag:a.note.flag, author:a.builder }); }
-  for (const d of (a.delays || [])) { const tgt = byNum[d.bt_num]; if (tgt) await sbCallRaw('addTaskDelay', { lot_id:a.target.lot_id, lot_task_id:tgt.id, bt_num:d.bt_num, task_name:d.task_name, lot_number:a.target.lot_number, community:a.target.community, builder_name:a.builder, reason_id:d.reason_id, reason_label:d.reason_label, note:d.note, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish, source_lot_id:a.source_lot_id, author:a.builder }); }
+
+  // DELAY INHERITANCE — hybrid: a.delays is a FROZEN array when the push was made ONLINE
+  // (captured at enqueue, same as the old inline path); it is null when the push was made
+  // OFFLINE, in which case we re-read the source lot's delays HERE at drain (always online)
+  // — replay-with-reads, so offline pushes still inherit delays instead of silently skipping.
+  let delays = a.delays;
+  if (delays == null && a.delays_source) {
+    delays = [];
+    for (const bt of (a.delays_source.bts || [])) {
+      const sd = await sbCallRaw('getDelaysForTask', { lot_id: a.delays_source.lot_id, bt_num: bt });
+      if (sd && sd.reason_label) delays.push({ bt_num:bt, reason_id:sd.reason_id, reason_label:sd.reason_label, note:(sd.note||'')+'  (inherited from '+a.source_lot_number+')', task_name:sd.task_name, days_late:sd.days_late, expected_done:sd.expected_done, actual_finish:sd.actual_finish });
+    }
+  }
+  for (const d of (delays || [])) { const tgt = byNum[d.bt_num]; if (tgt) await sbCallRaw('addTaskDelay', { lot_id:a.target.lot_id, lot_task_id:tgt.id, bt_num:d.bt_num, task_name:d.task_name, lot_number:a.target.lot_number, community:a.target.community, builder_name:(a.target.builder_name||a.builder), reason_id:d.reason_id, reason_label:d.reason_label, note:d.note, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish, source_lot_id:a.source_lot_id, author:a.builder }); }
 
   return { done: (res && typeof res.done === 'number') ? res.done : batch.length, notFound: notFound };
 }
@@ -2155,112 +2168,91 @@ document.addEventListener('visibilitychange', ()=>{
 function _bpGuardOn(){ _bpInFlight=true; try{ window.addEventListener('beforeunload', _bpBeforeUnload); }catch(e){} _acquireWakeLock(); }
 function _bpGuardOff(){ _bpInFlight=false; try{ window.removeEventListener('beforeunload', _bpBeforeUnload); }catch(e){} _releaseWakeLock(); }
 
+// Build one push_lot INTENT per selected target. Freezes the SOURCE decision (which task
+// statuses/dates, the note, and — when ONLINE — the source's delays). Target task_ids and
+// the recomputed stage are NOT frozen; the executor re-reads/recomputes them live at drain.
+async function _bpBuildIntents(chosen){
+  let pushed;
+  if(_bpMode==='task'){
+    const s=act[_bpBtNum]||{};
+    pushed=[{bt_num:_bpBtNum, status:(s.finished?'finished':(s.started?'started':'not_started')), actual_start:s.start||null, actual_finish:s.finish||null}];
+  } else {
+    pushed=TASKS.filter(t=>act[t.num]).map(t=>{ const s=act[t.num]; return {bt_num:t.num, status:(s.finished?'finished':(s.started?'started':'not_started')), actual_start:s.start||null, actual_finish:s.finish||null}; });
+  }
+  let note=null;
+  if(_bpMode==='task' && _bpIncludeNote && (_bpNoteText||'').trim()){
+    note={bt_num:_bpBtNum, text:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')', flag:_bpNoteFlag};
+  }
+  // ONLINE: freeze source delays now (same reads the old inline path did at apply). OFFLINE:
+  // leave null + carry delays_source so the executor re-reads them at drain (hybrid).
+  let frozenDelays=null;
+  if(_isOnline){
+    frozenDelays=[];
+    for(const p of pushed){
+      const d=await sbCall('getDelaysForTask',{lot_id:curLot.id, bt_num:p.bt_num});
+      if(d && d.reason_label){ frozenDelays.push({bt_num:p.bt_num, reason_id:d.reason_id, reason_label:d.reason_label, note:(d.note||'')+'  (inherited from '+curLot.lot_number+')', task_name:d.task_name, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish}); }
+    }
+  }
+  return chosen.map(lot=>({
+    kind:'push_lot', apiAction:'__push_lot', type:'push',
+    mode:_bpMode, bt_num:(_bpMode==='task'?_bpBtNum:null),
+    source_lot_id:curLot.id, source_lot_number:curLot.lot_number,
+    pushed:pushed,
+    note: note?{bt_num:note.bt_num, text:note.text, flag:note.flag}:null,
+    delays: frozenDelays,                                  // array (online, frozen) | null (offline -> re-read at drain)
+    delays_source: {lot_id:curLot.id, bts:pushed.map(p=>p.bt_num)},
+    target:{lot_id:lot.id, lot_number:lot.lot_number, community:lot.community, template_id:lot.template_id, builder_name:lot.builder_name||null},
+    builder:currentBuilder
+  }));
+}
+
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
-  _bpProgressScreen(chosen.length);
+  if(!chosen.length) return;
   _bpGuardOn();
+  const intents=await _bpBuildIntents(chosen);
+  const total=intents.length;
 
-  let ok=0, fail=0; const errors=[];
-  const doneLots=[], failedLots=[];
-  const total=chosen.length; let completed=0;
-
-  try{
-  for(const lot of chosen){
-    let lotHadError=false;
-    _bpProgress(completed, total, lot.lot_number);   // bar stays at completed while THIS lot is in flight
-    try{
-      // fetch this target lot's own task rows (its own task_ids per bt_num)
-      const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
-      const rows=(data&&data.tasks)||[];
-      const gates=(data&&data.gates)||[];
-      const byNum={}; rows.forEach(r=>byNum[r.bt_num]=r);
-
-      // local act-map for this TARGET lot, starting from its current state,
-      // then overwritten by whatever we push. Used to compute the target's stage.
-      const tgtAct={};
-      rows.forEach(r=>{ tgtAct[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish}; });
-
-      // collect the writes for this lot, then send them in ONE batch call
-      const batch=[]; let noteToPush=null;
-      const collect=(btNum)=>{
-        const src=act[btNum]; if(!src) return;
-        const tgt=byNum[btNum];
-        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); lotHadError=true; return; }
-        const status=src.finished?'finished':(src.started?'started':'not_started');
-        batch.push({task_id:tgt.id,status:status,actual_start:src.start||null,actual_finish:src.finish||null});
-        tgtAct[btNum]={started:!!src.started||!!src.finished,finished:!!src.finished,start:src.start||null,finish:src.finish||null};
-      };
-
-      if(_bpMode==='task'){
-        collect(_bpBtNum);
-        if(_bpIncludeNote && (_bpNoteText||'').trim()){
-          const tgt=byNum[_bpBtNum];
-          if(tgt){ noteToPush={lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpBtNum,note:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')',flag:_bpNoteFlag,author:currentBuilder}; }
-        }
-      } else {
-        const pushable=TASKS.filter(t=>act[t.num]);
-        pushable.forEach(t=>collect(t.num));
-      }
-
-      // ---- compute this target lot's stage from its NEW task set (client-side) ----
-      // Same shared-engine path as the single-lot computeStage() adapter.
-      let sm=[];
-      if(lot.template_id){ const r=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); sm=(r&&r.stages)||[]; }
-      const finishedT={}; Object.keys(tgtAct).forEach(bt=>{ if(tgtAct[bt]&&tgtAct[bt].finished) finishedT[bt]=true; });
-      const gArr=(gates||[]).map(g=>{
-        const bts=(g.hold_task_bt_nums||[]).map(Number).filter(n=>!isNaN(n));
-        const released = bts.length ? bts.every(bt=>finishedT[bt]) : !!g.confirmed;
-        return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message };
-      });
-      const stComputed=ScheduleEngine.computeStage(sm, finishedT, { gates:gArr });
-      const trueCode=stComputed.trueCode;
-      const reportedCode=(stComputed.reportedCode==='—')?null:stComputed.reportedCode;
-
-      // ONE round-trip: all task writes + the lot stage write
-      const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
-      if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
-      if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
-
-      // INHERIT DELAY REASONS — a push copies a delay that happened on the source lot,
-      // so the target inherits the same reason with source_lot_id set (lets reporting
-      // count BY LOT or BY EVENT). No prompting during push.
-      const btsPushed = (_bpMode==='task') ? [_bpBtNum] : batch.map(b=>{
-        const hit = Object.keys(byNum).find(k=>byNum[k].id===b.task_id); return hit!=null?parseInt(hit):null;
-      }).filter(x=>x!=null);
-      for(const bt of btsPushed){
-        const srcDelay = await sbCall('getDelaysForTask',{lot_id:curLot.id, bt_num:bt});
-        if(srcDelay && srcDelay.reason_label){
-          const tgt = byNum[bt];
-          if(tgt){
-            await sbCall('addTaskDelay',{
-              lot_id:lot.id, lot_task_id:tgt.id, bt_num:bt, task_name:srcDelay.task_name,
-              lot_number:lot.lot_number, community:lot.community, builder_name:lot.builder_name||currentBuilder,
-              reason_id:srcDelay.reason_id, reason_label:srcDelay.reason_label,
-              note:(srcDelay.note||'')+'  (inherited from '+curLot.lot_number+')',
-              days_late:srcDelay.days_late, expected_done:srcDelay.expected_done, actual_finish:srcDelay.actual_finish,
-              source_lot_id:curLot.id, author:currentBuilder
-            });
-          }
-        }
-      }
-      if(lotHadError) failedLots.push(lot.lot_number); else doneLots.push(lot.lot_number);
-    }catch(e){
-      fail++; lotHadError=true; failedLots.push(lot.lot_number);
-      errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
-    }
-    completed++;                          // only AFTER this lot's writes have SETTLED
-    _bpProgress(completed, total, null);  // advance the bar; on the final lot -> 100% "✓ Done"
+  // OFFLINE: enqueue every intent, no drain — durable, syncs on reconnect. Never "0 of N".
+  if(!_isOnline){
+    for(const intent of intents){ await OfflineQueue.enqueue(intent); }
+    _bpGuardOff();
+    try{ await updateSyncStatus(); }catch(e){}
+    _bpClose();
+    alert('⏳ '+total+' lot'+(total===1?'':'s')+' queued — will sync when you\'re back online.\n\n'+intents.map(i=>i.target.lot_number).join(', '));
+    if(typeof loadMyLots==='function'){ await loadMyLots(); }
+    return;
   }
-  } finally { _bpGuardOff(); }            // always release the close-guard
 
-  await new Promise(r=>setTimeout(r, 700));   // let the 100% "✓ Done" bar register before the summary
+  // ONLINE: route each through the durable queue, which drains IMMEDIATELY — same instant
+  // round-trip, same executePushLot writes, same progress + summary as the old inline path.
+  _bpProgressScreen(total);
+  const doneLots=[], failedLots=[]; let completed=0, queuedMid=0;
+  try{
+    for(const intent of intents){
+      _bpProgress(completed, total, intent.target.lot_number);
+      const {result}=await queueAndSync(intent);         // enqueue + (online) drain now
+      if(!_isOnline){ queuedMid++; }                     // transport dropped mid-push -> remaining queued
+      else if(result && result.error){ failedLots.push(intent.target.lot_number); }
+      else { doneLots.push(intent.target.lot_number); }
+      completed++;
+      _bpProgress(completed, total, null);
+    }
+  } finally { _bpGuardOff(); }
+
+  await new Promise(r=>setTimeout(r, 700));
   _bpClose();
-  let msg=doneLots.length+' of '+chosen.length+' lots updated.';
-  if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
-  if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
+  let msg;
+  if(queuedMid>0){
+    msg=doneLots.length+' of '+total+' pushed; '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
+    if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
+  } else {
+    msg=doneLots.length+' of '+total+' lots updated.';
+    if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
+    if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
+  }
   alert(msg);
 
-  // refresh current view so the user sees a clean state
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
 }
 
