@@ -995,12 +995,59 @@ async function probeConnectivity(){
 // drain pending in (timestamp,seq) order. NETWORK error -> we're offline: stop and
 // leave the rest pending (NOT failed). SERVER error (reachable backend) -> markFailed
 // and surface. Success -> markSynced. Returns { actionId: serverResult }.
+// ── DURABLE BULK PUSH — executor (piece 1) ─────────────────────────────────
+// Runs a queued push_lot INTENT at drain time. The queue froze the SOURCE decision
+// (which task statuses/dates, note, inherited delays); the TARGET is re-read LIVE here
+// and its stage RECOMPUTED, so a queued push applies against current state, never a
+// stale snapshot (replay-with-reads). Uses sbCallRaw so a transport failure THROWS —
+// the drain then leaves the row pending for the next reconnect (never a silent drop).
+// This mirrors _bpApply's per-lot body exactly; piece 2 routes _bpApply through here.
+async function executePushLot(a){
+  // 1) re-read the TARGET lot's own task rows (its task_ids per bt_num) + gates
+  const data = await sbCallRaw('getScheduleLotTasks', { lot_id: a.target.lot_id });
+  const rows = (data && data.tasks) || [];
+  const gates = (data && data.gates) || [];
+  const byNum = {}; rows.forEach(r => byNum[r.bt_num] = r);
+
+  // target act-map: current state, then overwritten by what we push (drives the stage)
+  const tgtAct = {};
+  rows.forEach(r => { tgtAct[r.bt_num] = { started:(r.status==='started'||r.status==='finished'), finished:(r.status==='finished'), start:r.actual_start, finish:r.actual_finish }; });
+
+  // 2) build the task-status batch from the FROZEN source intent (a.pushed)
+  const batch = []; const notFound = [];
+  (a.pushed || []).forEach(p => {
+    const tgt = byNum[p.bt_num];
+    if (!tgt) { notFound.push(p.bt_num); return; }           // task absent on target (piece 3 surfaces)
+    batch.push({ task_id:tgt.id, status:p.status, actual_start:p.actual_start||null, actual_finish:p.actual_finish||null });
+    tgtAct[p.bt_num] = { started:(p.status==='started'||p.status==='finished'), finished:(p.status==='finished'), start:p.actual_start||null, finish:p.actual_finish||null };
+  });
+
+  // 3) recompute the target's stage from its NEW task set + gates (shared engine)
+  let sm = [];
+  if (a.target.template_id) { const r = await sbCallRaw('getTemplateStageMap', { template_id: a.target.template_id }); sm = (r && r.stages) || []; }
+  const finishedT = {}; Object.keys(tgtAct).forEach(bt => { if (tgtAct[bt] && tgtAct[bt].finished) finishedT[bt] = true; });
+  const gArr = (gates || []).map(g => { const bts = (g.hold_task_bt_nums||[]).map(Number).filter(n => !isNaN(n)); const released = bts.length ? bts.every(bt => finishedT[bt]) : !!g.confirmed; return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message }; });
+  const st = ScheduleEngine.computeStage(sm, finishedT, { gates: gArr });
+  const reportedCode = (st.reportedCode === '—') ? null : st.reportedCode;
+
+  // 4) ONE round-trip: task writes + the recomputed stage
+  const res = await sbCallRaw('bulkUpdateLotTasks', { updates: batch, lot_id: a.target.lot_id, reported_stage: reportedCode, true_stage: st.trueCode });
+  if (res && res.error) return { error: res.error };
+
+  // 5) optional note (frozen), then 6) inherited delays (frozen). NOTE: these are
+  //    inserts — piece 4 makes them retry-safe; for now they run once per successful drain.
+  if (a.note && a.note.text) { const tgt = byNum[a.note.bt_num]; if (tgt) await sbCallRaw('addTaskNote', { lot_task_id:tgt.id, lot_id:a.target.lot_id, bt_num:a.note.bt_num, note:a.note.text, flag:a.note.flag, author:a.builder }); }
+  for (const d of (a.delays || [])) { const tgt = byNum[d.bt_num]; if (tgt) await sbCallRaw('addTaskDelay', { lot_id:a.target.lot_id, lot_task_id:tgt.id, bt_num:d.bt_num, task_name:d.task_name, lot_number:a.target.lot_number, community:a.target.community, builder_name:a.builder, reason_id:d.reason_id, reason_label:d.reason_label, note:d.note, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish, source_lot_id:a.source_lot_id, author:a.builder }); }
+
+  return { done: (res && typeof res.done === 'number') ? res.done : batch.length, notFound: notFound };
+}
+
 async function drainQueue(){
   const pending = await OfflineQueue.getPending();
   const results = {};
   for (const a of pending){
     let d;
-    try { d = await sbCallRaw(a.apiAction, a.payload); }
+    try { d = (a.kind === 'push_lot') ? await executePushLot(a) : await sbCallRaw(a.apiAction, a.payload); }
     catch(e){ _isOnline = false; break; }              // transport failure = offline
     if (d && d.error){ await OfflineQueue.markFailed(a.id, String(d.error)); }
     else {
