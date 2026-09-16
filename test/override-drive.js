@@ -59,5 +59,16 @@ eq('unchained baseline Y at rs3', ub.Y, 3);
 eq('unchained Y override day1 (earlier) hard-sets (was floored to 3)', runU(at(1)).Y, 1);
 eq('unchained Y override day7 (later)', runU(at(7)).Y, 7);
 
+// ---- LEAD-TIME (negative lag) branch: override must WIN over backDriver (the BG52 task-33 bug) ----
+// Pred(#1) at rs10; Order(#2) links to #1 with lag -6 => lead-time start = pred.start - 6.
+function lead(estB){ return [
+  {num:1,name:'Pred', dur:3,lag:0, preds:[], rs:10,rf:null,type:'work',order:1,est_start_date:null,is_crit:false},
+  {num:2,name:'Order',dur:1,lag:-6,preds:[1],rs:1, rf:null,type:'work',order:2,est_start_date:estB||null,is_crit:false}];}
+const runL = (estB)=>{ const r=SE.computeFieldSchedule(lead(estB),{},sd,'projected'); return {P:r.byNum[1].es, B:r.byNum[2].es}; };
+eq('lead-time baseline: Order = pred.start(10) - 6 = 4 (backDriver, no override)', runL(null).B, 4);
+eq('lead-time override day20 WINS over backDriver (was silently ignored — the bug)', runL(at(20)).B, 20);
+eq('lead-time override day1 wins, clamped to construction start', runL(at(1)).B, 1);
+eq('lead-time override leaves the predecessor unaffected', runL(at(20)).P, 10);
+
 console.log('\n'+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
