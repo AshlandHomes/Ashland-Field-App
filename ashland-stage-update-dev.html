@@ -174,6 +174,8 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-next,.bp-apply{flex:2;background:#00A9D1;border:none;border-radius:9px;padding:13px;font-size:14px;font-weight:700;color:#fff;cursor:pointer}
 .bp-apply{background:#27ae60}
 .bp-apply:disabled{opacity:.6;cursor:default}
+.bp-spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;vertical-align:-2px;margin-right:7px;animation:bpspin .7s linear infinite}
+@keyframes bpspin{to{transform:rotate(360deg)}}
 .bp-pv{background:#f8fafb;border:1px solid #e4e8eb;border-radius:9px;padding:12px;margin:8px 0}
 .bp-pv-line{font-size:13px;color:#34495e;margin:3px 0}
 .bp-pv-warn{font-size:12px;color:#c0392b;margin-top:8px;line-height:1.35}
@@ -1958,9 +1960,23 @@ function _bpRenderNotePicker(){
   document.body.insertAdjacentHTML('beforeend',html);
   document.querySelectorAll('#bp-overlay .bp-lot input').forEach(cb=>{cb.onchange=()=>{_bpSelected[cb.dataset.id]=cb.checked;};});
 }
+// Disable the confirm modal's Apply/Cancel + show a spinner the instant a push/post starts,
+// so it can't be double-tapped and never looks dead. Returns false if already in flight
+// (re-entry guard). The overlay is replaced by the progress screen or dismissed on resolve,
+// so there is nothing to re-enable.
+function _bpBusy(label){
+  const b=document.querySelector('#bp-overlay .bp-apply');
+  if(!b) return true;
+  if(b.disabled) return false;                       // already running -> ignore the double-tap
+  b.disabled=true; b.innerHTML='<span class="bp-spin"></span>'+(label||'Pushing…');
+  const c=document.querySelector('#bp-overlay .bp-cancel'); if(c) c.disabled=true;
+  return true;
+}
+
 async function _bpApplyNote(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length){alert('Select at least one lot.');return;}
+  if(!_bpBusy('Posting…')) return;                   // disable + spinner; ignore a second tap
   _bpProgressScreen(chosen.length);
   _bpGuardOn();
   const doneLots=[],failedLots=[]; const total=chosen.length; let completed=0;
@@ -2248,6 +2264,7 @@ async function _bpBuildIntents(chosen){
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length) return;
+  if(!_bpBusy(_isOnline?'Pushing…':'Queuing…')) return;   // disable + spinner on tap; ignore a second tap
   _bpGuardOn();
   const intents=await _bpBuildIntents(chosen);
   const total=intents.length;
