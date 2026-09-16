@@ -7,6 +7,19 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#00A9D1">
+<!-- Installable-app / standalone launch. apple-* tags cover iOS (which ignores the
+     manifest's display mode on older versions); mobile-web-app-capable is the modern
+     standard. This DEV build installs as its OWN app, visibly distinct from live:
+     its own manifest (manifest-dev.json), a distinct amber "DEV" home-screen icon
+     (apple-touch-icon-dev.png / icon-dev-*.png), and a short home-screen name
+     "Ashland DEV". generate-live.js rewrites all three back to the live identity
+     (manifest.json, apple-touch-icon.png, title "Ashland Field") for the live file. -->
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ashland Field">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--brand:#00A9D1;--brand-light:#e0f6fb;--brand-border:#b3e5f0;--grey:#4C4C4C;--ink:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--green:#1E8449;--red:#c0392b}
@@ -420,12 +433,34 @@ async function _pinHash(builder,pin){
 }
 async function saveSession(builder,pin){
   try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ builder:builder, pinHash:await _pinHash(builder,pin), savedAt:Date.now() })); }catch(e){}
+  await saveOfflineCred(builder,pin);   // persist the credential too — it must SURVIVE logout
 }
 function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||'null'); }catch(e){ return null; } }
 function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+
+// PERSISTENT offline credential — SURVIVES LOGOUT (this is the fix). A builder in the
+// field logs out / closes the app and must still be able to log back in with NO signal.
+// The session (afo_session_v1) is only the "auto-resume this builder on relaunch"
+// pointer and IS cleared on logout; the credential store below is NOT. Keyed per builder
+// (whoever has logged in on this device). Offline login still requires the correct PIN
+// (hash match), so persisting the hash grants no access the PIN itself didn't.
+const CRED_KEY='afo_creds_v1';
+function _loadCreds(){ try{ return JSON.parse(localStorage.getItem(CRED_KEY)||'{}')||{}; }catch(e){ return {}; } }
+async function saveOfflineCred(builder,pin){
+  try{ const c=_loadCreds(); c[builder]=await _pinHash(builder,pin); localStorage.setItem(CRED_KEY, JSON.stringify(c)); }catch(e){}
+}
+function loadOfflineCred(builder){ try{ return _loadCreds()[builder]||null; }catch(e){ return null; } }
+
+// Migrate installs that logged in BEFORE this store existed: seed the persistent cred
+// from an existing session so offline-login-after-logout works without a fresh online
+// login first. (Runs once at load; no-op once the cred is present.)
+try{ const _s=loadSession(); if(_s&&_s.builder&&_s.pinHash){ const _c=_loadCreds(); if(!_c[_s.builder]){ _c[_s.builder]=_s.pinHash; localStorage.setItem(CRED_KEY, JSON.stringify(_c)); } } }catch(e){}
+
+// Verify against the PERSISTENT credential (not the session) so it works after logout.
 async function verifyPinOffline(builder,pin){
-  const s=loadSession(); if(!s||s.builder!==builder||!s.pinHash) return false;
-  return s.pinHash===await _pinHash(builder,pin);
+  const h=loadOfflineCred(builder);
+  if(!h) return false;
+  return h===await _pinHash(builder,pin);
 }
 
 async function loadBuilders(){
