@@ -1022,6 +1022,14 @@ async function executePushLot(a){
     tgtAct[p.bt_num] = { started:(p.status==='started'||p.status==='finished'), finished:(p.status==='finished'), start:p.actual_start||null, finish:p.actual_finish||null };
   });
 
+  // SURFACE (before any write): if nothing matched, this push applies zero writes — FAIL
+  // with the reason (pushed vs target task lists) instead of a no-op that falsely "syncs".
+  if (batch.length === 0) {
+    return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' applied NOTHING — pushed tasks ['
+      + (a.pushed || []).map(p => p.bt_num).join(',') + '] matched none of the target\'s tasks ['
+      + rows.map(r => r.bt_num).join(',') + ']' };
+  }
+
   // 3) recompute the target's stage from its NEW task set + gates (shared engine)
   let sm = [];
   if (a.target.template_id) { const r = await sbCallRaw('getTemplateStageMap', { template_id: a.target.template_id }); sm = (r && r.stages) || []; }
@@ -1052,7 +1060,20 @@ async function executePushLot(a){
   }
   for (const d of (delays || [])) { const tgt = byNum[d.bt_num]; if (tgt) await sbCallRaw('addTaskDelay', { lot_id:a.target.lot_id, lot_task_id:tgt.id, bt_num:d.bt_num, task_name:d.task_name, lot_number:a.target.lot_number, community:a.target.community, builder_name:(a.target.builder_name||a.builder), reason_id:d.reason_id, reason_label:d.reason_label, note:d.note, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish, source_lot_id:a.source_lot_id, author:a.builder }); }
 
-  return { done: (res && typeof res.done === 'number') ? res.done : batch.length, notFound: notFound };
+  return { done: batch.length, notFound: notFound, target_lot: (a.target && a.target.lot_number) };
+}
+
+// Reconnect-drain report for push_lot rows, so failures/partials SURFACE (never silent).
+let _pushDrainReport = [];
+function _surfacePushReport(){
+  const rep = _pushDrainReport; _pushDrainReport = [];
+  const failed  = rep.filter(x => x.error);
+  const partial = rep.filter(x => !x.error && x.notFound && x.notFound.length);
+  if (!failed.length && !partial.length) return;
+  let msg = '';
+  if (failed.length)  msg += '⚠ A queued push did NOT apply:\n' + failed.map(f => '• Lot ' + f.lot + ' — ' + f.error).join('\n');
+  if (partial.length) msg += (msg ? '\n\n' : '') + '⚠ Pushed, but some tasks weren\'t on the target:\n' + partial.map(p => '• Lot ' + p.lot + ' — missing task #' + p.notFound.join(', #')).join('\n');
+  try { alert(msg); } catch(e){}
 }
 
 async function drainQueue(){
@@ -1081,6 +1102,7 @@ async function drainQueue(){
         }
       }
     }
+    if (a.kind === 'push_lot'){ _pushDrainReport.push({ lot:(a.target && a.target.lot_number), error:(d && d.error) || null, notFound:(d && d.notFound) || [] }); }
   }
   return results;
 }
@@ -1113,8 +1135,10 @@ async function syncQueue(){
   try {
     _isOnline = await probeConnectivity();
     if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
+    _pushDrainReport = [];
     const r = await drainQueue();
     await afterDrain(r);
+    _surfacePushReport();                  // NEVER silent: alert any push that failed / partially applied
     if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
     return r;
   } finally { _syncing = false; }
