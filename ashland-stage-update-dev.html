@@ -1067,8 +1067,10 @@ async function executePushLot(a){
   let delays = a.delays;
   if (delays == null && a.delays_source) {
     delays = [];
+    const drows = await sbCallRaw('getDelaysForLot', { lot_id: a.delays_source.lot_id }) || [];  // ONE call
+    const dmap = {}; drows.forEach(d => { if (dmap[d.bt_num] === undefined) dmap[d.bt_num] = d; });
     for (const bt of (a.delays_source.bts || [])) {
-      const sd = await sbCallRaw('getDelaysForTask', { lot_id: a.delays_source.lot_id, bt_num: bt });
+      const sd = dmap[bt];
       if (sd && sd.reason_label) delays.push({ bt_num:bt, reason_id:sd.reason_id, reason_label:sd.reason_label, note:(sd.note||'')+'  (inherited from '+a.source_lot_number+')', task_name:sd.task_name, days_late:sd.days_late, expected_done:sd.expected_done, actual_finish:sd.actual_finish });
     }
   }
@@ -2226,10 +2228,9 @@ async function _bpBuildIntents(chosen){
   let frozenDelays=null;
   if(_isOnline){
     frozenDelays=[];
-    for(const p of pushed){
-      const d=await sbCall('getDelaysForTask',{lot_id:curLot.id, bt_num:p.bt_num});
-      if(d && d.reason_label){ frozenDelays.push({bt_num:p.bt_num, reason_id:d.reason_id, reason_label:d.reason_label, note:(d.note||'')+'  (inherited from '+curLot.lot_number+')', task_name:d.task_name, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish}); }
-    }
+    const drows=await sbCall('getDelaysForLot',{lot_id:curLot.id})||[];        // ONE call (was one per task — the ~30s hang)
+    const dmap={}; drows.forEach(d=>{ if(dmap[d.bt_num]===undefined) dmap[d.bt_num]=d; });  // latest per bt (rows newest-first)
+    for(const p of pushed){ const d=dmap[p.bt_num]; if(d && d.reason_label){ frozenDelays.push({bt_num:p.bt_num, reason_id:d.reason_id, reason_label:d.reason_label, note:(d.note||'')+'  (inherited from '+curLot.lot_number+')', task_name:d.task_name, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish}); } }
   }
   return chosen.map(lot=>({
     kind:'push_lot', apiAction:'__push_lot', type:'push',

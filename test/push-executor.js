@@ -17,6 +17,7 @@ function makeEnv(targetRows, bulkResp){
       {code:'1.0',label:'Rough',order:1,is_manual:false,triggers:[10]},
       {code:'2.0',label:'Final',order:2,is_manual:false,triggers:[20]} ]};
     if (action==='bulkUpdateLotTasks') return bulkResp ? bulkResp(payload) : { done:(payload.updates||[]).length, failed:[] };
+    if (action==='getDelaysForLot') return [{bt_num:10, created_at:'2026-09-05', reason_id:5, reason_label:'Weather', note:'rain', task_name:'Roof', days_late:2, expected_done:'2026-09-01', actual_finish:'2026-09-03'}];
     return {};
   }
   const ctx = { sbCallRaw, ScheduleEngine:SE, console, Promise };
@@ -72,6 +73,17 @@ const truthy=(n,c)=>{c?pass++:fail++;console.log((c?'  ok  - ':'  FAIL- ')+n);};
   env=makeEnv(rows, (p)=>({ done:(p.updates||[]).length, failed:[] }));
   r=await env.exec(baseIntent([{bt_num:10,status:'finished',actual_start:'2026-09-01',actual_finish:'2026-09-02'}]));
   truthy('full server confirmation -> success (no error)', !!(r && r.done===1 && !r.error));
+
+  // 6) OFFLINE-origin delays (delays=null): re-read source delays via ONE getDelaysForLot call
+  env=makeEnv(rows);
+  const offIntent=Object.assign(baseIntent([
+    {bt_num:10,status:'finished',actual_start:'2026-09-01',actual_finish:'2026-09-02'},
+    {bt_num:20,status:'started', actual_start:'2026-09-03',actual_finish:null}]),
+    { delays:null, delays_source:{lot_id:'L10', bts:[10,20]} });
+  r=await env.exec(offIntent);
+  eq('offline re-read uses ONE getDelaysForLot call (not per-task)', env.calls.filter(c=>c.action==='getDelaysForLot').length, 1);
+  truthy('offline re-read: no per-task getDelaysForTask calls', !env.calls.some(c=>c.action==='getDelaysForTask'));
+  truthy('offline re-read: inherited delay written to target', env.calls.some(c=>c.action==='addTaskDelay' && c.payload.lot_task_id==='T10'));
 
   console.log('\n'+pass+' passed, '+fail+' failed');
   process.exit(fail?1:0);
