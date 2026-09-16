@@ -176,6 +176,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-apply:disabled{opacity:.6;cursor:default}
 .bp-spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;vertical-align:-2px;margin-right:7px;animation:bpspin .7s linear infinite}
 @keyframes bpspin{to{transform:rotate(360deg)}}
+html,body{overscroll-behavior-y:contain}
+#ptr{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:center;height:52px;transform:translateY(-60px);transition:transform .18s ease;z-index:60;font-size:13px;font-weight:600;color:var(--brand);pointer-events:none}
+#ptr .ptri{display:inline-block;width:15px;height:15px;border:2px solid var(--brand-border);border-top-color:var(--brand);border-radius:50%;margin-right:8px;vertical-align:-3px;opacity:0}
+#ptr.spin .ptri{opacity:1;animation:bpspin .7s linear infinite}
 .bp-pv{background:#f8fafb;border:1px solid #e4e8eb;border-radius:9px;padding:12px;margin:8px 0}
 .bp-pv-line{font-size:13px;color:#34495e;margin:3px 0}
 .bp-pv-warn{font-size:12px;color:#c0392b;margin-top:8px;line-height:1.35}
@@ -2319,6 +2323,61 @@ async function _bpApply(){
 
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
 }
+
+// ── PULL-TO-REFRESH = sync-now + hard refresh ──────────────────────────────
+// Pull down at the TOP of the subs/lots/schedule screens to drain the durable queue
+// (syncQueue) and reload the visible data — so on reconnect you refresh + push-through
+// without closing/reopening the app. overscroll-behavior:contain (CSS) neutralizes the
+// browser's own pull-to-refresh; in the installed standalone PWA there is none to fight.
+(function(){
+  const ACTIVE=['screen-subs','screen-lots','screen-schedule'];
+  const THRESH=70, MAXPULL=80;
+  let startY=0, pulling=false, armed=false, busy=false, ptr=null, txt=null;
+  function ensureEl(){
+    if(ptr) return;
+    document.body.insertAdjacentHTML('beforeend','<div id="ptr"><span class="ptri"></span><span id="ptr-txt">Pull to sync</span></div>');
+    ptr=document.getElementById('ptr'); txt=document.getElementById('ptr-txt');
+  }
+  function activeScreen(){ const a=document.querySelector('.screen.active'); return a?a.id:null; }
+  function canPull(target){
+    if(busy) return false;
+    if(ACTIVE.indexOf(activeScreen())<0) return false;                 // only on subs/lots/schedule
+    if(target && target.closest && target.closest('[class*="overlay"],[class*="modal"],.editbox')) return false; // not inside a modal
+    return (window.scrollY||document.documentElement.scrollTop||0)<=0; // only at the very top
+  }
+  function reset(){ if(ptr){ ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(-60px)'; ptr.classList.remove('spin'); } }
+  document.addEventListener('touchstart',(e)=>{
+    if(e.touches.length!==1 || !canPull(e.target)){ pulling=false; return; }
+    startY=e.touches[0].clientY; pulling=true; armed=false; ensureEl();
+  },{passive:true});
+  document.addEventListener('touchmove',(e)=>{
+    if(!pulling||busy) return;
+    const dy=e.touches[0].clientY-startY;
+    if(dy<=0 || (window.scrollY||0)>0){ reset(); armed=false; return; }
+    e.preventDefault();                                                // stop native overscroll while we handle the pull
+    const pull=Math.min(dy*0.5, MAXPULL);
+    ptr.style.transition='none'; ptr.style.transform='translateY('+(pull-52)+'px)';
+    armed=dy>THRESH; txt.textContent=armed?'Release to sync':'Pull to sync';
+  },{passive:false});
+  document.addEventListener('touchend',()=>{
+    if(!pulling) return; pulling=false;
+    if(armed && !busy) doRefresh(); else reset();
+  });
+  async function doRefresh(){
+    busy=true; armed=false;
+    ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(0)';
+    ptr.classList.add('spin'); txt.textContent='Syncing…';
+    try{
+      if(typeof syncQueue==='function') await syncQueue();            // drain the durable queue (probe + push-through)
+      if(typeof loadMyLots==='function') await loadMyLots();          // reload lots (re-renders subs)
+      const s=activeScreen();
+      if(s==='screen-lots' && typeof renderLots==='function') renderLots();
+      else if(s==='screen-schedule' && typeof curLot!=='undefined' && curLot && typeof openLot==='function') await openLot(curLot.id);
+    }catch(e){}
+    txt.textContent='Synced';
+    setTimeout(()=>{ reset(); busy=false; }, 500);
+  }
+})();
 
 </script>
 
