@@ -1042,8 +1042,22 @@ async function executePushLot(a){
   const res = await sbCallRaw('bulkUpdateLotTasks', { updates: batch, lot_id: a.target.lot_id, reported_stage: reportedCode, true_stage: st.trueCode });
   if (res && res.error) return { error: res.error };
 
-  // 5) optional note (frozen), then 6) inherited delays (frozen). NOTE: these are
-  //    inserts — piece 4 makes them retry-safe; for now they run once per successful drain.
+  // VERIFY the server actually applied EVERY write — never trust the call blindly. The
+  // server returns { done, failed[] }; a green "synced" is earned only when the whole push
+  // landed. Any shortfall (server-rejected writes, or tasks that weren't on the target)
+  // returns an error so the drain marks it FAILED and it surfaces — no false success.
+  const applied = (res && typeof res.done === 'number') ? res.done : 0;
+  const serverFailed = (res && Array.isArray(res.failed)) ? res.failed : [];
+  if (notFound.length || serverFailed.length || applied < batch.length) {
+    const why = [];
+    if (applied < batch.length) why.push('only ' + applied + ' of ' + batch.length + ' task writes applied');
+    if (serverFailed.length) why.push('server rejected ' + serverFailed.length + ': ' + serverFailed.map(f => (f && f.error) || 'error').join('; '));
+    if (notFound.length) why.push('tasks not on target: #' + notFound.join(', #'));
+    return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
+  }
+
+  // Full task write confirmed. 5) optional note (frozen), then 6) inherited delays (frozen).
+  //    These are inserts — piece 4 makes them retry-safe; for now they run once per success.
   if (a.note && a.note.text) { const tgt = byNum[a.note.bt_num]; if (tgt) await sbCallRaw('addTaskNote', { lot_task_id:tgt.id, lot_id:a.target.lot_id, bt_num:a.note.bt_num, note:a.note.text, flag:a.note.flag, author:a.builder }); }
 
   // DELAY INHERITANCE — hybrid: a.delays is a FROZEN array when the push was made ONLINE
@@ -2236,6 +2250,14 @@ async function _bpApply(){
   _bpGuardOn();
   const intents=await _bpBuildIntents(chosen);
   const total=intents.length;
+
+  // GUARD: if this lot's tasks aren't loaded (source not cached offline), pushed[] is empty
+  // — refuse rather than queue a no-op push that would surface as failed on every target.
+  if(!intents.length || (intents[0].pushed||[]).length===0){
+    _bpGuardOff(); _bpClose();
+    alert('⚠ Can\'t push — this lot\'s tasks aren\'t loaded on your device yet.\nOpen it once while online (let it finish loading), then push.');
+    return;
+  }
 
   // OFFLINE: enqueue every intent, no drain — durable, syncs on reconnect. Never "0 of N".
   if(!_isOnline){

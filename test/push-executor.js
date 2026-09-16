@@ -8,7 +8,7 @@ const E = require('../schedule-engine.js'); const SE = (typeof E==='function')?E
 const html = fs.readFileSync(__dirname + '/../ashland-stage-update-dev.html','utf8');
 const CODE = html.slice(html.indexOf('async function executePushLot(a){'), html.indexOf('async function drainQueue(){'));
 
-function makeEnv(targetRows){
+function makeEnv(targetRows, bulkResp){
   const calls = [];
   async function sbCallRaw(action, payload){
     calls.push({action, payload});
@@ -16,7 +16,7 @@ function makeEnv(targetRows){
     if (action==='getTemplateStageMap') return { stages: [
       {code:'1.0',label:'Rough',order:1,is_manual:false,triggers:[10]},
       {code:'2.0',label:'Final',order:2,is_manual:false,triggers:[20]} ]};
-    if (action==='bulkUpdateLotTasks') return { done:(payload.updates||[]).length, failed:[] };
+    if (action==='bulkUpdateLotTasks') return bulkResp ? bulkResp(payload) : { done:(payload.updates||[]).length, failed:[] };
     return {};
   }
   const ctx = { sbCallRaw, ScheduleEngine:SE, console, Promise };
@@ -58,6 +58,20 @@ const truthy=(n,c)=>{c?pass++:fail++;console.log((c?'  ok  - ':'  FAIL- ')+n);};
   truthy('empty batch returns an ERROR (never a silent success)', !!(r && r.error));
   truthy('error names pushed vs target tasks (diagnostic)', /pushed tasks \[99\].*target/.test(r.error||''));
   truthy('empty batch did NOT call bulkUpdateLotTasks', !env.calls.some(c=>c.action==='bulkUpdateLotTasks'));
+
+  // 4) SERVER-REJECTED write: server confirms only 1 of 2 -> ERROR (never false success)
+  env=makeEnv(rows, (p)=>({ done:1, failed:[{task_id:'T20', error:'date impossible'}] }));
+  r=await env.exec(baseIntent([
+    {bt_num:10,status:'finished',actual_start:'2026-09-01',actual_finish:'2026-09-02'},
+    {bt_num:20,status:'started', actual_start:'2026-09-03',actual_finish:null}]));
+  truthy('server rejected a write -> ERROR (not synced)', !!(r && r.error));
+  truthy('error reports the shortfall/server rejection', /only 1 of 2|server rejected/.test(r.error||''));
+  truthy('incomplete push does NOT post note/delay', !env.calls.some(c=>c.action==='addTaskNote'||c.action==='addTaskDelay'));
+
+  // 5) FULL success only when server confirms every write
+  env=makeEnv(rows, (p)=>({ done:(p.updates||[]).length, failed:[] }));
+  r=await env.exec(baseIntent([{bt_num:10,status:'finished',actual_start:'2026-09-01',actual_finish:'2026-09-02'}]));
+  truthy('full server confirmation -> success (no error)', !!(r && r.done===1 && !r.error));
 
   console.log('\n'+pass+' passed, '+fail+' failed');
   process.exit(fail?1:0);
