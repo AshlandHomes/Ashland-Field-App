@@ -149,10 +149,19 @@
           if (t.lag < 0 && backDriver !== null) {
             start = backDriver;
           } else {
-            start = (pd !== null) ? pd : (t.relativeStart != null ? t.relativeStart : 1); // relative_start = FALLBACK only
-            if (mode === 'projected' && !a.started && t.estStartDate) {
-              var estOff = actOffset(t.estStartDate, startDate);
-              if (estOff !== null) start = Math.max(start, estOff);   // est_start_date = FLOOR
+            var baseline = (pd !== null) ? pd : (t.relativeStart != null ? t.relativeStart : 1); // relative_start = FALLBACK only
+            var estOff = (mode === 'projected' && !a.started && t.estStartDate) ? actOffset(t.estStartDate, startDate) : null;
+            if (estOff !== null) {
+              // A manual override DRIVES this task's start and cascades through the normal
+              // forward pass (successors recompute off its finish; completion moves). Clamp
+              // only to the HARD floor: a task WITH predecessors can't begin before they
+              // finish (pd); a task with NO predecessor may move freely — down to
+              // construction start, applied by the start<1 floor below. Previously this was
+              // Math.max(baseline, estOff), which floored an UNCHAINED task at its template
+              // relative-start (rs) and silently swallowed any earlier override — the bug.
+              start = (pd !== null) ? Math.max(pd, estOff) : estOff;
+            } else {
+              start = baseline;
             }
           }
         }
@@ -176,16 +185,18 @@
           var aStartOff = (a.started && a.start) ? actOffset(a.start, startDate) : null;
           var aFinOff = (a.finished && a.finish) ? actOffset(a.finish, startDate) : null;
           var estOff = (!a.started && t.estStartDate) ? actOffset(t.estStartDate, startDate) : null;
-          var floorOff = null;
-          if (!a.started && !a.finished) {
-            if (estOff !== null) floorOff = estOff;
-          }
           var slip = 0;
           if (aFinOff !== null) slip = aFinOff - (rs + t.duration - 1);
           else if (aStartOff !== null) slip = aStartOff - rs;
-          else if (floorOff !== null) slip = Math.max(0, floorOff - rs);
           maxSlip = Math.max(maxSlip, slip);
-          es[t.num] = rs + maxSlip;
+          if (estOff !== null && aStartOff === null && aFinOff === null) {
+            // Manual override on an UNCHAINED task = hard placement (both directions),
+            // clamped to construction start. Same intent as the predecessor branch: the
+            // override drives the date instead of being floored at the template start (rs).
+            es[t.num] = Math.max(1, estOff);
+          } else {
+            es[t.num] = rs + maxSlip;
+          }
           ef[t.num] = (aFinOff !== null) ? aFinOff : es[t.num] + t.duration - 1;
         } else {
           es[t.num] = rs;
