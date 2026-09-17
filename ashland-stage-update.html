@@ -174,6 +174,12 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-next,.bp-apply{flex:2;background:#00A9D1;border:none;border-radius:9px;padding:13px;font-size:14px;font-weight:700;color:#fff;cursor:pointer}
 .bp-apply{background:#27ae60}
 .bp-apply:disabled{opacity:.6;cursor:default}
+.bp-spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;vertical-align:-2px;margin-right:7px;animation:bpspin .7s linear infinite}
+@keyframes bpspin{to{transform:rotate(360deg)}}
+html,body{overscroll-behavior-y:contain}
+#ptr{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:center;height:52px;transform:translateY(-60px);transition:transform .18s ease;z-index:60;font-size:13px;font-weight:600;color:var(--brand);pointer-events:none}
+#ptr .ptri{display:inline-block;width:15px;height:15px;border:2px solid var(--brand-border);border-top-color:var(--brand);border-radius:50%;margin-right:8px;vertical-align:-3px;opacity:0}
+#ptr.spin .ptri{opacity:1;animation:bpspin .7s linear infinite}
 .bp-pv{background:#f8fafb;border:1px solid #e4e8eb;border-radius:9px;padding:12px;margin:8px 0}
 .bp-pv-line{font-size:13px;color:#34495e;margin:3px 0}
 .bp-pv-warn{font-size:12px;color:#c0392b;margin-top:8px;line-height:1.35}
@@ -978,6 +984,14 @@ function renderTasks(){
 // recompute the derived side-effects (reported_stage, completion stamp).
 let _isOnline = (typeof navigator !== 'undefined') ? (navigator.onLine !== false) : true;
 let _syncing = false, _reconnectTimer = null;
+// The in-flight sync (coalesced): a second syncQueue() call while one is running
+// AWAITS the same drain instead of returning an empty result — so pull-to-refresh
+// reflects the REAL outcome, never a false "Synced".
+let _syncPromise = null;
+// Bounded auto-retry for push_lot rows left PENDING by a transient failure, while
+// still online (so they don't sit until the next manual pull / app reopen).
+let _pushRetryTimer = null, _pushRetryCount = 0;
+const _PUSH_RETRY_MAX = 5;
 
 // TRUE connectivity: navigator.onLine only proves the radio is up (lies on a
 // captive wifi with no real internet), so we also confirm OUR backend answered.
@@ -994,14 +1008,174 @@ async function probeConnectivity(){
 // drain pending in (timestamp,seq) order. NETWORK error -> we're offline: stop and
 // leave the rest pending (NOT failed). SERVER error (reachable backend) -> markFailed
 // and surface. Success -> markSynced. Returns { actionId: serverResult }.
+// ── DURABLE BULK PUSH — executor (piece 1) ─────────────────────────────────
+// Runs a queued push_lot INTENT at drain time. The queue froze the SOURCE decision
+// (which task statuses/dates, note, inherited delays); the TARGET is re-read LIVE here
+// and its stage RECOMPUTED, so a queued push applies against current state, never a
+// stale snapshot (replay-with-reads). Uses sbCallRaw so a transport failure THROWS —
+// the drain then leaves the row pending for the next reconnect (never a silent drop).
+// This mirrors _bpApply's per-lot body exactly; piece 2 routes _bpApply through here.
+// Error shapes it returns carry `permanent`: TRUE = structural, will never self-heal
+// (the pushed tasks simply don't exist on the target) → the drain retains it as a
+// surfaced 'failed'. FALSE/absent = transient (bad target read, momentary server
+// error, partial write) → the drain leaves it PENDING so it retries on the next
+// sync. A queued push is thus NEVER removed until it has actually, fully applied.
+async function executePushLot(a){
+  // 1) re-read the TARGET lot's own task rows (its task_ids per bt_num) + gates
+  const data = await sbCallRaw('getScheduleLotTasks', { lot_id: a.target.lot_id });
+  // A failed/empty TARGET READ is transient (server hiccup, reconnect race, not-yet-
+  // loaded lot) — NOT a reason to drop the push. Return a non-permanent error so the
+  // drain keeps it pending and retries; never markFailed on a read we couldn't trust.
+  if (data && data.error) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — could not read the target lot (' + data.error + '); will retry' };
+  const rows = (data && data.tasks) || [];
+  if (!rows.length) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — target lot returned no tasks (not loaded yet?); will retry' };
+  const gates = (data && data.gates) || [];
+  const byNum = {}; rows.forEach(r => byNum[r.bt_num] = r);
+
+  // target act-map: current state, then overwritten by what we push (drives the stage)
+  const tgtAct = {};
+  rows.forEach(r => { tgtAct[r.bt_num] = { started:(r.status==='started'||r.status==='finished'), finished:(r.status==='finished'), start:r.actual_start, finish:r.actual_finish }; });
+
+  // 2) build the task-status batch from the FROZEN source intent (a.pushed)
+  const batch = []; const notFound = [];
+  (a.pushed || []).forEach(p => {
+    const tgt = byNum[p.bt_num];
+    if (!tgt) { notFound.push(p.bt_num); return; }           // task absent on target (piece 3 surfaces)
+    batch.push({ task_id:tgt.id, status:p.status, actual_start:p.actual_start||null, actual_finish:p.actual_finish||null });
+    tgtAct[p.bt_num] = { started:(p.status==='started'||p.status==='finished'), finished:(p.status==='finished'), start:p.actual_start||null, finish:p.actual_finish||null };
+  });
+
+  // SURFACE (before any write): if nothing matched, this push applies zero writes — FAIL
+  // with the reason (pushed vs target task lists) instead of a no-op that falsely "syncs".
+  if (batch.length === 0) {
+    return { permanent: true, error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' applied NOTHING — pushed tasks ['
+      + (a.pushed || []).map(p => p.bt_num).join(',') + '] matched none of the target\'s tasks ['
+      + rows.map(r => r.bt_num).join(',') + ']' };
+  }
+
+  // 2b) PUSH THE GATE STATE — "entire lot status" includes the MANUAL hold gates.
+  // A builder unchecking a utility gate on the source (holding it at, e.g., 5.9) must
+  // hold the target the SAME way; a task-status push alone leaves the target's gate
+  // released, so its stage never drops. Manual gates are matched across lots by
+  // source_gate_id (the shared TEMPLATE gate). We mirror the source's confirmed flag
+  // onto the target: update the in-memory gate so the stage recompute below reflects
+  // it, and record a persist write. updateScheduleLotGate is idempotent (sets a flag),
+  // so a retry can't double-apply. Task-driven gates (hold_task_bt_nums present) carry
+  // no manual state — their release is derived from task completion, already pushed.
+  const gateWrites = []; const gateMisses = [];
+  if (Array.isArray(a.gates) && a.gates.length) {
+    const tgtBySrc = {}; gates.forEach(g => { if (g.source_gate_id != null) tgtBySrc[g.source_gate_id] = g; });
+    a.gates.forEach(sg => {
+      if (sg.hold_task_bt_nums && sg.hold_task_bt_nums.length) return;   // task-driven: not a manual confirm
+      const tg = tgtBySrc[sg.source_gate_id];
+      if (!tg) return;                                    // gate not on this target (different template) — skip
+      if (!!tg.confirmed === !!sg.confirmed) return;      // already matches — nothing to do
+      tg.confirmed = !!sg.confirmed;                      // reflect in the stage recompute below
+      if (tg.id != null) gateWrites.push({ gate_id: tg.id, confirmed: !!sg.confirmed });
+      else gateMisses.push(sg.gate_name || sg.source_gate_id);   // no lot gate-state row to patch (surfaced, non-fatal)
+    });
+  }
+
+  // 3) recompute the target's stage from its NEW task set + gates (shared engine)
+  let sm = [];
+  if (a.target.template_id) { const r = await sbCallRaw('getTemplateStageMap', { template_id: a.target.template_id }); sm = (r && r.stages) || []; }
+  const finishedT = {}; Object.keys(tgtAct).forEach(bt => { if (tgtAct[bt] && tgtAct[bt].finished) finishedT[bt] = true; });
+  const gArr = (gates || []).map(g => { const bts = (g.hold_task_bt_nums||[]).map(Number).filter(n => !isNaN(n)); const released = bts.length ? bts.every(bt => finishedT[bt]) : !!g.confirmed; return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message }; });
+  const st = ScheduleEngine.computeStage(sm, finishedT, { gates: gArr });
+  const reportedCode = (st.reportedCode === '—') ? null : st.reportedCode;
+
+  // 3b) persist the gate confirmations FIRST (so state is consistent before the stage
+  // write). A gate write failure is TRANSIENT (no permanent flag) → the drain keeps the
+  // push pending and retries; idempotent, so re-running is safe.
+  for (const gw of gateWrites) {
+    const gr = await sbCallRaw('updateScheduleLotGate', gw);
+    if (gr && gr.error) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — gate update failed (' + gr.error + '); will retry' };
+  }
+
+  // 4) ONE round-trip: task writes + the recomputed stage
+  const res = await sbCallRaw('bulkUpdateLotTasks', { updates: batch, lot_id: a.target.lot_id, reported_stage: reportedCode, true_stage: st.trueCode });
+  if (res && res.error) return { error: res.error };
+
+  // VERIFY the server actually applied EVERY write — never trust the call blindly. The
+  // server returns { done, failed[] }; a green "synced" is earned only when the whole push
+  // landed. Any shortfall (server-rejected writes, or tasks that weren't on the target)
+  // returns an error so the drain marks it FAILED and it surfaces — no false success.
+  const applied = (res && typeof res.done === 'number') ? res.done : 0;
+  const serverFailed = (res && Array.isArray(res.failed)) ? res.failed : [];
+  if (notFound.length || serverFailed.length || applied < batch.length) {
+    const why = [];
+    if (applied < batch.length) why.push('only ' + applied + ' of ' + batch.length + ' task writes applied');
+    if (serverFailed.length) why.push('server rejected ' + serverFailed.length + ': ' + serverFailed.map(f => (f && f.error) || 'error').join('; '));
+    if (notFound.length) why.push('tasks not on target: #' + notFound.join(', #'));
+    // PERMANENT only when the sole shortfall is structural (tasks that don't exist on the
+    // target — they will never appear). A server rejection or a short write count is
+    // TRANSIENT: leave it pending and retry (task writes are idempotent; note/delay have
+    // not run yet, so a retry can't double-post them).
+    const permanent = notFound.length > 0 && serverFailed.length === 0 && applied >= batch.length;
+    return { permanent: permanent, error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
+  }
+
+  // Full task write confirmed. 5) optional note (frozen), then 6) inherited delays (frozen).
+  //    These are inserts — piece 4 makes them retry-safe; for now they run once per success.
+  if (a.note && a.note.text) { const tgt = byNum[a.note.bt_num]; if (tgt) await sbCallRaw('addTaskNote', { lot_task_id:tgt.id, lot_id:a.target.lot_id, bt_num:a.note.bt_num, note:a.note.text, flag:a.note.flag, author:a.builder }); }
+
+  // DELAY INHERITANCE — hybrid: a.delays is a FROZEN array when the push was made ONLINE
+  // (captured at enqueue, same as the old inline path); it is null when the push was made
+  // OFFLINE, in which case we re-read the source lot's delays HERE at drain (always online)
+  // — replay-with-reads, so offline pushes still inherit delays instead of silently skipping.
+  let delays = a.delays;
+  if (delays == null && a.delays_source) {
+    delays = [];
+    const drows = await sbCallRaw('getDelaysForLot', { lot_id: a.delays_source.lot_id }) || [];  // ONE call
+    const dmap = {}; drows.forEach(d => { if (dmap[d.bt_num] === undefined) dmap[d.bt_num] = d; });
+    for (const bt of (a.delays_source.bts || [])) {
+      const sd = dmap[bt];
+      if (sd && sd.reason_label) delays.push({ bt_num:bt, reason_id:sd.reason_id, reason_label:sd.reason_label, note:(sd.note||'')+'  (inherited from '+a.source_lot_number+')', task_name:sd.task_name, days_late:sd.days_late, expected_done:sd.expected_done, actual_finish:sd.actual_finish });
+    }
+  }
+  for (const d of (delays || [])) { const tgt = byNum[d.bt_num]; if (tgt) await sbCallRaw('addTaskDelay', { lot_id:a.target.lot_id, lot_task_id:tgt.id, bt_num:d.bt_num, task_name:d.task_name, lot_number:a.target.lot_number, community:a.target.community, builder_name:(a.target.builder_name||a.builder), reason_id:d.reason_id, reason_label:d.reason_label, note:d.note, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish, source_lot_id:a.source_lot_id, author:a.builder }); }
+
+  return { done: batch.length, notFound: notFound, gatesApplied: gateWrites.length, gateMisses: gateMisses, target_lot: (a.target && a.target.lot_number) };
+}
+
+// Reconnect-drain report for push_lot rows, so failures/partials SURFACE (never silent).
+let _pushDrainReport = [];
+function _surfacePushReport(){
+  const rep = _pushDrainReport; _pushDrainReport = [];
+  // retrying = failed for a transient reason but STILL QUEUED (not lost) → will retry.
+  const retrying = rep.filter(x => x.error && x.retrying);
+  const failed   = rep.filter(x => x.error && !x.retrying);
+  const partial  = rep.filter(x => !x.error && x.notFound && x.notFound.length);
+  if (!retrying.length && !failed.length && !partial.length) return;
+  let msg = '';
+  if (failed.length)   msg += '⚠ A queued push did NOT apply:\n' + failed.map(f => '• Lot ' + f.lot + ' — ' + f.error).join('\n');
+  if (partial.length)  msg += (msg ? '\n\n' : '') + '⚠ Pushed, but some tasks weren\'t on the target:\n' + partial.map(p => '• Lot ' + p.lot + ' — missing task #' + p.notFound.join(', #')).join('\n');
+  // Still-queued pushes: reassure — nothing lost, it will apply on the next sync.
+  if (retrying.length) msg += (msg ? '\n\n' : '') + '⏳ Still queued (will retry — nothing lost):\n' + retrying.map(r => '• Lot ' + r.lot + ' — ' + r.error).join('\n');
+  try { alert(msg); } catch(e){}
+}
+
 async function drainQueue(){
   const pending = await OfflineQueue.getPending();
   const results = {};
   for (const a of pending){
     let d;
-    try { d = await sbCallRaw(a.apiAction, a.payload); }
+    try { d = (a.kind === 'push_lot') ? await executePushLot(a) : await sbCallRaw(a.apiAction, a.payload); }
     catch(e){ _isOnline = false; break; }              // transport failure = offline
-    if (d && d.error){ await OfflineQueue.markFailed(a.id, String(d.error)); }
+    let leftPending = false;
+    if (d && d.error){
+      // A push_lot that failed for a TRANSIENT reason MUST NOT be marked failed —
+      // markFailed removes it from getPending() so it would never retry, and the
+      // builder's queued push would be silently lost (Collin's hard rule: NEVER lose
+      // a queued action until it has actually applied). Leave it PENDING so the next
+      // sync retries it; only a PERMANENT (structural) failure is retained as 'failed'
+      // (still not deleted — surfaced loudly). Non-push actions keep the old behavior.
+      if (a.kind === 'push_lot' && !d.permanent){
+        leftPending = true;                            // stays 'pending' → retried next sync
+      } else {
+        await OfflineQueue.markFailed(a.id, String(d.error));
+      }
+    }
     else {
       results[a.id] = d; await OfflineQueue.markSynced(a.id);
       // If this action CREATED a server note (addTaskNote made offline, local id =
@@ -1020,6 +1194,7 @@ async function drainQueue(){
         }
       }
     }
+    if (a.kind === 'push_lot'){ _pushDrainReport.push({ lot:(a.target && a.target.lot_number), error:(d && d.error) || null, notFound:(d && d.notFound) || [], retrying: leftPending }); }
   }
   return results;
 }
@@ -1038,6 +1213,7 @@ async function queueAndSync(def){
     const r = await drainQueue();                     // fast path — same sbCall round-trip as before
     result = r[action.id] || null;
     await afterDrain(r);
+    await _schedulePushRetryIfPending();              // a push left pending by a transient failure retries automatically (never lost)
   } else {
     startReconnectWatch();
     await updateSyncStatus();
@@ -1045,18 +1221,45 @@ async function queueAndSync(def){
   return { action, result };
 }
 
-// Full sync pass (reconnect / 'online' event / manual): PROBE first, then drain.
-async function syncQueue(){
-  if (_syncing) return {};
+// Full sync pass (reconnect / 'online' event / manual / pull-to-refresh): PROBE
+// first, then drain. COALESCED — if a sync is already running, callers AWAIT it and
+// get its real result (pull-to-refresh must never report "Synced" while the drain it
+// thinks it triggered was actually a no-op early-return).
+function syncQueue(){
+  if (_syncing && _syncPromise) return _syncPromise;   // await the in-flight sync
   _syncing = true;
-  try {
-    _isOnline = await probeConnectivity();
-    if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
-    const r = await drainQueue();
-    await afterDrain(r);
-    if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
-    return r;
-  } finally { _syncing = false; }
+  _syncPromise = (async () => {
+    try {
+      _isOnline = await probeConnectivity();
+      if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
+      _pushDrainReport = [];
+      const r = await drainQueue();
+      await afterDrain(r);
+      _surfacePushReport();                  // NEVER silent: alert any push that failed / partially applied / still-queued
+      if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
+      await _schedulePushRetryIfPending();   // any push left PENDING by a transient failure → retry (never lost)
+      return r;
+    } finally { _syncing = false; _syncPromise = null; }
+  })();
+  return _syncPromise;
+}
+
+// If any push_lot row is still PENDING after a drain (a transient failure left it in
+// the queue so it can't be lost), retry it automatically — bounded backoff — instead
+// of waiting for the next manual pull. A CONFIRMED apply clears it; the counter resets
+// whenever a fresh sync starts making progress. Never deletes; only retries.
+async function _schedulePushRetryIfPending(){
+  if (_pushRetryTimer) return;
+  let pend = [];
+  try { pend = (await OfflineQueue.getPending()).filter(a => a.kind === 'push_lot'); } catch(e){ return; }
+  if (!pend.length){ _pushRetryCount = 0; return; }        // all applied → done
+  if (_pushRetryCount >= _PUSH_RETRY_MAX) return;          // stop auto-retrying; stays queued, retried on next manual pull / reopen (still never lost)
+  _pushRetryCount++;
+  const delay = Math.min(30000, 3000 * Math.pow(2, _pushRetryCount - 1));   // 3s,6s,12s,24s,30s
+  _pushRetryTimer = setTimeout(async () => {
+    _pushRetryTimer = null;
+    if (_isOnline) { try { await syncQueue(); } catch(e){} }
+  }, delay);
 }
 
 // While offline, poll for reconnect (the 'online' event is unreliable on mobile).
@@ -1857,9 +2060,23 @@ function _bpRenderNotePicker(){
   document.body.insertAdjacentHTML('beforeend',html);
   document.querySelectorAll('#bp-overlay .bp-lot input').forEach(cb=>{cb.onchange=()=>{_bpSelected[cb.dataset.id]=cb.checked;};});
 }
+// Disable the confirm modal's Apply/Cancel + show a spinner the instant a push/post starts,
+// so it can't be double-tapped and never looks dead. Returns false if already in flight
+// (re-entry guard). The overlay is replaced by the progress screen or dismissed on resolve,
+// so there is nothing to re-enable.
+function _bpBusy(label){
+  const b=document.querySelector('#bp-overlay .bp-apply');
+  if(!b) return true;
+  if(b.disabled) return false;                       // already running -> ignore the double-tap
+  b.disabled=true; b.innerHTML='<span class="bp-spin"></span>'+(label||'Pushing…');
+  const c=document.querySelector('#bp-overlay .bp-cancel'); if(c) c.disabled=true;
+  return true;
+}
+
 async function _bpApplyNote(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length){alert('Select at least one lot.');return;}
+  if(!_bpBusy('Posting…')) return;                   // disable + spinner; ignore a second tap
   _bpProgressScreen(chosen.length);
   _bpGuardOn();
   const doneLots=[],failedLots=[]; const total=chosen.length; let completed=0;
@@ -2107,114 +2324,195 @@ document.addEventListener('visibilitychange', ()=>{
 function _bpGuardOn(){ _bpInFlight=true; try{ window.addEventListener('beforeunload', _bpBeforeUnload); }catch(e){} _acquireWakeLock(); }
 function _bpGuardOff(){ _bpInFlight=false; try{ window.removeEventListener('beforeunload', _bpBeforeUnload); }catch(e){} _releaseWakeLock(); }
 
+// Build one push_lot INTENT per selected target. Freezes the SOURCE decision (which task
+// statuses/dates, the note, and — when ONLINE — the source's delays). Target task_ids and
+// the recomputed stage are NOT frozen; the executor re-reads/recomputes them live at drain.
+async function _bpBuildIntents(chosen){
+  let pushed;
+  if(_bpMode==='task'){
+    const s=act[_bpBtNum]||{};
+    pushed=[{bt_num:_bpBtNum, status:(s.finished?'finished':(s.started?'started':'not_started')), actual_start:s.start||null, actual_finish:s.finish||null}];
+  } else {
+    pushed=TASKS.filter(t=>act[t.num]).map(t=>{ const s=act[t.num]; return {bt_num:t.num, status:(s.finished?'finished':(s.started?'started':'not_started')), actual_start:s.start||null, actual_finish:s.finish||null}; });
+  }
+  let note=null;
+  if(_bpMode==='task' && _bpIncludeNote && (_bpNoteText||'').trim()){
+    note={bt_num:_bpBtNum, text:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')', flag:_bpNoteFlag};
+  }
+  // Freeze the source lot's MANUAL hold-gate states (utility gates the builder checks/
+  // unchecks). "Push entire lot status" must carry these too — a task-status-only push
+  // leaves the target's gate released, so an unchecked gate never holds the target down.
+  // In-memory already (loaded with the lot; reflects offline toggles), so freeze for
+  // both online and offline. Matched to the target by source_gate_id (template gate).
+  // ONLY in "entire lot status" (lot) mode — a single-task push copies one task, not
+  // the lot's gate state.
+  const srcGates = (_bpMode==='lot' && typeof lotGates !== 'undefined' && Array.isArray(lotGates)) ? lotGates : [];
+  const frozenGates = srcGates
+    .filter(g => !(g.hold_task_bt_nums && g.hold_task_bt_nums.length) && g.source_gate_id != null)
+    .map(g => ({ source_gate_id:g.source_gate_id, gate_name:g.gate_name, confirmed:!!g.confirmed }));
+
+  // ONLINE: freeze source delays now (same reads the old inline path did at apply). OFFLINE:
+  // leave null + carry delays_source so the executor re-reads them at drain (hybrid).
+  let frozenDelays=null;
+  if(_isOnline){
+    frozenDelays=[];
+    const drows=await sbCall('getDelaysForLot',{lot_id:curLot.id})||[];        // ONE call (was one per task — the ~30s hang)
+    const dmap={}; drows.forEach(d=>{ if(dmap[d.bt_num]===undefined) dmap[d.bt_num]=d; });  // latest per bt (rows newest-first)
+    for(const p of pushed){ const d=dmap[p.bt_num]; if(d && d.reason_label){ frozenDelays.push({bt_num:p.bt_num, reason_id:d.reason_id, reason_label:d.reason_label, note:(d.note||'')+'  (inherited from '+curLot.lot_number+')', task_name:d.task_name, days_late:d.days_late, expected_done:d.expected_done, actual_finish:d.actual_finish}); } }
+  }
+  return chosen.map(lot=>({
+    kind:'push_lot', apiAction:'__push_lot', type:'push',
+    mode:_bpMode, bt_num:(_bpMode==='task'?_bpBtNum:null),
+    source_lot_id:curLot.id, source_lot_number:curLot.lot_number,
+    pushed:pushed,
+    gates: frozenGates,                                    // source manual hold-gate states (mirrored onto target by source_gate_id)
+    note: note?{bt_num:note.bt_num, text:note.text, flag:note.flag}:null,
+    delays: frozenDelays,                                  // array (online, frozen) | null (offline -> re-read at drain)
+    delays_source: {lot_id:curLot.id, bts:pushed.map(p=>p.bt_num)},
+    target:{lot_id:lot.id, lot_number:lot.lot_number, community:lot.community, template_id:lot.template_id, builder_name:lot.builder_name||null},
+    builder:currentBuilder
+  }));
+}
+
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
-  _bpProgressScreen(chosen.length);
+  if(!chosen.length) return;
+  if(!_bpBusy(_isOnline?'Pushing…':'Queuing…')) return;   // disable + spinner on tap; ignore a second tap
   _bpGuardOn();
+  const intents=await _bpBuildIntents(chosen);
+  const total=intents.length;
 
-  let ok=0, fail=0; const errors=[];
-  const doneLots=[], failedLots=[];
-  const total=chosen.length; let completed=0;
-
-  try{
-  for(const lot of chosen){
-    let lotHadError=false;
-    _bpProgress(completed, total, lot.lot_number);   // bar stays at completed while THIS lot is in flight
-    try{
-      // fetch this target lot's own task rows (its own task_ids per bt_num)
-      const data=await sbCall('getScheduleLotTasks',{lot_id:lot.id});
-      const rows=(data&&data.tasks)||[];
-      const gates=(data&&data.gates)||[];
-      const byNum={}; rows.forEach(r=>byNum[r.bt_num]=r);
-
-      // local act-map for this TARGET lot, starting from its current state,
-      // then overwritten by whatever we push. Used to compute the target's stage.
-      const tgtAct={};
-      rows.forEach(r=>{ tgtAct[r.bt_num]={started:(r.status==='started'||r.status==='finished'),finished:(r.status==='finished'),start:r.actual_start,finish:r.actual_finish}; });
-
-      // collect the writes for this lot, then send them in ONE batch call
-      const batch=[]; let noteToPush=null;
-      const collect=(btNum)=>{
-        const src=act[btNum]; if(!src) return;
-        const tgt=byNum[btNum];
-        if(!tgt){ errors.push(lot.lot_number+': task #'+btNum+' not found'); lotHadError=true; return; }
-        const status=src.finished?'finished':(src.started?'started':'not_started');
-        batch.push({task_id:tgt.id,status:status,actual_start:src.start||null,actual_finish:src.finish||null});
-        tgtAct[btNum]={started:!!src.started||!!src.finished,finished:!!src.finished,start:src.start||null,finish:src.finish||null};
-      };
-
-      if(_bpMode==='task'){
-        collect(_bpBtNum);
-        if(_bpIncludeNote && (_bpNoteText||'').trim()){
-          const tgt=byNum[_bpBtNum];
-          if(tgt){ noteToPush={lot_task_id:tgt.id,lot_id:lot.id,bt_num:_bpBtNum,note:_bpNoteText.trim()+'  (pushed from '+curLot.lot_number+')',flag:_bpNoteFlag,author:currentBuilder}; }
-        }
-      } else {
-        const pushable=TASKS.filter(t=>act[t.num]);
-        pushable.forEach(t=>collect(t.num));
-      }
-
-      // ---- compute this target lot's stage from its NEW task set (client-side) ----
-      // Same shared-engine path as the single-lot computeStage() adapter.
-      let sm=[];
-      if(lot.template_id){ const r=await sbCall('getTemplateStageMap',{template_id:lot.template_id}); sm=(r&&r.stages)||[]; }
-      const finishedT={}; Object.keys(tgtAct).forEach(bt=>{ if(tgtAct[bt]&&tgtAct[bt].finished) finishedT[bt]=true; });
-      const gArr=(gates||[]).map(g=>{
-        const bts=(g.hold_task_bt_nums||[]).map(Number).filter(n=>!isNaN(n));
-        const released = bts.length ? bts.every(bt=>finishedT[bt]) : !!g.confirmed;
-        return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message };
-      });
-      const stComputed=ScheduleEngine.computeStage(sm, finishedT, { gates:gArr });
-      const trueCode=stComputed.trueCode;
-      const reportedCode=(stComputed.reportedCode==='—')?null:stComputed.reportedCode;
-
-      // ONE round-trip: all task writes + the lot stage write
-      const res=await sbCall('bulkUpdateLotTasks',{updates:batch,lot_id:lot.id,reported_stage:reportedCode,true_stage:trueCode});
-      if(res&&typeof res.done==='number'){ ok+=res.done; if(res.failed&&res.failed.length){lotHadError=true;} }
-      if(noteToPush){ await sbCall('addTaskNote',noteToPush); }
-
-      // INHERIT DELAY REASONS — a push copies a delay that happened on the source lot,
-      // so the target inherits the same reason with source_lot_id set (lets reporting
-      // count BY LOT or BY EVENT). No prompting during push.
-      const btsPushed = (_bpMode==='task') ? [_bpBtNum] : batch.map(b=>{
-        const hit = Object.keys(byNum).find(k=>byNum[k].id===b.task_id); return hit!=null?parseInt(hit):null;
-      }).filter(x=>x!=null);
-      for(const bt of btsPushed){
-        const srcDelay = await sbCall('getDelaysForTask',{lot_id:curLot.id, bt_num:bt});
-        if(srcDelay && srcDelay.reason_label){
-          const tgt = byNum[bt];
-          if(tgt){
-            await sbCall('addTaskDelay',{
-              lot_id:lot.id, lot_task_id:tgt.id, bt_num:bt, task_name:srcDelay.task_name,
-              lot_number:lot.lot_number, community:lot.community, builder_name:lot.builder_name||currentBuilder,
-              reason_id:srcDelay.reason_id, reason_label:srcDelay.reason_label,
-              note:(srcDelay.note||'')+'  (inherited from '+curLot.lot_number+')',
-              days_late:srcDelay.days_late, expected_done:srcDelay.expected_done, actual_finish:srcDelay.actual_finish,
-              source_lot_id:curLot.id, author:currentBuilder
-            });
-          }
-        }
-      }
-      if(lotHadError) failedLots.push(lot.lot_number); else doneLots.push(lot.lot_number);
-    }catch(e){
-      fail++; lotHadError=true; failedLots.push(lot.lot_number);
-      errors.push(lot.lot_number+': '+(e&&e.message?e.message:'error'));
-    }
-    completed++;                          // only AFTER this lot's writes have SETTLED
-    _bpProgress(completed, total, null);  // advance the bar; on the final lot -> 100% "✓ Done"
+  // GUARD: if this lot's tasks aren't loaded (source not cached offline), pushed[] is empty
+  // — refuse rather than queue a no-op push that would surface as failed on every target.
+  if(!intents.length || (intents[0].pushed||[]).length===0){
+    _bpGuardOff(); _bpClose();
+    alert('⚠ Can\'t push — this lot\'s tasks aren\'t loaded on your device yet.\nOpen it once while online (let it finish loading), then push.');
+    return;
   }
-  } finally { _bpGuardOff(); }            // always release the close-guard
 
-  await new Promise(r=>setTimeout(r, 700));   // let the 100% "✓ Done" bar register before the summary
+  // OFFLINE: enqueue every intent, no drain — durable, syncs on reconnect. Never "0 of N".
+  if(!_isOnline){
+    for(const intent of intents){ await OfflineQueue.enqueue(intent); }
+    _bpGuardOff();
+    try{ await updateSyncStatus(); }catch(e){}
+    _bpClose();
+    alert('⏳ '+total+' lot'+(total===1?'':'s')+' queued — will sync when you\'re back online.\n\n'+intents.map(i=>i.target.lot_number).join(', '));
+    if(typeof loadMyLots==='function'){ await loadMyLots(); }
+    return;
+  }
+
+  // ONLINE: route each through the durable queue, which drains IMMEDIATELY — same instant
+  // round-trip, same executePushLot writes, same progress + summary as the old inline path.
+  _bpProgressScreen(total);
+  const doneLots=[], failedLots=[]; let completed=0, queuedMid=0;
+  try{
+    for(const intent of intents){
+      _bpProgress(completed, total, intent.target.lot_number);
+      const {result}=await queueAndSync(intent);         // enqueue + (online) drain now
+      if(!_isOnline){ queuedMid++; }                     // transport dropped mid-push -> remaining queued
+      else if(result && result.error){ failedLots.push(intent.target.lot_number); }
+      else { doneLots.push(intent.target.lot_number); }
+      completed++;
+      _bpProgress(completed, total, null);
+    }
+  } finally { _bpGuardOff(); }
+
+  await new Promise(r=>setTimeout(r, 700));
   _bpClose();
-  let msg=doneLots.length+' of '+chosen.length+' lots updated.';
-  if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
-  if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
+  let msg;
+  if(queuedMid>0){
+    msg=doneLots.length+' of '+total+' pushed; '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
+    if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
+  } else {
+    msg=doneLots.length+' of '+total+' lots updated.';
+    if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
+    if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
+  }
   alert(msg);
 
-  // refresh current view so the user sees a clean state
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
 }
+
+// ── PULL-TO-REFRESH = sync-now + hard refresh ──────────────────────────────
+// Pull down at the TOP of the subs/lots/schedule screens to drain the durable queue
+// (syncQueue) and reload the visible data — so on reconnect you refresh + push-through
+// without closing/reopening the app. overscroll-behavior:contain (CSS) neutralizes the
+// browser's own pull-to-refresh; in the installed standalone PWA there is none to fight.
+(function(){
+  const ACTIVE=['screen-subs','screen-lots','screen-schedule'];
+  const THRESH=70, MAXPULL=90, HOLD=56;   // HOLD = how far content sits while syncing
+  let startY=0, pulling=false, armed=false, busy=false, ptr=null, txt=null, content=null;
+  function ensureEl(){
+    if(ptr) return;
+    document.body.insertAdjacentHTML('beforeend','<div id="ptr"><span class="ptri"></span><span id="ptr-txt">Pull to sync</span></div>');
+    ptr=document.getElementById('ptr'); txt=document.getElementById('ptr-txt');
+  }
+  function activeScreen(){ const a=document.querySelector('.screen.active'); return a?a.id:null; }
+  function activeEl(){ return document.querySelector('.screen.active'); }
+  // Move the visible content WITH the drag (physical pull, like a native app).
+  function moveContent(px, animate){
+    if(!content) return;
+    content.style.transition = animate ? 'transform .22s cubic-bezier(.22,1,.36,1)' : 'none';
+    content.style.transform  = px>0 ? 'translateY('+px+'px)' : '';
+  }
+  function canPull(target){
+    if(busy) return false;
+    if(ACTIVE.indexOf(activeScreen())<0) return false;                 // only on subs/lots/schedule
+    if(target && target.closest && target.closest('[class*="overlay"],[class*="modal"],.editbox')) return false; // not inside a modal
+    return (window.scrollY||document.documentElement.scrollTop||0)<=0; // only at the very top
+  }
+  function reset(){
+    if(ptr){ ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(-60px)'; ptr.classList.remove('spin'); }
+    moveContent(0, true);
+  }
+  document.addEventListener('touchstart',(e)=>{
+    if(e.touches.length!==1 || !canPull(e.target)){ pulling=false; return; }
+    startY=e.touches[0].clientY; pulling=true; armed=false; content=activeEl(); ensureEl();
+  },{passive:true});
+  document.addEventListener('touchmove',(e)=>{
+    if(!pulling||busy) return;
+    const dy=e.touches[0].clientY-startY;
+    if(dy<=0 || (window.scrollY||0)>0){ reset(); armed=false; return; }
+    e.preventDefault();                                                // stop native overscroll while we handle the pull
+    const pull=Math.min(dy*0.5, MAXPULL);
+    ptr.style.transition='none'; ptr.style.transform='translateY('+(pull-52)+'px)';
+    moveContent(pull, false);                                          // content follows the finger
+    armed=dy>THRESH; txt.textContent=armed?'Release to sync':'Pull to sync';
+  },{passive:false});
+  document.addEventListener('touchend',()=>{
+    if(!pulling) return; pulling=false;
+    if(armed && !busy) doRefresh(); else reset();
+  });
+  async function doRefresh(){
+    busy=true; armed=false;
+    ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(0)';
+    ptr.classList.add('spin'); txt.textContent='Syncing…';
+    moveContent(HOLD, true);                                           // hold content down while the spinner runs
+    let ok=true;
+    try{
+      // Fresh manual pull = a deliberate retry: re-arm the bounded auto-retry counter.
+      if(typeof _pushRetryCount!=='undefined') _pushRetryCount=0;
+      if(typeof syncQueue==='function') await syncQueue();            // COALESCED drain — awaits the real push-through, never a no-op
+      if(typeof loadMyLots==='function') await loadMyLots();          // reload lots (re-renders subs)
+      const s=activeScreen();
+      if(s==='screen-lots' && typeof renderLots==='function') renderLots();
+      else if(s==='screen-schedule' && typeof curLot!=='undefined' && curLot && typeof openLot==='function') await openLot(curLot.id);
+    }catch(e){ ok=false; }
+    // HONEST status — never a blanket "Synced". Reflect the real queue state so a push
+    // that didn't fully apply is visible, not hidden behind a green word.
+    let label='Synced';
+    if(!ok){ label='Sync error — still queued'; }
+    else if(typeof OfflineQueue!=='undefined' && OfflineQueue.summary){
+      try{
+        const sm=await OfflineQueue.summary();
+        if(sm.failed>0)       label='⚠ '+sm.failed+' failed';
+        else if(sm.pending>0) label='⏳ '+sm.pending+' still queued';
+      }catch(e){}
+    }
+    txt.textContent=label;
+    setTimeout(()=>{ reset(); busy=false; }, label==='Synced'?500:1200);
+  }
+})();
 
 </script>
 

@@ -929,6 +929,16 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify((r.data || [])[0] || null) };
       }
 
+      case 'getDelaysForLot': {
+        // Bulk push: ALL of a lot's task delays in ONE call (newest first; caller keeps the
+        // latest per bt_num), instead of one getDelaysForTask round-trip per pushed task.
+        const { lot_id } = payload;
+        if (!lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'lot_id required' }) };
+        const r = await supabaseRequest('GET',
+          `sched_task_delays?lot_id=eq.${lot_id}&select=*&order=created_at.desc`);
+        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+      }
+
       case 'getAllLotPhases': {
         // For every active lot: compute active phase and per-phase task snapshots.
         // ACTIVE PHASE = the furthest phase that contains a started/finished CRITICAL task.
