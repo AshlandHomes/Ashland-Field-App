@@ -985,6 +985,14 @@ function renderTasks(){
 // recompute the derived side-effects (reported_stage, completion stamp).
 let _isOnline = (typeof navigator !== 'undefined') ? (navigator.onLine !== false) : true;
 let _syncing = false, _reconnectTimer = null;
+// The in-flight sync (coalesced): a second syncQueue() call while one is running
+// AWAITS the same drain instead of returning an empty result — so pull-to-refresh
+// reflects the REAL outcome, never a false "Synced".
+let _syncPromise = null;
+// Bounded auto-retry for push_lot rows left PENDING by a transient failure, while
+// still online (so they don't sit until the next manual pull / app reopen).
+let _pushRetryTimer = null, _pushRetryCount = 0;
+const _PUSH_RETRY_MAX = 5;
 
 // TRUE connectivity: navigator.onLine only proves the radio is up (lies on a
 // captive wifi with no real internet), so we also confirm OUR backend answered.
@@ -1008,10 +1016,20 @@ async function probeConnectivity(){
 // stale snapshot (replay-with-reads). Uses sbCallRaw so a transport failure THROWS —
 // the drain then leaves the row pending for the next reconnect (never a silent drop).
 // This mirrors _bpApply's per-lot body exactly; piece 2 routes _bpApply through here.
+// Error shapes it returns carry `permanent`: TRUE = structural, will never self-heal
+// (the pushed tasks simply don't exist on the target) → the drain retains it as a
+// surfaced 'failed'. FALSE/absent = transient (bad target read, momentary server
+// error, partial write) → the drain leaves it PENDING so it retries on the next
+// sync. A queued push is thus NEVER removed until it has actually, fully applied.
 async function executePushLot(a){
   // 1) re-read the TARGET lot's own task rows (its task_ids per bt_num) + gates
   const data = await sbCallRaw('getScheduleLotTasks', { lot_id: a.target.lot_id });
+  // A failed/empty TARGET READ is transient (server hiccup, reconnect race, not-yet-
+  // loaded lot) — NOT a reason to drop the push. Return a non-permanent error so the
+  // drain keeps it pending and retries; never markFailed on a read we couldn't trust.
+  if (data && data.error) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — could not read the target lot (' + data.error + '); will retry' };
   const rows = (data && data.tasks) || [];
+  if (!rows.length) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — target lot returned no tasks (not loaded yet?); will retry' };
   const gates = (data && data.gates) || [];
   const byNum = {}; rows.forEach(r => byNum[r.bt_num] = r);
 
@@ -1031,7 +1049,7 @@ async function executePushLot(a){
   // SURFACE (before any write): if nothing matched, this push applies zero writes — FAIL
   // with the reason (pushed vs target task lists) instead of a no-op that falsely "syncs".
   if (batch.length === 0) {
-    return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' applied NOTHING — pushed tasks ['
+    return { permanent: true, error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' applied NOTHING — pushed tasks ['
       + (a.pushed || []).map(p => p.bt_num).join(',') + '] matched none of the target\'s tasks ['
       + rows.map(r => r.bt_num).join(',') + ']' };
   }
@@ -1059,7 +1077,12 @@ async function executePushLot(a){
     if (applied < batch.length) why.push('only ' + applied + ' of ' + batch.length + ' task writes applied');
     if (serverFailed.length) why.push('server rejected ' + serverFailed.length + ': ' + serverFailed.map(f => (f && f.error) || 'error').join('; '));
     if (notFound.length) why.push('tasks not on target: #' + notFound.join(', #'));
-    return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
+    // PERMANENT only when the sole shortfall is structural (tasks that don't exist on the
+    // target — they will never appear). A server rejection or a short write count is
+    // TRANSIENT: leave it pending and retry (task writes are idempotent; note/delay have
+    // not run yet, so a retry can't double-post them).
+    const permanent = notFound.length > 0 && serverFailed.length === 0 && applied >= batch.length;
+    return { permanent: permanent, error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
   }
 
   // Full task write confirmed. 5) optional note (frozen), then 6) inherited delays (frozen).
@@ -1089,12 +1112,16 @@ async function executePushLot(a){
 let _pushDrainReport = [];
 function _surfacePushReport(){
   const rep = _pushDrainReport; _pushDrainReport = [];
-  const failed  = rep.filter(x => x.error);
-  const partial = rep.filter(x => !x.error && x.notFound && x.notFound.length);
-  if (!failed.length && !partial.length) return;
+  // retrying = failed for a transient reason but STILL QUEUED (not lost) → will retry.
+  const retrying = rep.filter(x => x.error && x.retrying);
+  const failed   = rep.filter(x => x.error && !x.retrying);
+  const partial  = rep.filter(x => !x.error && x.notFound && x.notFound.length);
+  if (!retrying.length && !failed.length && !partial.length) return;
   let msg = '';
-  if (failed.length)  msg += '⚠ A queued push did NOT apply:\n' + failed.map(f => '• Lot ' + f.lot + ' — ' + f.error).join('\n');
-  if (partial.length) msg += (msg ? '\n\n' : '') + '⚠ Pushed, but some tasks weren\'t on the target:\n' + partial.map(p => '• Lot ' + p.lot + ' — missing task #' + p.notFound.join(', #')).join('\n');
+  if (failed.length)   msg += '⚠ A queued push did NOT apply:\n' + failed.map(f => '• Lot ' + f.lot + ' — ' + f.error).join('\n');
+  if (partial.length)  msg += (msg ? '\n\n' : '') + '⚠ Pushed, but some tasks weren\'t on the target:\n' + partial.map(p => '• Lot ' + p.lot + ' — missing task #' + p.notFound.join(', #')).join('\n');
+  // Still-queued pushes: reassure — nothing lost, it will apply on the next sync.
+  if (retrying.length) msg += (msg ? '\n\n' : '') + '⏳ Still queued (will retry — nothing lost):\n' + retrying.map(r => '• Lot ' + r.lot + ' — ' + r.error).join('\n');
   try { alert(msg); } catch(e){}
 }
 
@@ -1105,7 +1132,20 @@ async function drainQueue(){
     let d;
     try { d = (a.kind === 'push_lot') ? await executePushLot(a) : await sbCallRaw(a.apiAction, a.payload); }
     catch(e){ _isOnline = false; break; }              // transport failure = offline
-    if (d && d.error){ await OfflineQueue.markFailed(a.id, String(d.error)); }
+    let leftPending = false;
+    if (d && d.error){
+      // A push_lot that failed for a TRANSIENT reason MUST NOT be marked failed —
+      // markFailed removes it from getPending() so it would never retry, and the
+      // builder's queued push would be silently lost (Collin's hard rule: NEVER lose
+      // a queued action until it has actually applied). Leave it PENDING so the next
+      // sync retries it; only a PERMANENT (structural) failure is retained as 'failed'
+      // (still not deleted — surfaced loudly). Non-push actions keep the old behavior.
+      if (a.kind === 'push_lot' && !d.permanent){
+        leftPending = true;                            // stays 'pending' → retried next sync
+      } else {
+        await OfflineQueue.markFailed(a.id, String(d.error));
+      }
+    }
     else {
       results[a.id] = d; await OfflineQueue.markSynced(a.id);
       // If this action CREATED a server note (addTaskNote made offline, local id =
@@ -1124,7 +1164,7 @@ async function drainQueue(){
         }
       }
     }
-    if (a.kind === 'push_lot'){ _pushDrainReport.push({ lot:(a.target && a.target.lot_number), error:(d && d.error) || null, notFound:(d && d.notFound) || [] }); }
+    if (a.kind === 'push_lot'){ _pushDrainReport.push({ lot:(a.target && a.target.lot_number), error:(d && d.error) || null, notFound:(d && d.notFound) || [], retrying: leftPending }); }
   }
   return results;
 }
@@ -1143,6 +1183,7 @@ async function queueAndSync(def){
     const r = await drainQueue();                     // fast path — same sbCall round-trip as before
     result = r[action.id] || null;
     await afterDrain(r);
+    await _schedulePushRetryIfPending();              // a push left pending by a transient failure retries automatically (never lost)
   } else {
     startReconnectWatch();
     await updateSyncStatus();
@@ -1150,20 +1191,45 @@ async function queueAndSync(def){
   return { action, result };
 }
 
-// Full sync pass (reconnect / 'online' event / manual): PROBE first, then drain.
-async function syncQueue(){
-  if (_syncing) return {};
+// Full sync pass (reconnect / 'online' event / manual / pull-to-refresh): PROBE
+// first, then drain. COALESCED — if a sync is already running, callers AWAIT it and
+// get its real result (pull-to-refresh must never report "Synced" while the drain it
+// thinks it triggered was actually a no-op early-return).
+function syncQueue(){
+  if (_syncing && _syncPromise) return _syncPromise;   // await the in-flight sync
   _syncing = true;
-  try {
-    _isOnline = await probeConnectivity();
-    if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
-    _pushDrainReport = [];
-    const r = await drainQueue();
-    await afterDrain(r);
-    _surfacePushReport();                  // NEVER silent: alert any push that failed / partially applied
-    if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
-    return r;
-  } finally { _syncing = false; }
+  _syncPromise = (async () => {
+    try {
+      _isOnline = await probeConnectivity();
+      if (!_isOnline){ startReconnectWatch(); await updateSyncStatus(); return {}; }
+      _pushDrainReport = [];
+      const r = await drainQueue();
+      await afterDrain(r);
+      _surfacePushReport();                  // NEVER silent: alert any push that failed / partially applied / still-queued
+      if (_isOnline){ prefetchOffline(); }   // reconnected → resume filling the territory cache
+      await _schedulePushRetryIfPending();   // any push left PENDING by a transient failure → retry (never lost)
+      return r;
+    } finally { _syncing = false; _syncPromise = null; }
+  })();
+  return _syncPromise;
+}
+
+// If any push_lot row is still PENDING after a drain (a transient failure left it in
+// the queue so it can't be lost), retry it automatically — bounded backoff — instead
+// of waiting for the next manual pull. A CONFIRMED apply clears it; the counter resets
+// whenever a fresh sync starts making progress. Never deletes; only retries.
+async function _schedulePushRetryIfPending(){
+  if (_pushRetryTimer) return;
+  let pend = [];
+  try { pend = (await OfflineQueue.getPending()).filter(a => a.kind === 'push_lot'); } catch(e){ return; }
+  if (!pend.length){ _pushRetryCount = 0; return; }        // all applied → done
+  if (_pushRetryCount >= _PUSH_RETRY_MAX) return;          // stop auto-retrying; stays queued, retried on next manual pull / reopen (still never lost)
+  _pushRetryCount++;
+  const delay = Math.min(30000, 3000 * Math.pow(2, _pushRetryCount - 1));   // 3s,6s,12s,24s,30s
+  _pushRetryTimer = setTimeout(async () => {
+    _pushRetryTimer = null;
+    if (_isOnline) { try { await syncQueue(); } catch(e){} }
+  }, delay);
 }
 
 // While offline, poll for reconnect (the 'online' event is unreliable on mobile).
@@ -2331,24 +2397,34 @@ async function _bpApply(){
 // browser's own pull-to-refresh; in the installed standalone PWA there is none to fight.
 (function(){
   const ACTIVE=['screen-subs','screen-lots','screen-schedule'];
-  const THRESH=70, MAXPULL=80;
-  let startY=0, pulling=false, armed=false, busy=false, ptr=null, txt=null;
+  const THRESH=70, MAXPULL=90, HOLD=56;   // HOLD = how far content sits while syncing
+  let startY=0, pulling=false, armed=false, busy=false, ptr=null, txt=null, content=null;
   function ensureEl(){
     if(ptr) return;
     document.body.insertAdjacentHTML('beforeend','<div id="ptr"><span class="ptri"></span><span id="ptr-txt">Pull to sync</span></div>');
     ptr=document.getElementById('ptr'); txt=document.getElementById('ptr-txt');
   }
   function activeScreen(){ const a=document.querySelector('.screen.active'); return a?a.id:null; }
+  function activeEl(){ return document.querySelector('.screen.active'); }
+  // Move the visible content WITH the drag (physical pull, like a native app).
+  function moveContent(px, animate){
+    if(!content) return;
+    content.style.transition = animate ? 'transform .22s cubic-bezier(.22,1,.36,1)' : 'none';
+    content.style.transform  = px>0 ? 'translateY('+px+'px)' : '';
+  }
   function canPull(target){
     if(busy) return false;
     if(ACTIVE.indexOf(activeScreen())<0) return false;                 // only on subs/lots/schedule
     if(target && target.closest && target.closest('[class*="overlay"],[class*="modal"],.editbox')) return false; // not inside a modal
     return (window.scrollY||document.documentElement.scrollTop||0)<=0; // only at the very top
   }
-  function reset(){ if(ptr){ ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(-60px)'; ptr.classList.remove('spin'); } }
+  function reset(){
+    if(ptr){ ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(-60px)'; ptr.classList.remove('spin'); }
+    moveContent(0, true);
+  }
   document.addEventListener('touchstart',(e)=>{
     if(e.touches.length!==1 || !canPull(e.target)){ pulling=false; return; }
-    startY=e.touches[0].clientY; pulling=true; armed=false; ensureEl();
+    startY=e.touches[0].clientY; pulling=true; armed=false; content=activeEl(); ensureEl();
   },{passive:true});
   document.addEventListener('touchmove',(e)=>{
     if(!pulling||busy) return;
@@ -2357,6 +2433,7 @@ async function _bpApply(){
     e.preventDefault();                                                // stop native overscroll while we handle the pull
     const pull=Math.min(dy*0.5, MAXPULL);
     ptr.style.transition='none'; ptr.style.transform='translateY('+(pull-52)+'px)';
+    moveContent(pull, false);                                          // content follows the finger
     armed=dy>THRESH; txt.textContent=armed?'Release to sync':'Pull to sync';
   },{passive:false});
   document.addEventListener('touchend',()=>{
@@ -2367,15 +2444,30 @@ async function _bpApply(){
     busy=true; armed=false;
     ptr.style.transition='transform .18s ease'; ptr.style.transform='translateY(0)';
     ptr.classList.add('spin'); txt.textContent='Syncing…';
+    moveContent(HOLD, true);                                           // hold content down while the spinner runs
+    let ok=true;
     try{
-      if(typeof syncQueue==='function') await syncQueue();            // drain the durable queue (probe + push-through)
+      // Fresh manual pull = a deliberate retry: re-arm the bounded auto-retry counter.
+      if(typeof _pushRetryCount!=='undefined') _pushRetryCount=0;
+      if(typeof syncQueue==='function') await syncQueue();            // COALESCED drain — awaits the real push-through, never a no-op
       if(typeof loadMyLots==='function') await loadMyLots();          // reload lots (re-renders subs)
       const s=activeScreen();
       if(s==='screen-lots' && typeof renderLots==='function') renderLots();
       else if(s==='screen-schedule' && typeof curLot!=='undefined' && curLot && typeof openLot==='function') await openLot(curLot.id);
-    }catch(e){}
-    txt.textContent='Synced';
-    setTimeout(()=>{ reset(); busy=false; }, 500);
+    }catch(e){ ok=false; }
+    // HONEST status — never a blanket "Synced". Reflect the real queue state so a push
+    // that didn't fully apply is visible, not hidden behind a green word.
+    let label='Synced';
+    if(!ok){ label='Sync error — still queued'; }
+    else if(typeof OfflineQueue!=='undefined' && OfflineQueue.summary){
+      try{
+        const sm=await OfflineQueue.summary();
+        if(sm.failed>0)       label='⚠ '+sm.failed+' failed';
+        else if(sm.pending>0) label='⏳ '+sm.pending+' still queued';
+      }catch(e){}
+    }
+    txt.textContent=label;
+    setTimeout(()=>{ reset(); busy=false; }, label==='Synced'?500:1200);
   }
 })();
 
