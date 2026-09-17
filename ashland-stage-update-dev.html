@@ -1278,12 +1278,53 @@ function startReconnectWatch(){
 // OFFLINE_PLAN.md); the derived value also self-corrects next time that lot is
 // touched online.
 async function recomputeDerivedAfterSync(results){
-  if (typeof curLot === 'undefined' || !curLot) return;
   let all; try { all = await OfflineQueue.getAll(); } catch(e){ return; }
-  // A synced task OR gate action on the current lot changes derived reported_stage.
-  const derivedSyncedForCurLot = all.some(a => results[a.id] && a.target && a.target.lot_id === curLot.id
-    && (a.apiAction === 'updateScheduleLotTask' || a.apiAction === 'updateScheduleLotGate'));
-  if (derivedSyncedForCurLot){ try { await saveStage(); await checkCompletionStamp(); } catch(e){} }
+  // EVERY lot whose task/gate actions synced needs its derived reported_stage
+  // recomputed — not just curLot. A push writes each TARGET's reported_stage itself,
+  // but a lot whose tasks were completed offline (typically the push SOURCE) relies on
+  // THIS pass. Doing only curLot left such a lot's LIST badge stale (the stored
+  // reported_stage column) while its IN-LOT badge (live-computed on open) was correct —
+  // the two disagreed. Recompute from LIVE state (replay-with-reads) for any lot,
+  // whether or not it's the one currently loaded in memory.
+  const affected = {};
+  all.forEach(a => {
+    if (results[a.id] && a.target && a.target.lot_id
+        && (a.apiAction === 'updateScheduleLotTask' || a.apiAction === 'updateScheduleLotGate')) {
+      affected[a.target.lot_id] = true;
+    }
+  });
+  for (const lotId of Object.keys(affected)) {
+    try { await recomputeAndPersistLotStage(lotId); } catch(e){}
+  }
+  // The open lot also gets its completion stamp refreshed (curLot-specific, best-effort).
+  if (typeof curLot !== 'undefined' && curLot && affected[curLot.id]) { try { await checkCompletionStamp(); } catch(e){} }
+}
+
+// Re-read a lot's LIVE tasks + gates, recompute its stage with the shared engine, and
+// persist reported_stage/true_stage — for ANY lot, whether or not it's the one loaded in
+// memory. The derived-stage half of replay-with-reads: the task rows are written by their
+// own synced actions; this keeps the stored stage column in step. Mirrors saveStage()
+// (including the manual-stage override) but for a lot addressed by id, not the open one.
+async function recomputeAndPersistLotStage(lotId){
+  const lot = _cachedLot(lotId);
+  const data = await sbCallRaw('getScheduleLotTasks', { lot_id: lotId });
+  if (!data || data.error) return;
+  const rows = data.tasks || []; const gates = data.gates || [];
+  let sm = [];
+  const tid = lot && lot.template_id;
+  if (tid) { const r = await sbCallRaw('getTemplateStageMap', { template_id: tid }); sm = (r && r.stages) || []; }
+  if (!sm.length) return;                       // no stage map (unknown template / no_stages lot) → don't clobber
+  const finishedT = {}; rows.forEach(r => { if (r.status === 'finished') finishedT[r.bt_num] = true; });
+  const gArr = (gates || []).map(g => { const bts = (g.hold_task_bt_nums||[]).map(Number).filter(n => !isNaN(n)); const released = bts.length ? bts.every(bt => finishedT[bt]) : !!g.confirmed; return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message }; });
+  const st = ScheduleEngine.computeStage(sm, finishedT, { gates: gArr, manualCode: (lot && lot.manual_stage) || undefined });
+  await sbCallRaw('updateScheduleLot', { id: lotId, reported_stage: (st.reportedCode === '—' ? null : st.reportedCode), true_stage: st.trueCode || null });
+}
+
+// The builder's own cached lot row (from the last getScheduleLots) — carries template_id
+// and manual_stage, which getScheduleLotTasks does not return.
+function _cachedLot(lotId){
+  const src = (typeof myLots !== 'undefined' && Array.isArray(myLots)) ? myLots : [];
+  return src.find(l => l && l.id === lotId) || null;
 }
 
 // Reconcile a note created OFFLINE (local id = queue action id) to its real
