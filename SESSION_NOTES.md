@@ -5,6 +5,58 @@ Running log of what shipped and the state at each session's end. Newest first.
 
 ---
 
+## 2026-09-20 — Single-source STAGE (compute-on-read)
+
+**Live head:** `main = 7d709ff`  ·  **Dev source head:** `Dev` current  ·  both pushed, trees clean.
+
+### 🚨 INVARIANT — DO NOT REINTRODUCE A STAGE WRITER 🚨
+`reported_stage` / `true_stage` are **COMPUTE-ON-READ**. They are computed in
+`getScheduleLots` (backend) via the shared engine (`ScheduleEngine.computeStage`) — the
+SAME computation the in-lot badge uses (`computeStage()` in the field app). **Do NOT add
+any code that WRITES `reported_stage`/`true_stage`.** The stored DB columns still exist but
+are an **inert fallback only** — nothing maintains them (except the dead/manual
+`migrateOldLot` import). If a future task seems to need a stage write, it does NOT — extend
+the compute (the engine / `getScheduleLots`), never a stored write. Reintroducing a writer
+resurrects the drift bug below.
+
+**WHY:** stage was a stored *copy* of a calculation, kept in step by scattered client
+writers. The copy DRIFTED — Lot 10 showed `6` in the lot list but `8` in the in-lot detail
+(list read the stored column; detail computed live). Single-source compute-on-read
+eliminates the whole drift class *by construction*: list and detail derive from the same
+task/gate rows through one engine, so they can't disagree.
+
+**DELETE SET (removed — do not re-add):** `saveStage`, `recomputeAndPersistLotStage`,
+`_cachedLot`, the `loadMyLots` first-stage floor mirror, the `bulkUpdateLotTasks` stage-write
+(backend), and `executePushLot`'s `reported_stage`/`true_stage` args + stage recompute.
+
+**PRESERVED double-duty (REDUCED/STRIPPED, not deleted — don't mistake for stage-writers):**
+- `recomputeDerivedAfterSync` → reduced to *only* firing **completion-stamping**
+  (`checkCompletionStamp`) for the open lot. Deleting it whole would silently kill
+  completion stamps.
+- `executePushLot` → stage-stripped but still does the **gate-push write**
+  (`updateScheduleLotGate`), plus task writes, note, delays.
+
+**Fallback = (b) blank-on-error:** if `getScheduleLots` can't fetch a lot's tasks/stage-map,
+it BLANKS the stage (`stage_unavailable`), never the stored (drift-prone) value. Field badge
+renders a null stage as "—".
+
+**Also shipped:** back-out from a lot detail now refreshes that lot's list badge from the
+in-memory state (`refreshCurLotInList` in `backToLots`) — builder sees their own edits
+without a manual pull. Works offline, same engine.
+
+**Promote (on top of the durable-push release `7985ce1`):** `getScheduleLots` compute-on-read
++ writer deletion + back-out refresh → merge `7d709ff` (`supabase.js` +
+`ashland-stage-update.html`; `admin.html` regenerated identical). Verified on live: drift
+gone, back-out shows new stage, readers/export/counts correct, list load **snappy** at prod
+scale. (`getScheduleLots` per-lot fetch mirrors the `getAllLotPhases` pattern.)
+
+**Tests added:** `getschedulelots-compute.js`, `completion-stamp-after-sync.js`,
+`backout-refreshes-list.js`. Removed obsolete `derived-stage-allsynced.js` (it tested the
+deleted writer). Earlier same-day: durable-push `queue-loss-guard.js`, `gate-push-repro.js`
+(refocused on gate propagation).
+
+---
+
 ## 2026-08-27 — Big session: est-block, KI-2, admin polish, flag-resolution feature
 
 **Live head:** `main = eb34b31`  ·  **Dev source head:** `Dev = 18df808`  ·  both pushed, trees clean.
