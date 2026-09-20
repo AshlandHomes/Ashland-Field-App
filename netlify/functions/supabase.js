@@ -723,10 +723,14 @@ exports.handler = async function(event) {
           //     badge). Skip (keep stored) when the template map or the lot's rows weren't
           //     fetched — never clobber on incomplete data.
           lots.forEach(l => {
-            if (!l.template_id) return;
+            if (!l.template_id) return;                      // no stage concept
             const sm = stageMapByTpl[l.template_id];
-            if (sm === undefined) return;                    // template fetch failed -> keep stored
-            if (!fetchedLots[l.id]) return;                  // lot rows not fetched -> keep stored
+            // FETCH FAILURE (template map or the lot's rows unavailable): do NOT fall back
+            // to the stored reported_stage — it is no longer maintained, so it would drift
+            // and lie. Blank it (honest "couldn't load") rather than resurface the exact
+            // drift bug this refactor removes. `stage_unavailable` lets readers tell this
+            // apart from a genuinely stageless template (no_stages -> N/A).
+            if (sm === undefined || !fetchedLots[l.id]) { l.reported_stage = null; l.true_stage = null; l.stage_unavailable = true; return; }
             if (!sm.length) { l.no_stages = true; l.reported_stage = null; l.true_stage = null; return; }  // template opted out of stages -> N/A
             const finished = finishedByLot[l.id] || {};
             const confirmBySrc = confirmBySrcByLot[l.id] || {};
@@ -1102,8 +1106,9 @@ exports.handler = async function(event) {
       case 'bulkUpdateLotTasks': {
         // One round-trip from the browser; N task writes done server-side.
         // payload.updates = [{task_id, status?, actual_start?, actual_finish?, vendor_confirmed?, est_start_date?}, ...]
-        // payload.lot_id (optional) + payload.reported_stage/true_stage (optional) => one lot stage write at the end.
-        const { updates, lot_id, reported_stage, true_stage } = payload;
+        // payload.lot_id (optional) => touch last_task_update at the end. (Stage is NOT
+        // written — reported_stage/true_stage are computed on read in getScheduleLots.)
+        const { updates, lot_id } = payload;
         if (!Array.isArray(updates)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'updates array is required' }) };
         }
@@ -1125,12 +1130,9 @@ exports.handler = async function(event) {
           const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${u.task_id}`, upd);
           if (r.status && r.status >= 400) failed.push({ task_id: u.task_id, error: r.error }); else done++;
         }
-        // one lot-level write: stage (if provided) + touch timestamp
+        // touch the lot so last_task_update reflects this activity (no stage write).
         if (lot_id) {
-          const lotUpd = { last_task_update: stamp };
-          if (reported_stage !== undefined) lotUpd.reported_stage = reported_stage;
-          if (true_stage !== undefined) lotUpd.true_stage = true_stage;
-          await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, lotUpd);
+          await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: stamp });
         }
         return { statusCode: 200, body: JSON.stringify({ done, failed }) };
       }

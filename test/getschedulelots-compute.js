@@ -79,11 +79,13 @@ const is=(n,g,w)=>{const ok=JSON.stringify(g)===JSON.stringify(w);ok?pass++:fail
   is('L13 on a stageless template -> no_stages, stage null', [L('L13').no_stages, L('L13').reported_stage], [true, null]);
   is('L99 (no template) left untouched', [L('L99').reported_stage, L('L99').no_stages], [null, undefined]);
 
-  // FALLBACK: if the live task fetch fails, the lot keeps its STORED value (never clobbered).
+  // FALLBACK (option b): if the live task fetch fails, the stage is BLANKED — never the
+  // stored value (which no longer updates and would drift/lie). Blank-on-error is honest.
   const lots2 = await runLots(true);
   const L2 = id => lots2.find(l=>l.id===id);
-  is('fetch failure -> L10 keeps STORED 6.0 (safe fallback, no regression)', L2('L10').reported_stage, '6.0');
-  is('fetch failure -> L12 keeps STORED 7.0', L2('L12').reported_stage, '7.0');
+  is('fetch failure -> L10 stage BLANKED, NOT the drifting stored 6.0 (fallback b)', L2('L10').reported_stage, null);
+  is('fetch failure -> L10 flagged stage_unavailable (readers show "—", not N/A)', L2('L10').stage_unavailable, true);
+  is('fetch failure -> L12 stage BLANKED (not stored 7.0)', L2('L12').reported_stage, null);
 
   console.log('\n'+pass+' passed, '+fail+' failed');
   process.exit(fail?1:0);

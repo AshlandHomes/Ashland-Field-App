@@ -60,41 +60,36 @@ function run(targetGateConfirmed, pushGate){
 let pass=0, fail=0;
 const is=(n,g,w)=>{const ok=JSON.stringify(g)===JSON.stringify(w);ok?pass++:fail++;console.log((ok?'  ok  - ':'  FAIL- ')+n+(ok?'':'  got '+JSON.stringify(g)+' want '+JSON.stringify(w)));};
 
+// NOTE: since the single-source refactor, the push does NOT write reported_stage — the
+// stage is COMPUTED on read in getScheduleLots. So the "target drops to 5.9" proof now
+// lives in test/getschedulelots-compute.js (a held manual gate -> capped stage). What the
+// push is responsible for is PROPAGATING the source's gate state onto the target; that is
+// what this test proves (plus that it no longer writes any stage).
 (async()=>{
-  console.log('\n── RUN A: target gate RELEASED (confirmed=true) — an untouched Lot 11/12 ──');
+  console.log('\n── RUN A: push does NOT carry a gate change -> only task statuses written ──');
   {
-    const {ctx, calls, intent} = run(true, false);
+    const {ctx, calls, intent} = run(true, false);   // target gate released; intent carries NO gates
     const r = await ctx.__exec(intent);
     const bulk = calls.find(c=>c.action==='bulkUpdateLotTasks');
-    is('(1) the push DID write the task statuses (sync is NOT broken)', !!bulk, true);
-    is('    ...writing all 3 finished tasks', bulk.payload.updates.map(u=>u.task_id), ['T50','T60','T70']);
-    is('(2) recomputed reported stage = 7.0 (did NOT drop to 5.9)', bulk.payload.reported_stage, '7.0');
-    is('    push returned success (so the queue marks it SYNCED — the "Synced" you saw)', [r.done, !!r.error], [3, false]);
-    console.log('    → PROVES: task statuses applied, but the stage stayed 7.0 because the');
-    console.log('      target gate is still released. The gate cap was never pushed.');
+    is('writes all 3 finished task statuses', bulk.payload.updates.map(u=>u.task_id), ['T50','T60','T70']);
+    is('does NOT write reported_stage/true_stage (stage computed on read)', [bulk.payload.reported_stage, bulk.payload.true_stage], [undefined, undefined]);
+    is('does NOT touch the gate (nothing to propagate)', !calls.some(c=>c.action==='updateScheduleLotGate'), true);
+    is('push returns success', [r.done, !!r.error], [3, false]);
   }
 
-  console.log('\n── RUN B: if the target gate were already unchecked (confirmed=false) ──');
+  console.log('\n── RUN B: "Push entire lot status" CARRIES the source gate -> propagated to target ──');
   {
-    const {ctx, calls, intent} = run(false, false);   // target gate already unchecked
-    await ctx.__exec(intent);
-    const bulk = calls.find(c=>c.action==='bulkUpdateLotTasks');
-    is('recomputed reported stage = 5.9 (capped by the gate) ✓ the drop Collin expects', bulk.payload.reported_stage, '5.9');
-    console.log('    → PROVES: it is the GATE state, not the task statuses, that drives 7→5.9.');
-  }
-
-  console.log('\n── RUN C: THE FIX — target gate released, push now CARRIES the gate ──');
-  {
-    const {ctx, calls, intent} = run(true, true);   // target released, intent freezes source gate (confirmed=false)
+    const {ctx, calls, intent} = run(true, true);   // target gate released; intent freezes source gate (confirmed=false)
     const r = await ctx.__exec(intent);
     const gateCall = calls.find(c=>c.action==='updateScheduleLotGate');
-    is('the gate state IS pushed (updateScheduleLotGate called on the target row)', !!gateCall, true);
-    is('    ...unchecking the TARGET\'s gate-state row', gateCall && gateCall.payload, {gate_id:'GS11', confirmed:false});
+    is('the gate state IS propagated (updateScheduleLotGate on the target gate row)', !!gateCall, true);
+    is('    ...unchecking the TARGET\'s gate-state row (so getScheduleLots will cap it to 5.9)', gateCall && gateCall.payload, {gate_id:'GS11', confirmed:false});
     const bulk = calls.find(c=>c.action==='bulkUpdateLotTasks');
-    is('recomputed reported stage now = 5.9 — Lot 11/12 DROP 7 → 5.9 ✓', bulk.payload.reported_stage, '5.9');
     is('    task statuses still written (all 3)', bulk.payload.updates.map(u=>u.task_id), ['T50','T60','T70']);
+    is('    still writes NO stage (single source: getScheduleLots)', bulk.payload.reported_stage, undefined);
     is('    push reports success with gatesApplied=1', [r.done, r.gatesApplied, !!r.error], [3, 1, false]);
-    console.log('    → PROVES: with the gate pushed, the target drops to 5.9, exactly as expected.');
+    console.log('    → the target now has an unchecked gate; getScheduleLots computes it to 5.9');
+    console.log('      (proven in getschedulelots-compute.js, the L12 held case).');
   }
 
   console.log('\n'+pass+' passed, '+fail+' failed');

@@ -35,14 +35,16 @@ const truthy=(n,c)=>{c?pass++:fail++;console.log((c?'  ok  - ':'  FAIL- ')+n);};
   const baseIntent=(pushed)=>({kind:'push_lot',mode:'lot',source_lot_id:'L10',source_lot_number:'10',builder:'Matt',
     pushed:pushed, note:null, delays:[], target:{lot_id:'L11',lot_number:'11',community:'CT',template_id:'TPL'}});
 
-  // 1) normal: 10 finished, 20 started -> batch written, stage recomputed to 1.0
+  // 1) normal: 10 finished, 20 started -> batch written; stage is NOT written (computed
+  //    on read in getScheduleLots now — the single source of truth).
   let env=makeEnv(rows);
   let r=await env.exec(baseIntent([
     {bt_num:10,status:'finished',actual_start:'2026-09-01',actual_finish:'2026-09-02'},
     {bt_num:20,status:'started', actual_start:'2026-09-03',actual_finish:null}]));
   const bulk=env.calls.find(c=>c.action==='bulkUpdateLotTasks').payload;
   eq('writes both tasks to target ids', bulk.updates.map(u=>u.task_id), ['T10','T20']);
-  eq('recomputed stage 1.0', [bulk.reported_stage,bulk.true_stage], ['1.0','1.0']);
+  eq('does NOT write reported_stage/true_stage (stage computed on read)', [bulk.reported_stage,bulk.true_stage], [undefined,undefined]);
+  truthy('does NOT fetch the stage map (no client-side stage recompute)', !env.calls.some(c=>c.action==='getTemplateStageMap'));
   eq('returns done=2', r.done, 2);
 
   // 2) partial: one pushed task absent on target -> applied ones written, notFound surfaced
