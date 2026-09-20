@@ -604,19 +604,7 @@ async function refreshView(){
 async function loadMyLots(){
   document.getElementById('subs-list').innerHTML='<div class="loading">Loading your lots…</div>';
   const all=await sbRead('getScheduleLots',{})||[];
-  myLots=all.filter(l=>l.builder_name===currentBuilder&&l.status==='active');  // every active lot visible; stage is display-only (first-stage floor applies on read)
-  // Offline-safe first-stage floor for the list badge: a lot with no stored stage shows its
-  // template's first stage, computed from the CACHED stage map — never blank, even with no signal.
-  const blanks=myLots.filter(l=>!l.reported_stage&&l.template_id);
-  if(blanks.length){
-    const firsts={};
-    for(const tid of [...new Set(blanks.map(l=>l.template_id))]){
-      const sm=await sbRead('getTemplateStageMap',{template_id:tid});
-      const stages=(sm&&sm.stages)||[];
-      if(stages.length) firsts[tid]=stages.reduce((a,b)=>b.order<a.order?b:a).code;
-    }
-    myLots.forEach(l=>{ if(!l.reported_stage&&firsts[l.template_id]) l.reported_stage=firsts[l.template_id]; });
-  }
+  myLots=all.filter(l=>l.builder_name===currentBuilder&&l.status==='active');  // every active lot visible; reported_stage is computed on read in getScheduleLots (incl. the first-stage floor)
   renderSubs();
 }
 
@@ -648,12 +636,29 @@ function renderLots(){
     const held=(l.reported_stage&&l.true_stage&&l.reported_stage!==l.true_stage&&parseFloat(l.reported_stage)<parseFloat(l.true_stage));
     return '<div class="lotcard" onclick="openLot(\''+l.id+'\')">'
       +'<div class="lh"><div><div class="num">'+l.lot_number+'</div>'+(l.community?'<div class="comm">'+l.community+'</div>':'')+'</div>'
-      +(l.no_stages?'':'<span class="stagebadge'+(held?' held':'')+'">'+l.reported_stage+'</span>')+'</div>'
+      +(l.no_stages?'':'<span class="stagebadge'+(held?' held':'')+'">'+(l.reported_stage||'—')+'</span>')+'</div>'
       +'<div class="lotmeta">'+(l.construction_start_date?'Start: '+l.construction_start_date:'No start date set')+(held?' · ⚡ held at '+l.reported_stage:'')+'</div>'
       +'</div>';
   }).join('');
 }
-function backToLots(){showScreen('screen-lots');renderLots();}
+// Leaving a lot: reflect the edits just made (task / gate changes) in the LIST badge
+// immediately, so the builder never has to pull-to-refresh to see their OWN changes.
+// The stage is COMPUTED from the in-memory state with the same engine the in-lot badge
+// uses (single source), and patched onto this lot's myLots row — works offline, no
+// round-trip, and matches exactly what getScheduleLots would compute on the next load.
+function refreshCurLotInList(){
+  try{
+    if(typeof curLot==='undefined'||!curLot) return;
+    if(typeof myLots==='undefined'||!Array.isArray(myLots)) return;
+    const row=myLots.find(l=>l&&l.id===curLot.id);
+    if(!row) return;
+    const st=computeStage();
+    row.reported_stage=(st.reportedCode==='—')?null:st.reportedCode;
+    row.true_stage=st.trueCode||null;
+    row.stage_unavailable=false;                       // we have a fresh computed value
+  }catch(e){}
+}
+function backToLots(){refreshCurLotInList();showScreen('screen-lots');renderLots();}
 
 // ============ SCHEDULE ENGINE ============
 let TASKS=[],bn={},act={},startDate=null;
@@ -1011,8 +1016,9 @@ async function probeConnectivity(){
 // ── DURABLE BULK PUSH — executor (piece 1) ─────────────────────────────────
 // Runs a queued push_lot INTENT at drain time. The queue froze the SOURCE decision
 // (which task statuses/dates, note, inherited delays); the TARGET is re-read LIVE here
-// and its stage RECOMPUTED, so a queued push applies against current state, never a
-// stale snapshot (replay-with-reads). Uses sbCallRaw so a transport failure THROWS —
+// so a queued push applies against current state, never a stale snapshot
+// (replay-with-reads). The stage is NOT written — it is computed on read in
+// getScheduleLots (single source of truth). Uses sbCallRaw so a transport failure THROWS —
 // the drain then leaves the row pending for the next reconnect (never a silent drop).
 // This mirrors _bpApply's per-lot body exactly; piece 2 routes _bpApply through here.
 // Error shapes it returns carry `permanent`: TRUE = structural, will never self-heal
@@ -1032,17 +1038,12 @@ async function executePushLot(a){
   const gates = (data && data.gates) || [];
   const byNum = {}; rows.forEach(r => byNum[r.bt_num] = r);
 
-  // target act-map: current state, then overwritten by what we push (drives the stage)
-  const tgtAct = {};
-  rows.forEach(r => { tgtAct[r.bt_num] = { started:(r.status==='started'||r.status==='finished'), finished:(r.status==='finished'), start:r.actual_start, finish:r.actual_finish }; });
-
   // 2) build the task-status batch from the FROZEN source intent (a.pushed)
   const batch = []; const notFound = [];
   (a.pushed || []).forEach(p => {
     const tgt = byNum[p.bt_num];
     if (!tgt) { notFound.push(p.bt_num); return; }           // task absent on target (piece 3 surfaces)
     batch.push({ task_id:tgt.id, status:p.status, actual_start:p.actual_start||null, actual_finish:p.actual_finish||null });
-    tgtAct[p.bt_num] = { started:(p.status==='started'||p.status==='finished'), finished:(p.status==='finished'), start:p.actual_start||null, finish:p.actual_finish||null };
   });
 
   // SURFACE (before any write): if nothing matched, this push applies zero writes — FAIL
@@ -1058,10 +1059,11 @@ async function executePushLot(a){
   // hold the target the SAME way; a task-status push alone leaves the target's gate
   // released, so its stage never drops. Manual gates are matched across lots by
   // source_gate_id (the shared TEMPLATE gate). We mirror the source's confirmed flag
-  // onto the target: update the in-memory gate so the stage recompute below reflects
-  // it, and record a persist write. updateScheduleLotGate is idempotent (sets a flag),
-  // so a retry can't double-apply. Task-driven gates (hold_task_bt_nums present) carry
-  // no manual state — their release is derived from task completion, already pushed.
+  // onto the target and record a persist write. updateScheduleLotGate is idempotent
+  // (sets a flag), so a retry can't double-apply. Task-driven gates (hold_task_bt_nums
+  // present) carry no manual state — their release is derived from task completion,
+  // already pushed. (The gate change surfaces in the stage automatically: stage is
+  // computed on read in getScheduleLots.)
   const gateWrites = []; const gateMisses = [];
   if (Array.isArray(a.gates) && a.gates.length) {
     const tgtBySrc = {}; gates.forEach(g => { if (g.source_gate_id != null) tgtBySrc[g.source_gate_id] = g; });
@@ -1070,30 +1072,20 @@ async function executePushLot(a){
       const tg = tgtBySrc[sg.source_gate_id];
       if (!tg) return;                                    // gate not on this target (different template) — skip
       if (!!tg.confirmed === !!sg.confirmed) return;      // already matches — nothing to do
-      tg.confirmed = !!sg.confirmed;                      // reflect in the stage recompute below
       if (tg.id != null) gateWrites.push({ gate_id: tg.id, confirmed: !!sg.confirmed });
       else gateMisses.push(sg.gate_name || sg.source_gate_id);   // no lot gate-state row to patch (surfaced, non-fatal)
     });
   }
 
-  // 3) recompute the target's stage from its NEW task set + gates (shared engine)
-  let sm = [];
-  if (a.target.template_id) { const r = await sbCallRaw('getTemplateStageMap', { template_id: a.target.template_id }); sm = (r && r.stages) || []; }
-  const finishedT = {}; Object.keys(tgtAct).forEach(bt => { if (tgtAct[bt] && tgtAct[bt].finished) finishedT[bt] = true; });
-  const gArr = (gates || []).map(g => { const bts = (g.hold_task_bt_nums||[]).map(Number).filter(n => !isNaN(n)); const released = bts.length ? bts.every(bt => finishedT[bt]) : !!g.confirmed; return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message }; });
-  const st = ScheduleEngine.computeStage(sm, finishedT, { gates: gArr });
-  const reportedCode = (st.reportedCode === '—') ? null : st.reportedCode;
-
-  // 3b) persist the gate confirmations FIRST (so state is consistent before the stage
-  // write). A gate write failure is TRANSIENT (no permanent flag) → the drain keeps the
-  // push pending and retries; idempotent, so re-running is safe.
+  // 3) persist the gate confirmations. A gate write failure is TRANSIENT (no permanent
+  // flag) → the drain keeps the push pending and retries; idempotent, so re-running is safe.
   for (const gw of gateWrites) {
     const gr = await sbCallRaw('updateScheduleLotGate', gw);
     if (gr && gr.error) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — gate update failed (' + gr.error + '); will retry' };
   }
 
-  // 4) ONE round-trip: task writes + the recomputed stage
-  const res = await sbCallRaw('bulkUpdateLotTasks', { updates: batch, lot_id: a.target.lot_id, reported_stage: reportedCode, true_stage: st.trueCode });
+  // 4) apply the task-status writes (the stage is NOT written — computed on read).
+  const res = await sbCallRaw('bulkUpdateLotTasks', { updates: batch, lot_id: a.target.lot_id });
   if (res && res.error) return { error: res.error };
 
   // VERIFY the server actually applied EVERY write — never trust the call blindly. The
@@ -1271,18 +1263,17 @@ function startReconnectWatch(){
   }, 15000);
 }
 
-// On sync, recompute + write the DERIVED side-effects (reported_stage, completion
-// stamp) from the replayed task state — best-effort for the CURRENT lot (the one
-// the builder is on). Cross-lot backlog derived-recompute is a known edge (see
-// OFFLINE_PLAN.md); the derived value also self-corrects next time that lot is
-// touched online.
+// On sync, fire the COMPLETION STAMP for the open lot if its tasks just synced.
+// (reported_stage is no longer maintained here — it is computed on read in
+// getScheduleLots, the single source of truth. Completion stamping is a SEPARATE
+// side-effect: checkCompletionStamp stamps completion_stamped_at once every task is
+// finished, and touches no stage column.)
 async function recomputeDerivedAfterSync(results){
   if (typeof curLot === 'undefined' || !curLot) return;
   let all; try { all = await OfflineQueue.getAll(); } catch(e){ return; }
-  // A synced task OR gate action on the current lot changes derived reported_stage.
-  const derivedSyncedForCurLot = all.some(a => results[a.id] && a.target && a.target.lot_id === curLot.id
+  const curLotTaskSynced = all.some(a => results[a.id] && a.target && a.target.lot_id === curLot.id
     && (a.apiAction === 'updateScheduleLotTask' || a.apiAction === 'updateScheduleLotGate'));
-  if (derivedSyncedForCurLot){ try { await saveStage(); await checkCompletionStamp(); } catch(e){} }
+  if (curLotTaskSynced) { try { await checkCompletionStamp(); } catch(e){} }
 }
 
 // Reconcile a note created OFFLINE (local id = queue action id) to its real
@@ -1462,14 +1453,9 @@ async function saveTask(t){
     target:{lot_id:curLot.id, task_id:t._id, bt_num:t.num},
     payload:{task_id:t._id,lot_id:curLot.id,status:(a.finished?'finished':(a.started?'started':'not_started')),actual_start:a.start||null,actual_finish:a.finish||null},
     builder:currentBuilder });
-  // Derived side-effects (reported_stage, completion stamp) are recomputed ONCE
-  // this task action SYNCS — in recomputeDerivedAfterSync (online now, or on
-  // reconnect). Not called inline: inline would double-write online and THROW
-  // offline (they are direct sbCalls). Offline they simply defer to reconnect.
-}
-async function saveStage(){
-  const st=computeStage();
-  await sbCall('updateScheduleLot',{id:curLot.id,reported_stage:(st.reportedCode==='—'?null:st.reportedCode),true_stage:st.trueCode||null});
+  // reported_stage is computed on read in getScheduleLots (single source of truth), so
+  // nothing is written here for the stage. The completion stamp is fired once this task
+  // action SYNCS — in recomputeDerivedAfterSync (online now, or on reconnect).
 }
 async function toggleConfirm(n){
   const t=bn[n];
@@ -1712,9 +1698,8 @@ async function toggleGate(gateId,currentlyConfirmed){
     target:{lot_id:curLot.id, gate_id:gateId},
     payload:{gate_id:gateId, confirmed:g.confirmed},
     builder:currentBuilder });
-  // Derived reported_stage (saveStage) is recomputed ONCE this gate action SYNCS, in
-  // recomputeDerivedAfterSync (online now, or on reconnect) — not inline (inline would
-  // double-write online and THROW offline). Offline it defers to reconnect.
+  // reported_stage reflects this gate change automatically — it is computed on read in
+  // getScheduleLots (single source of truth), so there is nothing to write here.
 }
 
 // ============ TASK EDIT ============

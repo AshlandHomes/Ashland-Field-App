@@ -654,44 +654,97 @@ exports.handler = async function(event) {
       case 'getScheduleLots': {
         const r = await supabaseRequest('GET', 'sched_lots?select=*&order=created_at.desc');
         const lots = r.data || [];
-        // Floor on read: a lot with no stored stage shows its template's FIRST stage
-        // (lowest stage_order). The stored column is a cache written on task actions;
-        // this keeps display correct without a masking back-fill, and self-corrects
-        // the moment the lot's next task action writes the (already-floored) stage.
-        const blanks = lots.filter(l => !l.reported_stage && l.template_id);
-        if (blanks.length) {
-          const tids = [...new Set(blanks.map(l => l.template_id))].map(encodeURIComponent).join(',');
-          const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=in.(${tids})&select=template_id,stage_code,stage_order&order=stage_order`);
-          const firstByTpl = {};
-          (smRes.data || []).forEach(s => { if (firstByTpl[s.template_id] === undefined) firstByTpl[s.template_id] = s.stage_code; });
+        // ── SINGLE SOURCE OF TRUTH: reported_stage / true_stage / no_stages / hold
+        // surfacing are COMPUTED here from each lot's LIVE task + gate state, via the
+        // shared engine — the SAME computation the in-lot badge uses — so the list and
+        // the detail view can never disagree. (Previously the list trusted the stored
+        // reported_stage column, floored blanks, and surfaced holds separately; that
+        // stored copy drifted whenever it wasn't rewritten after a task synced.) The
+        // engine already applies the first-stage floor and the hold-gate cap, so this one
+        // call replaces both old blocks. Step 3 removes the now-redundant writers.
+        //
+        // SAFETY: a lot is recomputed ONLY when we successfully fetched its template's
+        // stage map AND its tasks/gates. On any fetch failure we leave that lot's STORED
+        // reported_stage/true_stage untouched (fallback) — never worse than before.
+        const lotsWithTpl = lots.filter(l => l.template_id);
+        if (lotsWithTpl.length) {
+          // (a) per-TEMPLATE stage map (+ trigger bt_nums) and hold-gate DEFINITIONS —
+          //     fetched once per distinct template. undefined => fetch failed (skip lot).
+          const stageMapByTpl = {};   // tid -> [{code,label,is_manual,order,triggers:[bt]}]
+          const gateDefsByTpl  = {};  // tid -> [{source_gate_id,name,hold_stage_code,status_message,hold_task_bt_nums}]
+          const tplIds = [...new Set(lotsWithTpl.map(l => l.template_id))];
+          await Promise.all(tplIds.map(async (tid) => {
+            try {
+              const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${tid}&select=id,stage_code,stage_label,is_manual,stage_order&order=stage_order`);
+              if (smRes.error) return;                       // leave undefined -> lots on this tpl keep stored value
+              const sm = smRes.data || [];
+              const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${tid}&select=id,bt_num`);
+              if (tkRes.error) return;
+              const btById = {}; (tkRes.data || []).forEach(t => { btById[t.id] = t.bt_num; });
+              let joins = [];
+              if (sm.length) {
+                const jRes = await supabaseRequest('GET', `sched_stage_map_tasks?stage_map_id=in.(${sm.map(s => s.id).join(',')})&select=stage_map_id,task_id`);
+                if (jRes.error) return;
+                joins = jRes.data || [];
+              }
+              const trig = {}; joins.forEach(j => { (trig[j.stage_map_id] = trig[j.stage_map_id] || []).push(btById[j.task_id]); });
+              stageMapByTpl[tid] = sm.map(s => ({ code: s.stage_code, label: s.stage_label, is_manual: s.is_manual, order: s.stage_order, triggers: (trig[s.id] || []).filter(x => x != null) }));
+              const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${tid}&select=id,name,hold_stage_code,status_message,hold_task_bt_nums`);
+              gateDefsByTpl[tid] = gRes.error ? [] : (gRes.data || []).map(g => ({ source_gate_id: g.id, name: g.name, hold_stage_code: g.hold_stage_code, status_message: g.status_message, hold_task_bt_nums: g.hold_task_bt_nums || [] }));
+            } catch (e) { /* leave tid undefined -> fallback to stored for its lots */ }
+          }));
+
+          // (b) per-lot LIVE finished-task map + manual gate confirmations. Chunked by
+          //     lot_id (tiny columns; ~100 tasks/lot => 8 lots stays well under PostgREST's
+          //     1000-row cap). A chunk that errors leaves its lots out of `fetchedLots`.
+          const finishedByLot = {};        // lot_id -> {bt: true}
+          const confirmBySrcByLot = {};    // lot_id -> {source_gate_id: confirmed}
+          const fetchedLots = {};          // lot_id -> true when its tasks+gates fetched OK
+          const CHUNK = 8;
+          const lotIds = lotsWithTpl.map(l => l.id);
+          for (let i = 0; i < lotIds.length; i += CHUNK) {
+            const slice = lotIds.slice(i, i + CHUNK);
+            const inList = slice.join(',');
+            try {
+              const [tRes, gsRes] = await Promise.all([
+                // &limit lifts PostgREST's 1000-row cap (via Range in supabaseRequest), so a
+                // chunk with many tasks/lot can't silently truncate -> undercount finished.
+                supabaseRequest('GET', `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,status&limit=100000`),
+                supabaseRequest('GET', `sched_lot_gate_state?lot_id=in.(${inList})&select=lot_id,source_gate_id,confirmed&limit=100000`),
+              ]);
+              if (tRes.error || gsRes.error) continue;       // leave these lots un-fetched -> fallback
+              (tRes.data || []).forEach(t => { if (t.status === 'finished') { (finishedByLot[t.lot_id] = finishedByLot[t.lot_id] || {})[t.bt_num] = true; } });
+              (gsRes.data || []).forEach(s => { (confirmBySrcByLot[s.lot_id] = confirmBySrcByLot[s.lot_id] || {})[s.source_gate_id] = !!s.confirmed; });
+              slice.forEach(id => { fetchedLots[id] = true; });
+            } catch (e) { /* fallback for this chunk */ }
+          }
+
+          // (c) compute each lot's stage with the shared engine (SAME path as the in-lot
+          //     badge). Skip (keep stored) when the template map or the lot's rows weren't
+          //     fetched — never clobber on incomplete data.
           lots.forEach(l => {
-            if (!l.reported_stage && l.template_id) {
-              if (firstByTpl[l.template_id]) l.reported_stage = firstByTpl[l.template_id];
-              else l.no_stages = true;   // template defines NO stages -> opted out (admin/export/field show "N/A")
-            }
-          });
-        }
-        // Hold surfacing (compute-on-read): a lot is HELD when reported_stage is
-        // capped BELOW true_stage. Piece 4 sets reportedCode = the blocking gate's
-        // threshold, so the blocking gate is the template hold gate whose
-        // hold_stage_code == reported_stage — attach its message + name for the
-        // admin status column + export. No stored derived state.
-        const heldLots = lots.filter(l => l.template_id && l.reported_stage && l.true_stage
-          && !isNaN(parseFloat(l.reported_stage)) && !isNaN(parseFloat(l.true_stage))
-          && parseFloat(l.reported_stage) < parseFloat(l.true_stage));
-        if (heldLots.length) {
-          const htids = [...new Set(heldLots.map(l => l.template_id))].map(encodeURIComponent).join(',');
-          const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=in.(${htids})&select=template_id,name,hold_stage_code,status_message`);
-          const gatesByTpl = {};
-          (gRes.data || []).forEach(g => { (gatesByTpl[g.template_id] = gatesByTpl[g.template_id] || []).push(g); });
-          heldLots.forEach(l => {
-            const gs = (gatesByTpl[l.template_id] || []).filter(g => parseFloat(g.hold_stage_code) === parseFloat(l.reported_stage));
-            if (gs.length) {
-              const names = gs.map(g => g.name).filter(Boolean);
-              const msgs  = gs.map(g => g.status_message).filter(Boolean);
-              l.hold_gate_name = names.length ? names.join('; ') : null;
-              l.hold_message   = msgs.length  ? msgs.join('; ')  : null;
-            }
+            if (!l.template_id) return;                      // no stage concept
+            const sm = stageMapByTpl[l.template_id];
+            // FETCH FAILURE (template map or the lot's rows unavailable): do NOT fall back
+            // to the stored reported_stage — it is no longer maintained, so it would drift
+            // and lie. Blank it (honest "couldn't load") rather than resurface the exact
+            // drift bug this refactor removes. `stage_unavailable` lets readers tell this
+            // apart from a genuinely stageless template (no_stages -> N/A).
+            if (sm === undefined || !fetchedLots[l.id]) { l.reported_stage = null; l.true_stage = null; l.stage_unavailable = true; return; }
+            if (!sm.length) { l.no_stages = true; l.reported_stage = null; l.true_stage = null; return; }  // template opted out of stages -> N/A
+            const finished = finishedByLot[l.id] || {};
+            const confirmBySrc = confirmBySrcByLot[l.id] || {};
+            const gates = (gateDefsByTpl[l.template_id] || []).map(g => {
+              const bts = (g.hold_task_bt_nums || []).map(Number).filter(n => !isNaN(n));
+              const released = bts.length ? bts.every(bt => finished[bt]) : !!confirmBySrc[g.source_gate_id];   // TASK vs MANUAL release
+              return { threshold: g.hold_stage_code, released, name: g.name, statusMessage: g.status_message };
+            });
+            const st = ScheduleEngine.computeStage(sm, finished, { gates, manualCode: l.manual_stage || undefined });
+            l.reported_stage = (st.reportedCode === '—') ? null : st.reportedCode;
+            l.true_stage = st.trueCode || null;
+            l.no_stages = false;
+            l.hold_gate_name = st.held ? (st.blockingName || null) : null;   // hold surfacing (admin status + export)
+            l.hold_message   = st.held ? (st.blockingMessage || null) : null;
           });
         }
         return { statusCode: 200, body: JSON.stringify(lots) };
@@ -1053,8 +1106,9 @@ exports.handler = async function(event) {
       case 'bulkUpdateLotTasks': {
         // One round-trip from the browser; N task writes done server-side.
         // payload.updates = [{task_id, status?, actual_start?, actual_finish?, vendor_confirmed?, est_start_date?}, ...]
-        // payload.lot_id (optional) + payload.reported_stage/true_stage (optional) => one lot stage write at the end.
-        const { updates, lot_id, reported_stage, true_stage } = payload;
+        // payload.lot_id (optional) => touch last_task_update at the end. (Stage is NOT
+        // written — reported_stage/true_stage are computed on read in getScheduleLots.)
+        const { updates, lot_id } = payload;
         if (!Array.isArray(updates)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'updates array is required' }) };
         }
@@ -1076,12 +1130,9 @@ exports.handler = async function(event) {
           const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${u.task_id}`, upd);
           if (r.status && r.status >= 400) failed.push({ task_id: u.task_id, error: r.error }); else done++;
         }
-        // one lot-level write: stage (if provided) + touch timestamp
+        // touch the lot so last_task_update reflects this activity (no stage write).
         if (lot_id) {
-          const lotUpd = { last_task_update: stamp };
-          if (reported_stage !== undefined) lotUpd.reported_stage = reported_stage;
-          if (true_stage !== undefined) lotUpd.true_stage = true_stage;
-          await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, lotUpd);
+          await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: stamp });
         }
         return { statusCode: 200, body: JSON.stringify({ done, failed }) };
       }
