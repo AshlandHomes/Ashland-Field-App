@@ -642,7 +642,24 @@ function renderLots(){
       +'</div>';
   }).join('');
 }
-function backToLots(){showScreen('screen-lots');renderLots();}
+// Leaving a lot: reflect the edits just made (task / gate changes) in the LIST badge
+// immediately, so the builder never has to pull-to-refresh to see their OWN changes.
+// The stage is COMPUTED from the in-memory state with the same engine the in-lot badge
+// uses (single source), and patched onto this lot's myLots row — works offline, no
+// round-trip, and matches exactly what getScheduleLots would compute on the next load.
+function refreshCurLotInList(){
+  try{
+    if(typeof curLot==='undefined'||!curLot) return;
+    if(typeof myLots==='undefined'||!Array.isArray(myLots)) return;
+    const row=myLots.find(l=>l&&l.id===curLot.id);
+    if(!row) return;
+    const st=computeStage();
+    row.reported_stage=(st.reportedCode==='—')?null:st.reportedCode;
+    row.true_stage=st.trueCode||null;
+    row.stage_unavailable=false;                       // we have a fresh computed value
+  }catch(e){}
+}
+function backToLots(){refreshCurLotInList();showScreen('screen-lots');renderLots();}
 
 // ============ SCHEDULE ENGINE ============
 let TASKS=[],bn={},act={},startDate=null;
