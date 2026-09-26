@@ -12,31 +12,40 @@
 --   D2 = all builders backfilled, status 'active' (is_locked is transient; none locked).
 --   D3 = no other inactive flag; all 7 backfilled. No super_user (preserve today's access).
 --
--- LINK BY CONSTRUCTION (no string matching): assign each unlinked builder a fresh
--- uuid, then create the user row with THAT id. 1:1 by design, idempotent (only
--- unlinked builders / missing users are touched). FK + UNIQUE added AFTER the data.
+-- LINK BY CONSTRUCTION (no string matching), RE-RUN SAFE — map first, users second,
+-- link third: capture each unlinked builder's id + a fresh uuid in a temp map, INSERT
+-- the user rows from the map, THEN set builders.user_id from the map. Never assign
+-- builders.user_id BEFORE the user row exists — the FK is non-deferred, so a bare
+-- pre-assignment fails on any re-run, which is exactly when the catch-up is needed.
+-- 1:1 by design, idempotent (only unlinked builders are mapped). FK + UNIQUE added
+-- AFTER the data.
 --
--- LIVE runs at promote, after the step-(a) LIVE foundation exists — same block with
--- the dev_ prefix removed.
+-- Re-run = catch-up for builders created before upsertBuilderRecord is fixed (backlog, BLOCKS STEP d).
+--
+-- LIVE runs at promote, after the step-(a) LIVE foundation exists — same block with the
+-- dev_ prefix removed, SAME map-first / users-second / link-third order (never a bare
+-- pre-assignment of user_id).
 -- ============================================================================
 
 
 -- ########################  DEV SECTION (run once)  ##########################
 BEGIN;
 
--- 1) assign a user id to every unlinked builder BY CONSTRUCTION.
-UPDATE dev_field_ops_builders
-   SET user_id = gen_random_uuid()
- WHERE user_id IS NULL;
+-- 1) MAP FIRST: capture each unlinked builder + a fresh uuid (no writes to real tables yet).
+CREATE TEMP TABLE _bkfill_map ON COMMIT DROP AS
+  SELECT id AS builder_id, gen_random_uuid() AS uid
+  FROM dev_field_ops_builders WHERE user_id IS NULL;
 
--- 2) create the matching user for each linked builder that doesn't have one yet.
+-- 2) USERS SECOND: create the user row for every mapped builder (id exists before any FK link).
 INSERT INTO dev_field_ops_users (id, display_name, auth_user_id, email, status)
-SELECT b.user_id, b.name, NULL, NULL, 'active'
-FROM dev_field_ops_builders b
-WHERE b.user_id IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM dev_field_ops_users u WHERE u.id = b.user_id);
+  SELECT m.uid, b.name, NULL, NULL, 'active'
+  FROM _bkfill_map m JOIN dev_field_ops_builders b ON b.id = m.builder_id;
 
--- 3) roles per D1 (mutually exclusive; NULL is_admin treated as non-admin).
+-- 3) LINK THIRD: point the builder at its now-existing user row.
+UPDATE dev_field_ops_builders b SET user_id = m.uid
+  FROM _bkfill_map m WHERE b.id = m.builder_id;
+
+-- 4) roles per D1 (mutually exclusive; NULL is_admin treated as non-admin).
 INSERT INTO dev_field_ops_user_roles (user_id, role_id)          -- BUILDER for non-admins
 SELECT b.user_id, r.id
 FROM dev_field_ops_builders b
@@ -51,7 +60,7 @@ JOIN dev_field_ops_roles r ON r.key = 'admin'
 WHERE b.is_admin IS TRUE AND b.user_id IS NOT NULL
 ON CONFLICT DO NOTHING;
 
--- 4) integrity: FK + UNIQUE on the link column (guarded so a re-run doesn't error).
+-- 5) integrity: FK + UNIQUE on the link column (guarded so a re-run doesn't error).
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='dev_field_ops_builders_user_id_fkey') THEN
