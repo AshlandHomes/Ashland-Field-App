@@ -1489,8 +1489,12 @@ async function finishTask(n){
   const projYmd=(t._projected_ef!=null)?ymd(offToDate(t._projected_ef)):today;
   const tlabel='#'+n+' '+t.name;
 
-  // ── Soft predecessor warning (in-app modal) ──
-  const incompletePreds=(t.preds||[]).filter(p=>bn[p]&&!(act[p]&&act[p].finished));
+  // ── Soft predecessor warning (in-app modal) — LAG-AWARE ──
+  // A NEGATIVE-lag (lead-time) task legitimately happens BEFORE its predecessor
+  // (e.g. "drop framing material N days BEFORE framing"), so an unfinished
+  // predecessor is EXPECTED, not out-of-sequence — skip the warning. Zero/positive
+  // lag is a real dependency order, so an unfinished predecessor still warns.
+  const incompletePreds=((t.lag||0)<0)?[]:(t.preds||[]).filter(p=>bn[p]&&!(act[p]&&act[p].finished));
   if(incompletePreds.length){
     const names=incompletePreds.map(p=>'#'+p+(bn[p]?' — '+bn[p].name:'')).join('<br>');
     const go=await appModal({
