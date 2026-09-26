@@ -5,6 +5,35 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🧭 DATABASE SEPARATION — committed direction (2026-09-26)
+
+LandIQ and the field app / admin console / manager module **will move to SEPARATE Supabase
+projects.** Sequenced AFTER the 3 BLOCKS-STEP-(d) items below and BEFORE any permission gating
+goes live:
+
+1. **Fix the 3 BLOCKS-STEP-(d) items on Dev** (create/delete builder atomicity + deactivation;
+   named admins). These are pre-requisites regardless of separation.
+2. **Separate — pure infra move, ZERO feature changes.** New project holds `field_ops_*` /
+   `sched_*` (+ our `auth.users`). Verify live before anything else changes.
+   - **VERIFICATION (not a blocker):** Collin confirms ~99% LandIQ reads no `field_ops_*` /
+     `sched_*`. Before cutover, **grep the LandIQ repo for `field_ops_` / `sched_` references**,
+     OR smoke-test LandIQ immediately after cutover with **rollback ready**.
+3. **Promote the permission foundation into the new project** (it never has to reconcile with
+   LandIQ's auth — once separated, THE SEAM disappears and `auth.users` is ours alone).
+
+**LOGIN PLAN (records the target so we don't drift):**
+- *Until separation:* named admin accounts use **PIN only** — nothing touches shared `auth.users`.
+- *After separation:* **admin console → username/password**; **builders + managers (manager view
+  is in the field app) → PIN**; **Face ID later.** `field_ops_builders.biometric_credential_id`
+  already exists (per Collin) but **no application code references it today** (grep-clean) — treat
+  as a dormant/reserved column; document its consumer when Face ID is actually built.
+- **Manager PIN storage must move up.** PINs live on `field_ops_builders` today (the builder
+  login/assignment list). Managers are not builders → move PIN storage to the **user level**
+  (`field_ops_users` or a credentials table) before managers get PINs. Short-term, named admin
+  PINs may reuse the builders table + `is_admin`.
+
+---
+
 ## Predecessor warning + template fidelity (from the lag-aware fix)
 
 - **Lag-window-aware warning.** The lag-aware fix skips the finish-time predecessor

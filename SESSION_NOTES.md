@@ -22,6 +22,37 @@ LandIQ table.**
 
 ---
 
+## 2026-09-26 — Permission foundation applied on Dev (steps a/b/c) + separation decision
+
+**Step (a) foundation** (`sql/2026-09-26_permission_foundation_fieldops.sql`) applied on Dev,
+verified 12/12 PASS. **Step (b) builder backfill** (`sql/2026-09-26_builder_backfill.sql`,
+re-run-safe map-first/users-second/link-third, commit `b5ef232`) ran clean on Dev — **9/9 PASS**
+(users 7, builder role 6, admin role 1, FK + UNIQUE present, `fk_out_of_namespace` 0).
+**Step (c):** online PIN, offline PIN, and Admin login all verified working. No login path changed.
+
+### DECISIONS recorded this session
+
+- **DATABASE SEPARATION — COMMITTED.** LandIQ and the field app / admin console / manager
+  module will move to **SEPARATE Supabase projects**. Planned order: **(1)** fix the 3
+  BLOCKS-STEP-(d) items on Dev; **(2)** separate as a **pure infra move with ZERO feature
+  changes**, verify live; **(3)** promote the permission foundation into the new project.
+  (This supersedes "reconcile our auth with LandIQ's in one shared project" — once separated,
+  `auth.users` is ours alone and THE SEAM disappears.)
+- **Separation VERIFICATION step (not a blocker).** Collin confirms (~99%) LandIQ reads no
+  `field_ops_*` / `sched_*` tables. Before cutover: **grep the LandIQ repo for `field_ops_` /
+  `sched_` references**, OR smoke-test LandIQ immediately after cutover with rollback ready.
+- **LOGIN PLAN.** *Until separation:* named admin accounts use **PIN** (no email/password,
+  nothing touching shared `auth.users`). *After separation:* admin console → **username/password**;
+  builders and managers (manager view lives in the field app) → **PIN**; **Face ID later**
+  (`field_ops_builders.biometric_credential_id` already exists per Collin, but **zero application
+  code references it today** — grep-clean; it is a dormant/reserved column).
+- **Manager-view storage note.** PIN credentials currently live on `field_ops_builders`, which
+  IS the builder login + assignment list. **Managers are not builders**, so PIN storage must move
+  to the **user level** (`field_ops_users` or a credentials table) before managers get PINs.
+  Short-term, named admin PINs may reuse the existing builders table + `is_admin`.
+
+---
+
 ## 2026-09-20 — Single-source STAGE (compute-on-read)
 
 **Live head:** `main = 7d709ff`  ·  **Dev source head:** `Dev` current  ·  both pushed, trees clean.
