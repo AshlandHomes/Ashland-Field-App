@@ -5,6 +5,28 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🔒 BLOCKS STEP (d) — must resolve before gating modules by permission
+
+Raised during the step-(b) builder backfill. If a builder ends up with no user /
+no role, gating locks them out; a shared admin identity defeats the audit. Resolve
+ALL of these before any permission gating goes live.
+
+- **`upsertBuilderRecord` must also create the user + builder role.** Today it inserts
+  a `field_ops_builders` row only (`supabase.js:253`); a builder added after the backfill
+  gets `user_id = NULL` and NO role — and would be **locked out the moment modules are
+  gated**. Make new-builder creation atomically create the `field_ops_users` row + builder
+  role (or run the backfill as part of it).
+- **`deleteBuilder` hard-deletes and orphans the user.** Today it `DELETE`s the builder
+  row (`supabase.js:248`), leaving an orphan `field_ops_users` row still holding the builder
+  role. Replace with **deactivation** (`field_ops_users.status='suspended'` + hide from
+  login) per the immutable-audit rule — don't hard-delete identities.
+- **Shared "Admin" PIN account → named admin accounts.** `is_admin` today is a single
+  shared "Admin" builder (one PIN). A shared admin identity **defeats per-person audit**.
+  Replace with named admin accounts (email login → `auth.users` → `field_ops_users`, admin
+  role) before gating.
+
+---
+
 ## Permission foundation — deferred items
 
 Foundation rebuilt under `field_ops_` after the 2026-09-26 LandIQ collision (see
