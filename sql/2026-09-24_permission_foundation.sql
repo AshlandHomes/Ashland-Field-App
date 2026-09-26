@@ -18,10 +18,12 @@
 --  * The one change to an existing table is ADD COLUMN IF NOT EXISTS user_id on
 --    dev_field_ops_builders — a nullable column, backfilled in phase (b). It
 --    changes nothing about PIN login (online or offline).
---  * RLS is ENABLED with NO policies on the new identity tables = deny-all to
+--  * RLS is ENABLED with NO policies on ALL 8 new tables = deny-all to
 --    anon/authenticated; the app's admin (service) key bypasses RLS, so nothing
---    breaks and no identity data is ever exposed to anon. Real policies land in
---    the gating phase, not here.
+--    breaks and no identity/authorization data is ever exposed to anon. Real
+--    policies land in the gating phase, not here.
+--  * Each section ends with NOTIFY pgrst, 'reload schema' so PostgREST registers
+--    the new tables/columns immediately.
 --
 -- THE SEAM (finalize BEFORE any LIVE apply): app_users.auth_user_id links a
 -- unified user to Supabase auth.users. LandIQ already lives on auth.users in this
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS dev_roles (
   name        text NOT NULL,
   description text
 );
+ALTER TABLE dev_roles ENABLE ROW LEVEL SECURITY;       -- deny-all; authorization data, never anon-writable
 
 -- 3) PERMISSIONS -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dev_permissions (
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS dev_permissions (
   key         text UNIQUE NOT NULL,                     -- e.g. field_app.use, admin_console.use, users.manage
   description text
 );
+ALTER TABLE dev_permissions ENABLE ROW LEVEL SECURITY;  -- deny-all; authorization data, never anon-writable
 
 -- 4) ROLE -> PERMISSIONS (the bundle) ---------------------------------------
 CREATE TABLE IF NOT EXISTS dev_role_permissions (
@@ -68,6 +72,7 @@ CREATE TABLE IF NOT EXISTS dev_role_permissions (
   permission_id uuid NOT NULL REFERENCES dev_permissions(id) ON DELETE CASCADE,
   PRIMARY KEY (role_id, permission_id)
 );
+ALTER TABLE dev_role_permissions ENABLE ROW LEVEL SECURITY;  -- deny-all; the bundle IS the authorization, never anon-writable
 
 -- 5) USER -> ROLES (multi-role = union of permissions) ----------------------
 CREATE TABLE IF NOT EXISTS dev_user_roles (
@@ -94,6 +99,7 @@ CREATE TABLE IF NOT EXISTS dev_modules (
   enabled                boolean NOT NULL DEFAULT true,
   required_permission_id uuid REFERENCES dev_permissions(id)
 );
+ALTER TABLE dev_modules ENABLE ROW LEVEL SECURITY;     -- deny-all; module on/off is authorization, never anon-writable
 
 -- 8) MANAGER (and later builder) SUBDIVISION ASSIGNMENT ----------------------
 CREATE TABLE IF NOT EXISTS dev_user_subdivisions (
@@ -150,13 +156,27 @@ SELECT m.key, m.name, true, p.id FROM (VALUES
   JOIN dev_permissions p ON p.key = m.perm
 ON CONFLICT (key) DO NOTHING;
 
+-- Make PostgREST see the new tables/columns immediately (else the API 404s them
+-- until a redeploy). Final line of the section per the house new-table checklist.
+NOTIFY pgrst, 'reload schema';
+
 -- ########################  END DEV SECTION  #################################
 
 
 -- ########################  LIVE SECTION  ####################################
--- NOT WRITTEN YET — deliberately. The live identity anchor must reconcile with
--- LandIQ's existing auth (profiles/roles/RLS) in this shared project first
--- (THE SEAM above). Once LandIQ's schema is read: mirror the DEV tables without
--- the dev_ prefix, wire app_users.auth_user_id -> auth.users(id), and compose
--- RLS with LandIQ's. This runs at the phase-(a) promote, after that read.
+-- NOT WRITTEN AS RUNNABLE DDL YET — deliberately. The live identity anchor must
+-- reconcile with LandIQ's existing auth (profiles/roles/RLS) in this shared
+-- project first (THE SEAM above), so writing executable LIVE SQL now would risk a
+-- parallel model inside one project. When LandIQ's schema has been read, the LIVE
+-- section mirrors the DEV section with these REQUIREMENTS baked in (same as the
+-- corrected DEV section — do not drop any):
+--   * same 8 tables WITHOUT the dev_ prefix.
+--   * ENABLE ROW LEVEL SECURITY on ALL 8 (deny-all) — including roles,
+--     permissions, role_permissions, modules (the authorization tables).
+--   * wire app_users.auth_user_id -> auth.users(id); decide reuse-LandIQ-profiles
+--     vs keep app_users; map LandIQ's roles into `roles`; compose RLS with LandIQ's.
+--   * house new-table checklist for anything the app will READ: GRANT to
+--     service_role (nothing reads these in phase (a), so deferred — see backlog).
+--   * FINAL LINE: NOTIFY pgrst, 'reload schema';
+-- This runs at the phase-(a) promote, AFTER the LandIQ read.
 -- ============================================================================
