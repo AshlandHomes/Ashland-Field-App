@@ -5,6 +5,23 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## Predecessor warning + template fidelity (from the lag-aware fix)
+
+- **Lag-window-aware warning.** The lag-aware fix skips the finish-time predecessor
+  warning ENTIRELY for a negative-lag (lead-time) task. But a lead time is a *window*,
+  not "no dependency": "drop material 6 days before framing" still assumes framing is
+  coming. If the predecessor hasn't even STARTED, finishing the lead-time task may still
+  be out of sequence. Refine: for negative-lag, warn only when the predecessor is
+  *not started* (vs unfinished); keep the current skip when it's started-but-unfinished.
+  (`ashland-stage-update-dev.html`, `finishTask` incompletePreds.)
+
+- **Template task count: 129 vs 148 in Buildtopia.** Our active template has 129 tasks;
+  the Buildtopia source has 148. Reconcile the 19-task gap — determine which are
+  intentionally dropped vs missing, and whether any missing tasks are schedule-driving
+  (critical path / gates). Investigation first, then a template-builder update if needed.
+
+---
+
 ## 🔒 BLOCKS STEP (d) — must resolve before gating modules by permission
 
 Raised during the step-(b) builder backfill. If a builder ends up with no user /
