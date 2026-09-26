@@ -5,6 +5,23 @@ Running log of what shipped and the state at each session's end. Newest first.
 
 ---
 
+## 🚨 STANDING RULE — THE DATABASE IS SHARED WITH LandIQ 🚨
+This Supabase project is SHARED with LandIQ. **Never create, alter, or reference a
+LandIQ table.**
+- **LandIQ owns:** `app_users`, `tenants`, `companies`, `contacts`, `deal_contacts`,
+  `hub_*`, `invites`, `action_log`, `user_table_prefs`.
+- **Field app owns:** `field_ops_*`, `sched_*`. **New field-app tables use the
+  `field_ops_` prefix.**
+- The `dev_` prefix isolates **dev from live ONLY — NOT from LandIQ.** LandIQ has its
+  own `dev_`-prefixed tables in this same project.
+- **Inventory before any DDL. Use plain `CREATE TABLE` (never `IF NOT EXISTS`) with an
+  existence pre-check** that RAISES on collision — `CREATE TABLE IF NOT EXISTS` silently
+  ADOPTS an existing (LandIQ) table, which is exactly the 2026-09-26 incident (we ran
+  `ALTER … dev_app_users` on LandIQ's user table + added FKs into it; remediated, no
+  lasting LandIQ impact).
+
+---
+
 ## 2026-09-20 — Single-source STAGE (compute-on-read)
 
 **Live head:** `main = 7d709ff`  ·  **Dev source head:** `Dev` current  ·  both pushed, trees clean.

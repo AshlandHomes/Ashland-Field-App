@@ -1,3 +1,18 @@
+-- ############################################################################
+-- ###  RETRACTED 2026-09-26 — DO NOT RUN. KEPT FOR HISTORY (incident cause).  ###
+-- ############################################################################
+-- This migration was the cause of the 2026-09-26 LandIQ collision. The DB is SHARED
+-- with LandIQ; `dev_` isolates dev from live ONLY, not from LandIQ. `dev_app_users`
+-- already existed as LandIQ's user table, so `CREATE TABLE IF NOT EXISTS
+-- dev_app_users` silently ADOPTED it, and this file then ran `ALTER ... ENABLE ROW
+-- LEVEL SECURITY` on it (a no-op — RLS was already on) and created 3 tables with FKs
+-- (ON DELETE CASCADE) INTO LandIQ's table. All 7 tables were dropped and the FKs
+-- removed on 2026-09-26; LandIQ's space is back to prior state, no lasting impact.
+-- The corrected rebuild is sql/2026-09-26_permission_foundation_fieldops.sql
+-- (own field_ops_users, zero LandIQ references, plain CREATE + pre-flight check).
+-- The DEV DDL below is wrapped in a /* ... */ block comment so it CANNOT run again.
+-- ############################################################################
+--
 -- ============================================================================
 -- Permission / Module FOUNDATION — schema migration (phase (a) of the platform
 -- permission build). ADDITIVE ONLY. Nothing reads or enforces these tables yet.
@@ -35,7 +50,8 @@
 -- ============================================================================
 
 
--- ########################  DEV SECTION (run now)  ###########################
+-- ########################  DEV SECTION — RETRACTED  #########################
+/*  RETRACTED — DO NOT RUN. Preserved verbatim as the incident record.
 
 -- 1) UNIFIED USER ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dev_app_users (
@@ -160,6 +176,7 @@ ON CONFLICT (key) DO NOTHING;
 -- until a redeploy). Final line of the section per the house new-table checklist.
 NOTIFY pgrst, 'reload schema';
 
+*/  -- end RETRACTED DEV block
 -- ########################  END DEV SECTION  #################################
 
 
