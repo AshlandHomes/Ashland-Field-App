@@ -10,8 +10,19 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABA
 const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
 
 async function supabaseRequest(method, path, body) {
-  const _m = path.match(/^([a-zA-Z0-9_]+)(.*)$/);
-  const _path = _m ? (TABLE_PREFIX + _m[1] + _m[2]) : path;
+  // Prefix the leading identifier with TABLE_PREFIX (dev_ on Dev, '' on live) so the
+  // same code hits dev_* or live objects. RPC paths are `rpc/<fn>` — prefix the
+  // FUNCTION NAME (the segment AFTER rpc/), never the literal "rpc", so Dev calls
+  // dev_<fn> and live calls <fn>. (Mirrors the table-prefix scheme for functions.)
+  let _path;
+  if (/^rpc\//i.test(path)) {
+    const _rest = path.slice(4);
+    const _rm = _rest.match(/^([a-zA-Z0-9_]+)(.*)$/);
+    _path = 'rpc/' + (_rm ? (TABLE_PREFIX + _rm[1] + _rm[2]) : _rest);
+  } else {
+    const _m = path.match(/^([a-zA-Z0-9_]+)(.*)$/);
+    _path = _m ? (TABLE_PREFIX + _m[1] + _m[2]) : path;
+  }
   const url = `${SUPABASE_URL}/rest/v1/${_path}`;
   const headers = {
     'Content-Type': 'application/json',
@@ -250,12 +261,22 @@ exports.handler = async function(event) {
       }
 
       case 'upsertBuilderRecord': {
-        const r = await supabaseRequest('POST', 'field_ops_builders?on_conflict=name', {
-          ...payload,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+        // ATOMIC create/update: one Postgres function upserts the builder AND ensures its
+        // field_ops_users row + role in a single transaction (no half-created builder).
+        // Prefix-aware: dev_field_ops_create_builder on Dev, field_ops_create_builder live.
+        const r = await supabaseRequest('POST', 'rpc/field_ops_create_builder', {
+          p_name:         payload.name,
+          p_subdivisions: payload.subdivisions || [],
+          p_pin_hash:     payload.pin_hash ?? null,
+          p_temp_pin:     payload.temp_pin ?? null,
+          p_is_admin:     !!payload.is_admin
         });
-        return { statusCode: 200, body: JSON.stringify(r.data) };
+        // Honest status: pass the DB error through (e.g. the D-6 suspended-name refusal)
+        // rather than reporting a false success.
+        return {
+          statusCode: r.error ? (r.status || 400) : 200,
+          body: JSON.stringify(r.error ? { error: r.error } : (r.data ?? {}))
+        };
       }
 
       case 'addDelay': {
