@@ -167,6 +167,19 @@ SELECT m.key, m.name, true, p.id FROM (VALUES
   JOIN dev_field_ops_permissions p ON p.key = m.perm
 ON CONFLICT (key) DO NOTHING;
 
+-- GRANTS — service_role BYPASSES RLS but that is NOT table privilege; without these
+-- the app (service key) can't read/write these tables. Minimal per-table privilege.
+-- (Also shipped standalone in sql/2026-09-27_fieldops_service_role_grants.sql for the
+-- already-applied Dev DB. No anon/authenticated grants — RLS-deny-all stands.)
+GRANT SELECT, INSERT, UPDATE, DELETE ON dev_field_ops_users                     TO service_role;
+GRANT SELECT, INSERT, DELETE         ON dev_field_ops_user_roles                 TO service_role;
+GRANT SELECT                         ON dev_field_ops_roles                      TO service_role;
+GRANT SELECT                         ON dev_field_ops_permissions                TO service_role;
+GRANT SELECT                         ON dev_field_ops_role_permissions           TO service_role;
+GRANT SELECT                         ON dev_field_ops_modules                    TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON dev_field_ops_user_permission_overrides  TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON dev_field_ops_user_subdivisions          TO service_role;
+
 COMMIT;
 
 -- After COMMIT: make PostgREST see the new tables.
@@ -209,6 +222,18 @@ FROM checks ORDER BY check_name;
 -- prefix removed everywhere (pre-flight array, CREATEs, ALTERs, seeds, verification)
 -- targeting field_ops_users, field_ops_roles, ... . No LandIQ reconciliation is
 -- needed (we reference none of their tables). Written out in full at promote so DEV
--- and LIVE cannot drift; the house new-table checklist (GRANT to service_role) is
--- added then, for anything the app will read (see ENHANCEMENT_BACKLOG.md).
+-- and LIVE cannot drift.
+--
+-- The GRANTs are NOT optional and NOT deferred — they ship in the SAME migration
+-- (house rule: RLS bypass is not table privilege). The LIVE block includes, verbatim
+-- with the dev_ prefix removed:
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON field_ops_users                     TO service_role;
+--   GRANT SELECT, INSERT, DELETE         ON field_ops_user_roles                 TO service_role;
+--   GRANT SELECT                         ON field_ops_roles                      TO service_role;
+--   GRANT SELECT                         ON field_ops_permissions                TO service_role;
+--   GRANT SELECT                         ON field_ops_role_permissions           TO service_role;
+--   GRANT SELECT                         ON field_ops_modules                    TO service_role;
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON field_ops_user_permission_overrides  TO service_role;
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON field_ops_user_subdivisions          TO service_role;
+-- NO anon / authenticated grants (RLS-deny-all stands). Final line: NOTIFY pgrst.
 -- ============================================================================

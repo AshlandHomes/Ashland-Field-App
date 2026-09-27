@@ -19,6 +19,12 @@ LandIQ table.**
   ADOPTS an existing (LandIQ) table, which is exactly the 2026-09-26 incident (we ran
   `ALTER … dev_app_users` on LandIQ's user table + added FKs into it; remediated, no
   lasting LandIQ impact).
+- **Every new table needs explicit `service_role` GRANTs in the SAME migration — RLS
+  bypass is NOT table privilege.** `service_role` has `BYPASSRLS` (skips row policies) but
+  still needs `SELECT/INSERT/UPDATE/DELETE` grants, or the app (service key) silently sees
+  nothing / can't write. The 2026-09-26 foundation tables shipped without DML grants →
+  Add Builder's atomic function rolled back on Dev (2026-09-27). Grant minimal DML per
+  table when the table is created; NO anon/authenticated grants (RLS-deny-all stands).
 
 ---
 
