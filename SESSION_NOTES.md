@@ -28,6 +28,36 @@ LandIQ table.**
 
 ---
 
+## 2026-09-27 — LIVE anon lockdown (security) — RESOLVED
+
+**Closed the anon read/write/delete exposure on the live field-app tables.** The shared
+project's anon key (shared with LandIQ, public if LandIQ ships it in-browser) + permissive
+`secret_all`/`allow_all_*` policies + anon grants let anyone read/write/delete all 23 live
+`field_ops_*`/`sched_*` tables directly — including **plaintext PINs** in `field_ops_builders`.
+
+**What changed (live):** ran `sql/2026-09-27_live_anon_lockdown.sql` STEP 1 — for each of the
+23 named tables, dropped every policy, `REVOKE ALL FROM anon, authenticated`, `ENABLE RLS`
+(deny-all; incl. the 3 previously RLS-off tables `sched_subdivision_lots`,
+`sched_subdivision_templates`, `sched_subdivisions`). Live app unaffected — the Netlify
+function runs on the **service key** (verified: `keycheck` → `hasServiceRole true`,
+`keyStart sb_secret_`), which bypasses RLS and holds full DML.
+
+**Verified:** STEP 2 = 4/4 PASS (policies 0, anon privs 0, authenticated privs 0, rls_disabled 0).
+Live smoke test all good (field-app PIN login, lot list, open lot, task-note write, admin
+console + builders/lots, and **LandIQ still loads**).
+
+**ROLLBACK:** STEP 0 captured the exact pre-state — **19 policies, 186 anon/authenticated
+grants, RLS state for 23 tables (20 on / 3 off)** — as verbatim regenerating SQL. **Collin holds
+that STEP 0 output** (authoritative rollback); a hand-written fallback also lives in the SQL file.
+
+**Still open (backlog, SECURITY):** PINs are PLAINTEXT (`pin_hash` stores the raw 4-digit) —
+hash server-side; no per-action authorization (function effectively public via the
+`/config`-served secret) — step (d) + separation; mark `SUPABASE_SERVICE_ROLE_KEY` +
+`API_SHARED_SECRET` secret in Netlify. Next code fix: **B — `getBuilders` PIN leak** (strip
+`pin_hash`/`temp_pin` from client responses), staged on Dev, promote pending.
+
+---
+
 ## 2026-09-26 — Permission foundation applied on Dev (steps a/b/c) + separation decision
 
 **Step (a) foundation** (`sql/2026-09-26_permission_foundation_fieldops.sql`) applied on Dev,

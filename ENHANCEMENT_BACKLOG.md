@@ -7,8 +7,14 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ## 🔐 SECURITY (2026-09-27 — from the live-exposure assessment)
 
-Recorded during the live anon-exposure work. The anon lockdown (SQL) and the
-getBuilders PIN-leak fix (code) are being handled now; these are the deferred ones.
+Recorded during the live anon-exposure work.
+- ✅ **RESOLVED 2026-09-27 — LIVE anon lockdown.** Dropped all permissive policies +
+  revoked anon/authenticated + enabled RLS on all 23 live field-app tables
+  (`sql/2026-09-27_live_anon_lockdown.sql`). Verified 4/4 PASS + live smoke test; rollback
+  (STEP 0 output) held by Collin. See SESSION_NOTES 2026-09-27.
+- 🔜 **getBuilders PIN-leak fix (code)** — staged on Dev (`963739c`), promote pending.
+
+The deferred ones below remain:
 
 - **PINs are stored PLAINTEXT.** `field_ops_builders.pin_hash` holds the raw 4-digit PIN
   (`verifyPin` compares `pin_hash === pin`, `supabase.js`; `setBuilderPin` writes
