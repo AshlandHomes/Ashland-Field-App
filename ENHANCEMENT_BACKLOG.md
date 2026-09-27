@@ -57,11 +57,11 @@ Raised during the step-(b) builder backfill. If a builder ends up with no user /
 no role, gating locks them out; a shared admin identity defeats the audit. Resolve
 ALL of these before any permission gating goes live.
 
-- **`upsertBuilderRecord` must also create the user + builder role.** Today it inserts
-  a `field_ops_builders` row only (`supabase.js:253`); a builder added after the backfill
-  gets `user_id = NULL` and NO role — and would be **locked out the moment modules are
-  gated**. Make new-builder creation atomically create the `field_ops_users` row + builder
-  role (or run the backfill as part of it).
+- **`upsertBuilderRecord` must also create the user + builder role.** ✅ BUILT on Dev
+  (blocker 1, commit `4cb8c2f`; pending live). `upsertBuilderRecord` now calls the atomic
+  `dev_field_ops_create_builder` RPC (add-only: creates the builder + `field_ops_users` row +
+  role in one transaction; refuses existing names). Still to do at promote: apply the LIVE
+  `field_ops_create_builder` function.
 - **`deleteBuilder` hard-deletes and orphans the user.** Today it `DELETE`s the builder
   row (`supabase.js:248`), leaving an orphan `field_ops_users` row still holding the builder
   role. Replace with **deactivation** (`field_ops_users.status='suspended'` + hide from
@@ -70,6 +70,28 @@ ALL of these before any permission gating goes live.
   shared "Admin" builder (one PIN). A shared admin identity **defeats per-person audit**.
   Replace with named admin accounts (email login → `auth.users` → `field_ops_users`, admin
   role) before gating.
+
+### Role model must be flexible + editable (Collin's requirement)
+
+The data model already supports this (multi-role: `dev_field_ops_user_roles` PK is
+`(user_id, role_id)`; effective permissions = union of all roles' grants, minus any
+per-user `deny` override; `super_user` holds all 9 permissions). What's missing is the
+surface + credential + gating to actually use it. Target example: ONE super_user launches
+the field app (as a builder), the manager view (as a manager), and the admin console — same
+person, multiple roles. Resolve before gating:
+
+- **User & Role management screen** in the admin console, gated by `users.manage`: view any
+  user, add/remove any roles (MULTI-role, not builder-XOR-admin — that rule lives only in the
+  one-time backfill and the create function's INITIAL role, never in the data model),
+  deactivate/reactivate. Changes take effect on the user's **next login**.
+- **PIN credential moves off `field_ops_builders` to the user level** (`field_ops_users` or a
+  credentials table) so ANY user type — builder, manager, super_user, admin — can hold a PIN
+  and launch the modules their roles allow. Today PINs live on the builder row, so a non-builder
+  user cannot log into the field app at all.
+- **Retire `is_admin`.** Admin access must come ONLY from roles (the `admin`/`super_user` role
+  via `user_roles`), so there is one source of admin truth. Migrate `is_admin=true` builders to
+  the role, then drop the column. (Removes the second admin mechanism; pairs with retiring the
+  shared `ADMIN_PIN` env gate.)
 
 ---
 
