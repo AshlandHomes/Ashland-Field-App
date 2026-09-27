@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Blocker 1 — ATOMIC "create builder" (DEV). Run ONCE (idempotent; CREATE OR REPLACE).
 --
--- Replaces the old bare INSERT into dev_field_ops_builders (a builder with no user
+-- Replaces the old bare upsert into dev_field_ops_builders (a builder with no user
 -- and no role — locked out the moment modules are gated) with ONE Postgres function
 -- that, in a SINGLE transaction, upserts the builder AND ensures its
 -- dev_field_ops_users row + role. A function body is atomic: if any step raises, the
@@ -9,15 +9,26 @@
 --
 -- Shared DB: every object here is dev_field_ops_* — zero LandIQ references.
 --
+-- COLUMN PRESERVATION (matches the old merge-duplicates handler, and is strictly
+-- SAFER): the DO UPDATE branch uses COALESCE(param, existing) for every mutable
+-- column, so a NULL argument means "leave this column alone." Re-saving an existing
+-- builder with p_pin_hash = NULL therefore can NEVER erase their PIN. (submitAddBuilder
+-- is the only caller and always sends pin_hash:null + a temp_pin; the permanent
+-- pin_hash set later via setBuilderPin is preserved on any re-save.)
+--
+-- ROLE TRACKS is_admin (D-1, builder XOR admin): the role is derived from the builder
+-- row's FINAL is_admin (after the upsert), and the OTHER of {builder, admin} is deleted
+-- in the same transaction — so flipping is_admin can never leave two roles. Other roles
+-- (field_manager / super_user) are never touched.
+--
 -- SECURITY (D-1): Postgres grants EXECUTE on new functions to PUBLIC by default and
 -- PostgREST exposes callable functions at /rest/v1/rpc/<name>. We REVOKE EXECUTE from
 -- PUBLIC/anon/authenticated and GRANT only to service_role, so the function is
--- reachable ONLY with the server (service) key — never from an anon/authenticated
--- client. Verified by the query at the bottom.
+-- reachable ONLY with the server (service) key. Verified by the query at the bottom.
 --
--- D-6: this function NEVER revives a suspended identity by name-match (the same
--- name-matching flaw removed from the backfill). Adding a name whose linked user is
--- suspended is REFUSED; reactivation is an explicit, id-based admin action (blocker 2).
+-- D-6: this function NEVER revives a suspended identity by name-match. Adding a name
+-- whose linked user is suspended is REFUSED; reactivation is an explicit, id-based
+-- admin action (blocker 2). Inert until blocker 2 introduces suspended users.
 --
 -- LIVE runs at promote: the SAME function WITHOUT the dev_ prefix
 -- (field_ops_create_builder over field_ops_*), same REVOKE/GRANT, same verification.
@@ -28,10 +39,10 @@
 
 CREATE OR REPLACE FUNCTION public.dev_field_ops_create_builder(
   p_name         text,
-  p_subdivisions text[]  DEFAULT '{}',
-  p_pin_hash     text    DEFAULT NULL,
-  p_temp_pin     text    DEFAULT NULL,
-  p_is_admin     boolean DEFAULT false
+  p_subdivisions text[]  DEFAULT NULL,   -- NULL = leave subdivisions unchanged on re-save
+  p_pin_hash     text    DEFAULT NULL,   -- NULL = leave pin_hash unchanged (never wipes a PIN)
+  p_temp_pin     text    DEFAULT NULL,   -- NULL = leave temp_pin unchanged
+  p_is_admin     boolean DEFAULT NULL    -- NULL = leave is_admin unchanged
 )
 RETURNS public.dev_field_ops_builders
 LANGUAGE plpgsql
@@ -42,7 +53,8 @@ DECLARE
   v_builder  public.dev_field_ops_builders;
   v_existing public.dev_field_ops_builders;
   v_uid      uuid;
-  v_role_key text := CASE WHEN COALESCE(p_is_admin, false) THEN 'admin' ELSE 'builder' END;
+  v_want     text;   -- desired role key, from the FINAL is_admin
+  v_other    text;   -- the role key to remove
 BEGIN
   IF p_name IS NULL OR btrim(p_name) = '' THEN
     RAISE EXCEPTION 'builder name is required';
@@ -50,8 +62,6 @@ BEGIN
 
   -- D-6 GUARD — never revive a suspended identity by name. If a builder with this name
   -- exists and its linked user is suspended, refuse (reactivation is id-based, blocker 2).
-  -- Inert until blocker 2 introduces suspended users; wired here so the create path is
-  -- correct by construction and blocker 2 need not retrofit it.
   SELECT b.* INTO v_existing FROM public.dev_field_ops_builders b WHERE b.name = p_name;
   IF FOUND AND v_existing.user_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM public.dev_field_ops_users u
@@ -63,21 +73,25 @@ BEGIN
 
   -- 1) UPSERT the builder by name. Arbiter = the single-column UNIQUE index on name
   --    inherited from the live table (dev_schema.sql: LIKE field_ops_builders INCLUDING
-  --    ALL). This is the same arbiter the old on_conflict=name upsert already relied on.
+  --    ALL). On INSERT (new builder) subdivisions/is_admin default to empty/false. On
+  --    conflict, every mutable column is COALESCE(param, existing) so a NULL argument
+  --    preserves the stored value — a re-save can never blank a PIN or subdivisions.
   INSERT INTO public.dev_field_ops_builders
     (name, subdivisions, pin_hash, temp_pin, is_admin, created_at, updated_at)
   VALUES
     (p_name, COALESCE(p_subdivisions, '{}'), p_pin_hash, p_temp_pin, COALESCE(p_is_admin, false), now(), now())
   ON CONFLICT (name) DO UPDATE SET
-    subdivisions = EXCLUDED.subdivisions,
-    pin_hash     = EXCLUDED.pin_hash,
-    temp_pin     = EXCLUDED.temp_pin,
-    is_admin     = EXCLUDED.is_admin,
+    -- unqualified table name = the EXISTING row (documented ON CONFLICT correlation);
+    -- COALESCE(param, existing) => a NULL argument preserves the stored value.
+    subdivisions = COALESCE(p_subdivisions, dev_field_ops_builders.subdivisions),
+    pin_hash     = COALESCE(p_pin_hash,     dev_field_ops_builders.pin_hash),
+    temp_pin     = COALESCE(p_temp_pin,     dev_field_ops_builders.temp_pin),
+    is_admin     = COALESCE(p_is_admin,     dev_field_ops_builders.is_admin),
     updated_at   = now()
   RETURNING * INTO v_builder;
 
   -- 2) USER — create-then-link ONLY if this builder has no user yet. Users-before-link
-  --    (the FK is non-deferred), same rule as the backfill. Also self-heals any builder
+  --    (the FK is non-deferred), same rule as the backfill. Self-heals any builder
   --    created by the old handler in the gap before this deploy.
   IF v_builder.user_id IS NULL THEN
     v_uid := gen_random_uuid();
@@ -89,9 +103,17 @@ BEGIN
     v_uid := v_builder.user_id;
   END IF;
 
-  -- 3) ROLE per is_admin (idempotent — safe on re-add / edit).
+  -- 3) ROLE — builder XOR admin, derived from the FINAL is_admin. Remove the other role
+  --    of the pair, then assert the desired one. Never touches field_manager/super_user.
+  v_want  := CASE WHEN COALESCE(v_builder.is_admin, false) THEN 'admin' ELSE 'builder' END;
+  v_other := CASE WHEN v_want = 'admin' THEN 'builder' ELSE 'admin' END;
+
+  DELETE FROM public.dev_field_ops_user_roles ur
+   USING public.dev_field_ops_roles r
+   WHERE ur.user_id = v_uid AND ur.role_id = r.id AND r.key = v_other;
+
   INSERT INTO public.dev_field_ops_user_roles (user_id, role_id)
-  SELECT v_uid, r.id FROM public.dev_field_ops_roles r WHERE r.key = v_role_key
+  SELECT v_uid, r.id FROM public.dev_field_ops_roles r WHERE r.key = v_want
   ON CONFLICT DO NOTHING;
 
   RETURN v_builder;
@@ -139,8 +161,24 @@ FROM checks ORDER BY check_name;
 */
 
 
+-- ####################  CLEANUP — remove the ZZ_Test rows (right FK order)  ##
+-- Scoped by name/id. Order: capture the user_id, delete roles, delete the builder
+-- (removes the FK reference builders.user_id -> users.id), THEN delete the user — so no
+-- FK is violated and no user is orphaned (the old hard Delete leaves the user behind).
+-- Wrapped in a transaction for the ON COMMIT DROP temp table. Safe to run repeatedly.
+/*
+BEGIN;
+CREATE TEMP TABLE _zz ON COMMIT DROP AS
+  SELECT user_id FROM public.dev_field_ops_builders WHERE name = 'ZZ_Test' AND user_id IS NOT NULL;
+DELETE FROM public.dev_field_ops_user_roles WHERE user_id IN (SELECT user_id FROM _zz);
+DELETE FROM public.dev_field_ops_builders   WHERE name = 'ZZ_Test';          -- drops the FK reference first
+DELETE FROM public.dev_field_ops_users      WHERE id IN (SELECT user_id FROM _zz);
+COMMIT;
+*/
+
+
 -- ####################  ROLLBACK (only if needed)  ###########################
--- Drops the function. The old code path (bare INSERT) must be restored in supabase.js
+-- Drops the function. The old code path (bare upsert) must be restored in supabase.js
 -- at the same time (see the commit that added this file).
 /*
 DROP FUNCTION IF EXISTS public.dev_field_ops_create_builder(text, text[], text, text, boolean);

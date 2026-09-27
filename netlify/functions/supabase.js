@@ -272,11 +272,14 @@ exports.handler = async function(event) {
           p_is_admin:     !!payload.is_admin
         });
         // Honest status: pass the DB error through (e.g. the D-6 suspended-name refusal)
-        // rather than reporting a false success.
-        return {
-          statusCode: r.error ? (r.status || 400) : 200,
-          body: JSON.stringify(r.error ? { error: r.error } : (r.data ?? {}))
-        };
+        // rather than reporting a false success. Extract the human message from the
+        // PostgREST error JSON so the admin console can show it plainly.
+        if (r.error) {
+          let msg = r.error;
+          try { const j = JSON.parse(r.error); msg = j.message || j.hint || j.details || r.error; } catch(_) {}
+          return { statusCode: r.status || 400, body: JSON.stringify({ error: msg }) };
+        }
+        return { statusCode: 200, body: JSON.stringify(r.data ?? {}) };
       }
 
       case 'addDelay': {

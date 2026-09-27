@@ -2143,7 +2143,8 @@ async function submitAddBuilder() {
   const subs = [...document.querySelectorAll('#builder-sub-checkboxes input:checked')].map(c=>c.value);
   if (!name) { alert('Name is required'); return; }
   if (!pin||pin.length!==4) { alert('4-digit PIN required'); return; }
-  await sbCall('upsertBuilderRecord', {name, subdivisions:subs, pin_hash:null, temp_pin:pin, is_admin:false});
+  const res = await sbCall('upsertBuilderRecord', {name, subdivisions:subs, pin_hash:null, temp_pin:pin, is_admin:false});
+  if (!res) return;   // sbCall already surfaced the error (e.g. the D-6 refusal); keep the modal open, don't report success
   closeModal('modal-add-builder');
   await loadBuilders(); renderBuildersTable();
 }
