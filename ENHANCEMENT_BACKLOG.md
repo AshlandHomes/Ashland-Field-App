@@ -5,6 +5,30 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🔐 SECURITY (2026-09-27 — from the live-exposure assessment)
+
+Recorded during the live anon-exposure work. The anon lockdown (SQL) and the
+getBuilders PIN-leak fix (code) are being handled now; these are the deferred ones.
+
+- **PINs are stored PLAINTEXT.** `field_ops_builders.pin_hash` holds the raw 4-digit PIN
+  (`verifyPin` compares `pin_hash === pin`, `supabase.js`; `setBuilderPin` writes
+  `pin_hash: pin`). The column name is a misnomer. **Hash PINs server-side** (in the Netlify
+  function) — hash on write, compare hash on verify — so a DB/response leak never exposes a
+  usable PIN. Migrate existing rows (rehash on next successful login, or force reset).
+- **No server-side authorization per action.** The Netlify function's only gate is
+  `API_SHARED_SECRET`, and that secret is handed to the browser via
+  `/.netlify/functions/config` — so the function is effectively public. ANY caller can invoke
+  ANY action: `upsertBuilderRecord` (create an admin), `updateBuilderPin`/`setBuilderPin`
+  (take over any account), `unlockBuilder`, `deleteBuilder`, `verifyAdminPin` (brute-force),
+  and every lot/task/template/company/subdivision write. **This is the permission
+  foundation's job (step d) + DB separation** — per-action authorization tied to the
+  authenticated user's effective permissions. Do NOT bolt on a partial check; build it with (d).
+- **Netlify env: mark secrets as secret.** `SUPABASE_SERVICE_ROLE_KEY` and
+  `API_SHARED_SECRET` are NOT marked "secret" in Netlify (other keys are). Mark both secret
+  (all scopes / deploy contexts) so they aren't exposed in build logs or the UI.
+
+---
+
 ## 🧭 DATABASE SEPARATION — committed direction (2026-09-26)
 
 LandIQ and the field app / admin console / manager module **will move to SEPARATE Supabase
