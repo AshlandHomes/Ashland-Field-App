@@ -9,26 +9,33 @@
 --
 -- Shared DB: every object here is dev_field_ops_* — zero LandIQ references.
 --
--- COLUMN PRESERVATION (matches the old merge-duplicates handler, and is strictly
--- SAFER): the DO UPDATE branch uses COALESCE(param, existing) for every mutable
--- column, so a NULL argument means "leave this column alone." Re-saving an existing
--- builder with p_pin_hash = NULL therefore can NEVER erase their PIN. (submitAddBuilder
--- is the only caller and always sends pin_hash:null + a temp_pin; the permanent
--- pin_hash set later via setBuilderPin is preserved on any re-save.)
+-- ADD-ONLY (no upsert). Add Builder REFUSES a name that already exists. Verified in
+-- the repo: the only caller is submitAddBuilder, and its payload (pin_hash:null +
+-- a new temp_pin) would RESET an existing builder's PIN — an accident, since PIN
+-- resets belong on the independent "Set PIN" button (updateBuilderPin). Nothing else
+-- relies on re-adding an existing name (Set PIN / subdivision edit / unlock / delete
+-- all use other actions). So the create path is now a plain INSERT for a NEW name; an
+-- existing name raises a clear error and changes nothing. No "two valid PINs" state.
 --
--- ROLE TRACKS is_admin (D-1, builder XOR admin): the role is derived from the builder
--- row's FINAL is_admin (after the upsert), and the OTHER of {builder, admin} is deleted
--- in the same transaction — so flipping is_admin can never leave two roles. Other roles
--- (field_manager / super_user) are never touched.
+-- NO ROLE XOR NEEDED. Because this creates a brand-new builder + brand-new user only,
+-- the user has no prior role — there is never an "other" role to delete. And no app
+-- path can change is_admin on an EXISTING builder (Add refuses existing names; Set PIN
+-- / unlock / subdivision edit / delete never touch is_admin; there is no is_admin
+-- toggle). So a single role INSERT is correct; a delete-the-other step would be dead
+-- code. (Blocker 3 creates named admins with a NEW name + is_admin=true → plain INSERT,
+-- admin role. Any future "change is_admin on an existing person" is a separate path.)
 --
 -- SECURITY (D-1): Postgres grants EXECUTE on new functions to PUBLIC by default and
 -- PostgREST exposes callable functions at /rest/v1/rpc/<name>. We REVOKE EXECUTE from
 -- PUBLIC/anon/authenticated and GRANT only to service_role, so the function is
 -- reachable ONLY with the server (service) key. Verified by the query at the bottom.
 --
--- D-6: this function NEVER revives a suspended identity by name-match. Adding a name
--- whose linked user is suspended is REFUSED; reactivation is an explicit, id-based
--- admin action (blocker 2). Inert until blocker 2 introduces suspended users.
+-- D-6: this function NEVER revives a suspended identity by name-match. An existing name
+-- whose linked user is suspended gets a specific refusal; reactivation is an explicit,
+-- id-based admin action (blocker 2). (Any existing name is refused regardless.)
+--
+-- CATCH-UP for pre-existing unlinked builders is the backfill's job (re-run-safe), NOT
+-- this function — this function only ever handles a genuinely new name.
 --
 -- LIVE runs at promote: the SAME function WITHOUT the dev_ prefix
 -- (field_ops_create_builder over field_ops_*), same REVOKE/GRANT, same verification.
@@ -38,11 +45,11 @@
 -- ########################  DEV FUNCTION (run once)  #########################
 
 CREATE OR REPLACE FUNCTION public.dev_field_ops_create_builder(
-  p_name         text,
-  p_subdivisions text[]  DEFAULT NULL,   -- NULL = leave subdivisions unchanged on re-save
-  p_pin_hash     text    DEFAULT NULL,   -- NULL = leave pin_hash unchanged (never wipes a PIN)
-  p_temp_pin     text    DEFAULT NULL,   -- NULL = leave temp_pin unchanged
-  p_is_admin     boolean DEFAULT NULL    -- NULL = leave is_admin unchanged
+  p_name         text,                   -- required; must NOT already exist (add-only)
+  p_subdivisions text[]  DEFAULT NULL,   -- NULL => '{}' (no subdivisions) on the new builder
+  p_pin_hash     text    DEFAULT NULL,   -- NULL => no permanent PIN yet (set via Set PIN / first login)
+  p_temp_pin     text    DEFAULT NULL,   -- the initial temp PIN for first login
+  p_is_admin     boolean DEFAULT NULL    -- NULL => false (builder role)
 )
 RETURNS public.dev_field_ops_builders
 LANGUAGE plpgsql
@@ -53,68 +60,52 @@ DECLARE
   v_builder  public.dev_field_ops_builders;
   v_existing public.dev_field_ops_builders;
   v_uid      uuid;
-  v_want     text;   -- desired role key, from the FINAL is_admin
-  v_other    text;   -- the role key to remove
+  v_want     text;   -- role key for the new builder, from is_admin
 BEGIN
   IF p_name IS NULL OR btrim(p_name) = '' THEN
     RAISE EXCEPTION 'builder name is required';
   END IF;
 
-  -- D-6 GUARD — never revive a suspended identity by name. If a builder with this name
-  -- exists and its linked user is suspended, refuse (reactivation is id-based, blocker 2).
+  -- ADD-ONLY GUARD — refuse any name that already exists. A suspended match gets the
+  -- specific D-6 message (reactivation is an id-based admin action, blocker 2); any
+  -- other existing name is refused too, pointing at the right tools. Add never edits.
   SELECT b.* INTO v_existing FROM public.dev_field_ops_builders b WHERE b.name = p_name;
-  IF FOUND AND v_existing.user_id IS NOT NULL
-     AND EXISTS (SELECT 1 FROM public.dev_field_ops_users u
-                  WHERE u.id = v_existing.user_id AND u.status = 'suspended') THEN
-    RAISE EXCEPTION
-      'A deactivated builder with this name exists — reactivate them or use a different name'
-      USING ERRCODE = 'unique_violation';
+  IF FOUND THEN
+    IF v_existing.user_id IS NOT NULL
+       AND EXISTS (SELECT 1 FROM public.dev_field_ops_users u
+                    WHERE u.id = v_existing.user_id AND u.status = 'suspended') THEN
+      RAISE EXCEPTION
+        'A deactivated builder named "%" exists — reactivate them or use a different name', p_name
+        USING ERRCODE = 'unique_violation';
+    ELSE
+      RAISE EXCEPTION
+        'A builder named "%" already exists — use Set PIN or edit them instead', p_name
+        USING ERRCODE = 'unique_violation';
+    END IF;
   END IF;
 
-  -- 1) UPSERT the builder by name. Arbiter = the single-column UNIQUE index on name
-  --    inherited from the live table (dev_schema.sql: LIKE field_ops_builders INCLUDING
-  --    ALL). On INSERT (new builder) subdivisions/is_admin default to empty/false. On
-  --    conflict, every mutable column is COALESCE(param, existing) so a NULL argument
-  --    preserves the stored value — a re-save can never blank a PIN or subdivisions.
+  -- 1) INSERT the new builder (plain INSERT — the name is proven not to exist; the
+  --    UNIQUE index on name still guards against a concurrent insert). subdivisions /
+  --    is_admin default to empty / false when the argument is NULL.
   INSERT INTO public.dev_field_ops_builders
     (name, subdivisions, pin_hash, temp_pin, is_admin, created_at, updated_at)
   VALUES
     (p_name, COALESCE(p_subdivisions, '{}'), p_pin_hash, p_temp_pin, COALESCE(p_is_admin, false), now(), now())
-  ON CONFLICT (name) DO UPDATE SET
-    -- unqualified table name = the EXISTING row (documented ON CONFLICT correlation);
-    -- COALESCE(param, existing) => a NULL argument preserves the stored value.
-    subdivisions = COALESCE(p_subdivisions, dev_field_ops_builders.subdivisions),
-    pin_hash     = COALESCE(p_pin_hash,     dev_field_ops_builders.pin_hash),
-    temp_pin     = COALESCE(p_temp_pin,     dev_field_ops_builders.temp_pin),
-    is_admin     = COALESCE(p_is_admin,     dev_field_ops_builders.is_admin),
-    updated_at   = now()
   RETURNING * INTO v_builder;
 
-  -- 2) USER — create-then-link ONLY if this builder has no user yet. Users-before-link
-  --    (the FK is non-deferred), same rule as the backfill. Self-heals any builder
-  --    created by the old handler in the gap before this deploy.
-  IF v_builder.user_id IS NULL THEN
-    v_uid := gen_random_uuid();
-    INSERT INTO public.dev_field_ops_users (id, display_name, auth_user_id, email, status)
-    VALUES (v_uid, p_name, NULL, NULL, 'active');
-    UPDATE public.dev_field_ops_builders SET user_id = v_uid WHERE id = v_builder.id
-    RETURNING * INTO v_builder;
-  ELSE
-    v_uid := v_builder.user_id;
-  END IF;
+  -- 2) USER — create the user, then link (users-before-link; the FK is non-deferred).
+  v_uid := gen_random_uuid();
+  INSERT INTO public.dev_field_ops_users (id, display_name, auth_user_id, email, status)
+  VALUES (v_uid, p_name, NULL, NULL, 'active');
+  UPDATE public.dev_field_ops_builders SET user_id = v_uid WHERE id = v_builder.id
+  RETURNING * INTO v_builder;
 
-  -- 3) ROLE — builder XOR admin, derived from the FINAL is_admin. Remove the other role
-  --    of the pair, then assert the desired one. Never touches field_manager/super_user.
-  v_want  := CASE WHEN COALESCE(v_builder.is_admin, false) THEN 'admin' ELSE 'builder' END;
-  v_other := CASE WHEN v_want = 'admin' THEN 'builder' ELSE 'admin' END;
-
-  DELETE FROM public.dev_field_ops_user_roles ur
-   USING public.dev_field_ops_roles r
-   WHERE ur.user_id = v_uid AND ur.role_id = r.id AND r.key = v_other;
-
+  -- 3) ROLE — one role for the new user (builder, or admin if is_admin). No "delete the
+  --    other" step: a brand-new user has no prior role, and no app path changes is_admin
+  --    on an existing builder, so there is nothing to reconcile.
+  v_want := CASE WHEN COALESCE(v_builder.is_admin, false) THEN 'admin' ELSE 'builder' END;
   INSERT INTO public.dev_field_ops_user_roles (user_id, role_id)
-  SELECT v_uid, r.id FROM public.dev_field_ops_roles r WHERE r.key = v_want
-  ON CONFLICT DO NOTHING;
+  SELECT v_uid, r.id FROM public.dev_field_ops_roles r WHERE r.key = v_want;
 
   RETURN v_builder;
 END;
