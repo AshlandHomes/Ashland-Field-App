@@ -13,6 +13,11 @@ Recorded during the live anon-exposure work.
   (`sql/2026-09-27_live_anon_lockdown.sql`). Verified 4/4 PASS + live smoke test; rollback
   (STEP 0 output) held by Collin. See SESSION_NOTES 2026-09-27.
 - 🔜 **getBuilders PIN-leak fix (code)** — staged on Dev (`963739c`), promote pending.
+- **Minimize client-facing columns (principle).** `getBuilders` no longer leaks
+  `pin_hash`/`temp_pin`, but still returns fields the login screen doesn't use
+  (`user_id`, `failed_attempts`, `biometric_credential_id`, `created_at`, `updated_at`).
+  Client-facing handlers should return only what the UI needs — tighten `getBuilders`
+  (and audit the other read handlers) to an explicit minimal column set.
 
 The deferred ones below remain:
 
