@@ -4,54 +4,63 @@
 -- (the Netlify actions, engine validation, and UI come in later steps).
 --
 -- Shared DB: every object here is dev_field_ops_* (OURS). It READS/UPDATES
--- dev_sched_lot_tasks (also ours). ZERO LandIQ references.
+-- dev_sched_lot_tasks and reads dev_sched_lots (also ours). ZERO LandIQ references.
 --
 -- WHAT THIS DOES
 --   * dev_field_ops_lot_structure_snapshots       — one row per apply (who/when/source/kind)
 --   * dev_field_ops_lot_structure_snapshot_tasks  — the target's structural rows BEFORE the
 --       apply (immutable undo record); created WITH NO DATA from dev_sched_lot_tasks so its
 --       structural columns inherit the EXACT live types (no guessing predecessors' type).
---   * dev_field_ops_apply_lot_structure(...)       — ONE transaction: snapshot the target's
---       current structure, then mirror (push) or restore (undo). Atomic = all-or-nothing.
+--   * dev_field_ops_apply_lot_structure(...)       — ONE transaction: guard, snapshot the
+--       target's current structure, then mirror (push) or restore (undo). Atomic. Returns
+--       jsonb { snapshot_id, applied } and RAISEs on any no-op or precondition failure.
 --
 -- TYPE-SAFE BY CONSTRUCTION: every structural write is column -> column (target<-source for
--- push, target<-snapshot for undo). No jsonb, no casts, so predecessors/lag/duration copy
--- whatever their real types are. Structural set (D-1): predecessors, lag, duration,
--- phase_name, phase_order, task_order. (est_start_date is NOT touched — lot-specific.)
+-- push, target<-snapshot for undo). No jsonb, no casts. Structural set (D-1): predecessors,
+-- lag, duration, phase_name, phase_order, task_order. (est_start_date is NOT touched.)
 --
 -- NO GRAPH VALIDATION HERE (deliberate): cycles/dangling-pred HARD-BLOCK and the
 -- dead-end/multi-source/unreachable WARNINGS are computed by the shared engine in the
--- Netlify preview/apply action BEFORE this function is ever called (later step). This
--- function trusts a pre-validated request; it is service_role-only (same effective
--- exposure as every other write — on the SECURITY backlog, not worse).
+-- Netlify preview/apply action BEFORE this function is called (later step). The in-function
+-- guards below are the SQL-level safety net (no-ops, cross-lot, 1:1, same-template), run
+-- inside the atomic boundary. Function is service_role-only.
 --
 -- SECURITY: RLS ON (deny-all) on both snapshot tables; service_role gets SELECT, INSERT
--- ONLY (immutable — no UPDATE/DELETE); NO anon/authenticated. Function EXECUTE locked to
--- service_role. (Note: dev_schema.sql's anon-grant loop would re-grant anon on these if
--- re-run — that's the known dev_schema tightening on the SECURITY backlog; this migration
--- sets the correct state and explicitly revokes anon/authenticated.)
+-- ONLY (immutable); NO anon/authenticated. Function EXECUTE locked to service_role.
+-- Pre-flight RAISEs if either table OR the function name already exists (plain CREATE —
+-- never CREATE OR REPLACE — so nothing is silently replaced; same collision class as the
+-- LandIQ incident). (dev_schema.sql's anon-grant loop would re-grant anon on these if
+-- re-run — known dev_schema tightening on the SECURITY backlog; this sets correct state.)
 --
--- LIVE at promote: same objects without the dev_ prefix (field_ops_* over sched_*), same
--- RLS/grants/EXECUTE. Written out in full at promote.
+-- LIVE at promote: same objects without the dev_ prefix, same guards/RLS/grants/EXECUTE.
 -- ============================================================================
 
 
--- ####################  INVENTORY (read-only; run FIRST)  ####################
--- Confirms the 7 structural columns exist on the live-cloned dev_sched_lot_tasks (so the
--- CREATE TABLE AS inherits them) and shows their exact types. Informational.
+-- ####################  BLOCK A — INVENTORY (read-only; run FIRST)  ##########
+-- A1. Confirm dev_sched_lot_tasks has the columns the function reads/writes (incl.
+--     updated_at, which the UPDATEs set). If updated_at is MISSING, tell me and I remove
+--     `updated_at = now()` from both UPDATEs before you run Block B.
 /*
 SELECT column_name, data_type, udt_name
 FROM information_schema.columns
 WHERE table_schema='public' AND table_name='dev_sched_lot_tasks'
-  AND column_name IN ('predecessors','lag','duration','phase_name','phase_order','task_order','bt_num','id','lot_id')
+  AND column_name IN ('id','lot_id','bt_num','predecessors','lag','duration',
+                      'phase_name','phase_order','task_order','updated_at')
 ORDER BY column_name;
+*/
+-- A2. Confirm the function name is FREE (expect 0 rows — any row = a collision to resolve).
+/*
+SELECT n.nspname AS schema, p.proname AS name, pg_get_function_identity_arguments(p.oid) AS args
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE p.proname = 'dev_field_ops_apply_lot_structure';
 */
 
 
--- ########################  DEV SECTION (run once)  ##########################
+-- ########################  BLOCK B — DEV SECTION (run once)  ################
 BEGIN;
 
--- Pre-flight: plain CREATE only — RAISE (never adopt) if either table already exists.
+-- Pre-flight: plain CREATE only — RAISE (never adopt/replace) if either table OR the
+-- function already exists.
 DO $$
 DECLARE t text;
 BEGIN
@@ -61,21 +70,25 @@ BEGIN
       RAISE EXCEPTION 'ABORT: table % already exists — inventory before DDL (shared DB).', t;
     END IF;
   END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+              WHERE p.proname = 'dev_field_ops_apply_lot_structure') THEN
+    RAISE EXCEPTION 'ABORT: function dev_field_ops_apply_lot_structure already exists (any signature) — drop it explicitly before re-creating.';
+  END IF;
 END $$;
 
 -- 1) SNAPSHOT HEADER — one row per apply.
 CREATE TABLE dev_field_ops_lot_structure_snapshots (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   target_lot_id uuid NOT NULL,
-  source_lot_id uuid,                                  -- the mirrored source (NULL for undo)
+  source_lot_id uuid,                                  -- mirrored source (NULL for undo)
   created_at    timestamptz NOT NULL DEFAULT now(),
   created_by    text,                                  -- actor (builder name), audit only
   kind          text NOT NULL CHECK (kind IN ('push','undo'))
 );
 ALTER TABLE dev_field_ops_lot_structure_snapshots ENABLE ROW LEVEL SECURITY;  -- deny-all
 
--- 2) SNAPSHOT DETAIL — the target's structural rows BEFORE the apply. Columns inherit the
---    EXACT types of dev_sched_lot_tasks (predecessors etc.) via CREATE TABLE AS ... NO DATA.
+-- 2) SNAPSHOT DETAIL — target's structural rows BEFORE apply; columns inherit the EXACT
+--    types of dev_sched_lot_tasks via CREATE TABLE AS ... WITH NO DATA.
 CREATE TABLE dev_field_ops_lot_structure_snapshot_tasks AS
   SELECT (NULL::uuid) AS snapshot_id,
          id AS task_id, bt_num, predecessors, lag, duration, phase_name, phase_order, task_order
@@ -96,31 +109,77 @@ REVOKE ALL ON dev_field_ops_lot_structure_snapshot_tasks FROM anon, authenticate
 GRANT SELECT, INSERT ON dev_field_ops_lot_structure_snapshots      TO service_role;
 GRANT SELECT, INSERT ON dev_field_ops_lot_structure_snapshot_tasks TO service_role;
 
--- 4) ATOMIC APPLY — snapshot current structure, then mirror (push) or restore (undo).
-CREATE OR REPLACE FUNCTION public.dev_field_ops_apply_lot_structure(
+-- 4) ATOMIC APPLY — guard, snapshot current structure, then mirror (push) or restore (undo).
+--    Plain CREATE FUNCTION (pre-flight guarantees the name is free).
+CREATE FUNCTION public.dev_field_ops_apply_lot_structure(
   p_target_lot_id       uuid,
   p_source_lot_id       uuid DEFAULT NULL,   -- PUSH: mirror this source lot's structure
   p_restore_snapshot_id uuid DEFAULT NULL,   -- UNDO: restore this prior snapshot's structure
   p_actor               text DEFAULT NULL,
   p_kind                text DEFAULT 'push'  -- 'push' | 'undo'
 )
-RETURNS uuid                                 -- the NEW snapshot id (this apply's before-state)
+RETURNS jsonb                                -- { snapshot_id, applied }
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_snap uuid;
+  v_snap       uuid;
+  v_applied    integer;
+  v_src_n      integer;
+  v_mismatch   integer;
+  v_snap_tgt   uuid;
+  v_snap_kind  text;
+  v_detail_n   integer;
 BEGIN
   IF p_target_lot_id IS NULL THEN RAISE EXCEPTION 'target lot id required'; END IF;
   IF p_kind NOT IN ('push','undo') THEN RAISE EXCEPTION 'kind must be push or undo'; END IF;
-  IF p_kind = 'push' AND p_source_lot_id IS NULL THEN
-    RAISE EXCEPTION 'push requires a source lot'; END IF;
-  IF p_kind = 'undo' AND p_restore_snapshot_id IS NULL THEN
-    RAISE EXCEPTION 'undo requires a snapshot to restore'; END IF;
 
-  -- 1) SNAPSHOT the target's CURRENT structure (before any change). Immutable record;
-  --    rolls back with everything else if the apply below fails (no orphan snapshot).
+  IF p_kind = 'push' THEN
+    ---------------------------------------------------------------- PUSH guards
+    IF p_source_lot_id IS NULL THEN RAISE EXCEPTION 'push requires a source lot'; END IF;
+    IF p_source_lot_id = p_target_lot_id THEN RAISE EXCEPTION 'source and target are the same lot'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.dev_sched_lots WHERE id = p_target_lot_id) THEN
+      RAISE EXCEPTION 'target lot % not found', p_target_lot_id; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.dev_sched_lots WHERE id = p_source_lot_id) THEN
+      RAISE EXCEPTION 'source lot % not found', p_source_lot_id; END IF;
+    -- same template (dev_sched_lots.template_id); IS DISTINCT FROM handles NULLs
+    IF (SELECT template_id FROM public.dev_sched_lots WHERE id = p_source_lot_id)
+         IS DISTINCT FROM
+       (SELECT template_id FROM public.dev_sched_lots WHERE id = p_target_lot_id) THEN
+      RAISE EXCEPTION 'source and target are on different templates — structure copy refused';
+    END IF;
+    -- 1:1 by bt_num (symmetric difference must be empty) and source must have tasks
+    SELECT count(*) INTO v_src_n FROM public.dev_sched_lot_tasks WHERE lot_id = p_source_lot_id;
+    IF v_src_n = 0 THEN RAISE EXCEPTION 'source lot has no tasks'; END IF;
+    SELECT
+      (SELECT count(*) FROM (SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_source_lot_id
+                             EXCEPT SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_target_lot_id) a)
+    + (SELECT count(*) FROM (SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_target_lot_id
+                             EXCEPT SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_source_lot_id) b)
+    INTO v_mismatch;
+    IF v_mismatch > 0 THEN
+      RAISE EXCEPTION 'source/target task sets differ by % bt_num(s) — not 1:1', v_mismatch;
+    END IF;
+  ELSE
+    ---------------------------------------------------------------- UNDO guards
+    IF p_restore_snapshot_id IS NULL THEN RAISE EXCEPTION 'undo requires a snapshot to restore'; END IF;
+    SELECT target_lot_id, kind INTO v_snap_tgt, v_snap_kind
+      FROM public.dev_field_ops_lot_structure_snapshots WHERE id = p_restore_snapshot_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'restore snapshot % not found', p_restore_snapshot_id; END IF;
+    IF v_snap_tgt <> p_target_lot_id THEN
+      RAISE EXCEPTION 'restore snapshot belongs to a different lot (% not %)', v_snap_tgt, p_target_lot_id; END IF;
+    -- only a PUSH before-snapshot is a valid restore point (undo reverts a push; it does
+    -- not restore from an undo's own before-state — that would be a redo, out of scope).
+    IF v_snap_kind <> 'push' THEN
+      RAISE EXCEPTION 'restore snapshot is kind=% — only a push before-snapshot can be restored', v_snap_kind; END IF;
+    SELECT count(*) INTO v_detail_n
+      FROM public.dev_field_ops_lot_structure_snapshot_tasks WHERE snapshot_id = p_restore_snapshot_id;
+    IF v_detail_n = 0 THEN RAISE EXCEPTION 'restore snapshot has no detail rows'; END IF;
+  END IF;
+
+  -- SNAPSHOT the target's CURRENT structure (before any change). Rolls back with everything
+  -- if the apply fails (no orphan snapshot).
   INSERT INTO public.dev_field_ops_lot_structure_snapshots
     (id, target_lot_id, source_lot_id, created_at, created_by, kind)
   VALUES (gen_random_uuid(), p_target_lot_id, p_source_lot_id, now(), p_actor, p_kind)
@@ -132,36 +191,29 @@ BEGIN
   FROM public.dev_sched_lot_tasks
   WHERE lot_id = p_target_lot_id;
 
-  -- 2) APPLY — column -> column (types always match; no casts). Lot-guarded both sides.
+  -- APPLY — column -> column (types always match). Lot-guarded.
   IF p_kind = 'push' THEN
     UPDATE public.dev_sched_lot_tasks tgt
-       SET predecessors = src.predecessors,
-           lag          = src.lag,
-           duration     = src.duration,
-           phase_name   = src.phase_name,
-           phase_order  = src.phase_order,
-           task_order   = src.task_order,
-           updated_at   = now()
+       SET predecessors = src.predecessors, lag = src.lag, duration = src.duration,
+           phase_name = src.phase_name, phase_order = src.phase_order, task_order = src.task_order,
+           updated_at = now()
       FROM public.dev_sched_lot_tasks src
-     WHERE tgt.lot_id = p_target_lot_id
-       AND src.lot_id = p_source_lot_id
-       AND src.bt_num = tgt.bt_num;
-  ELSE  -- undo: restore the target's structure from the chosen snapshot's detail rows
+     WHERE tgt.lot_id = p_target_lot_id AND src.lot_id = p_source_lot_id AND src.bt_num = tgt.bt_num;
+  ELSE
     UPDATE public.dev_sched_lot_tasks tgt
-       SET predecessors = snp.predecessors,
-           lag          = snp.lag,
-           duration     = snp.duration,
-           phase_name   = snp.phase_name,
-           phase_order  = snp.phase_order,
-           task_order   = snp.task_order,
-           updated_at   = now()
+       SET predecessors = snp.predecessors, lag = snp.lag, duration = snp.duration,
+           phase_name = snp.phase_name, phase_order = snp.phase_order, task_order = snp.task_order,
+           updated_at = now()
       FROM public.dev_field_ops_lot_structure_snapshot_tasks snp
-     WHERE snp.snapshot_id = p_restore_snapshot_id
-       AND tgt.lot_id = p_target_lot_id
-       AND tgt.id     = snp.task_id;
+     WHERE snp.snapshot_id = p_restore_snapshot_id AND tgt.lot_id = p_target_lot_id AND tgt.id = snp.task_id;
   END IF;
 
-  RETURN v_snap;
+  GET DIAGNOSTICS v_applied = ROW_COUNT;
+  IF v_applied = 0 THEN
+    RAISE EXCEPTION 'apply wrote 0 rows — nothing changed (no matching target tasks)';
+  END IF;
+
+  RETURN jsonb_build_object('snapshot_id', v_snap, 'applied', v_applied);
 END;
 $$;
 
@@ -177,7 +229,9 @@ NOTIFY pgrst, 'reload schema';
 -- ########################  END DEV SECTION  #################################
 
 
--- ####################  VERIFICATION — run after. Expect 9 rows, all PASS.  ##
+-- ####################  BLOCK C — VERIFICATION. Expect 9 rows, all PASS.  ####
+-- (Still 9: the new guards are RUNTIME behavior, exercised in the apply tests of later
+-- steps — not schema state. These 9 are the existence/security invariants.)
 /*
 WITH checks AS (
             SELECT 'header_table_exists' AS check_name,
@@ -189,13 +243,11 @@ WITH checks AS (
                      AND relname IN ('dev_field_ops_lot_structure_snapshots','dev_field_ops_lot_structure_snapshot_tasks'))::text, '2'
   UNION ALL SELECT 'service_role_dml_grants',   -- SELECT+INSERT on each of the 2 tables = 4
                    (SELECT count(*) FROM information_schema.role_table_grants
-                     WHERE grantee='service_role' AND table_schema='public'
-                       AND privilege_type IN ('SELECT','INSERT')
+                     WHERE grantee='service_role' AND table_schema='public' AND privilege_type IN ('SELECT','INSERT')
                        AND table_name IN ('dev_field_ops_lot_structure_snapshots','dev_field_ops_lot_structure_snapshot_tasks'))::text, '4'
   UNION ALL SELECT 'service_role_no_update_delete',
                    (SELECT count(*) FROM information_schema.role_table_grants
-                     WHERE grantee='service_role' AND table_schema='public'
-                       AND privilege_type IN ('UPDATE','DELETE')
+                     WHERE grantee='service_role' AND table_schema='public' AND privilege_type IN ('UPDATE','DELETE')
                        AND table_name IN ('dev_field_ops_lot_structure_snapshots','dev_field_ops_lot_structure_snapshot_tasks'))::text, '0'
   UNION ALL SELECT 'anon_authenticated_no_grants',
                    (SELECT count(*) FROM information_schema.role_table_grants
