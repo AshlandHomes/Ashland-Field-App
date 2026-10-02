@@ -412,7 +412,7 @@ html,body{overscroll-behavior-y:contain}
 
 <script src="schedule-engine.js?v=3"></script>
 <script src="note-resolution.js?v=1"></script>
-<script src="offline-queue.js?v=1"></script>
+<script src="offline-queue.js?v=2"></script>
 <script src="offline-data.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
@@ -1404,6 +1404,11 @@ async function _failSheetOpen(){
   document.querySelectorAll('#fs-overlay .fs-dismiss').forEach(b=>{ b.onclick=()=>_failSheetDismiss(b.dataset.id); });
 }
 async function _failSheetDismiss(id){
+  // Graceful degrade: if an OLD offline-queue.js is somehow loaded next to this HTML,
+  // markAcknowledged won't exist — tell the user to reload rather than silently no-op.
+  if(typeof OfflineQueue==='undefined' || typeof OfflineQueue.markAcknowledged!=='function'){
+    alert('Please reload the app to update, then dismiss.'); return;
+  }
   try{ await OfflineQueue.markAcknowledged(id); }catch(e){}
   await updateSyncStatus();   // recount the badge
   _failSheetOpen();           // re-render (auto-closes when none remain)
@@ -2550,6 +2555,14 @@ async function _bpBuildIntents(chosen){
   }));
 }
 
+// Short, plain per-lot failure line for the push summary, e.g.
+// "Lot 26: 3 tasks not updated — dates before this lot’s start."
+function _bpShortFail(lot, err){
+  const m=(err||'').match(/rejected (\d+)/);
+  if(m) return lot+': '+m[1]+' task'+(m[1]==='1'?'':'s')+' not updated — dates before this lot’s start';
+  if(/did not fully apply|applied NOTHING/.test(err||'')) return lot+': some tasks didn’t apply';
+  return lot+': didn’t fully apply';
+}
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length) return;
@@ -2577,33 +2590,43 @@ async function _bpApply(){
     return;
   }
 
-  // ONLINE: route each through the durable queue, which drains IMMEDIATELY — same instant
-  // round-trip, same executePushLot writes, same progress + summary as the old inline path.
+  // ONLINE: route each through the durable queue, which drains IMMEDIATELY. Classify from
+  // the honest drain report (_pushDrainReport), NOT `result` — drainQueue only returns a
+  // result for SYNCED items, so a permanent failure returns null and would otherwise be
+  // miscounted as success with no message (the bug: an online push that failed 3 tasks
+  // showed "Done"). Capture each push's report entry right after its drain.
   _bpProgressScreen(total);
-  const doneLots=[], failedLots=[]; let completed=0, queuedMid=0;
+  _pushDrainReport = [];
+  const outcomes=[]; let completed=0;
   try{
     for(const intent of intents){
       _bpProgress(completed, total, intent.target.lot_number);
-      const {result}=await queueAndSync(intent);         // enqueue + (online) drain now
-      if(!_isOnline){ queuedMid++; }                     // transport dropped mid-push -> remaining queued
-      else if(result && result.error){ failedLots.push(intent.target.lot_number); }
-      else { doneLots.push(intent.target.lot_number); }
+      await queueAndSync(intent);                        // enqueue + (online) drain now
+      if(!_isOnline){ outcomes.push({lot:intent.target.lot_number, queued:true}); }
+      else {
+        const e=[..._pushDrainReport].reverse().find(x=>x && x.lot===intent.target.lot_number);
+        outcomes.push({lot:intent.target.lot_number, entry:e||null});
+      }
       completed++;
       _bpProgress(completed, total, null);
     }
   } finally { _bpGuardOff(); }
 
+  const doneLots=[], failedLines=[], retryLots=[]; let queuedMid=0;
+  outcomes.forEach(o=>{
+    if(o.queued){ queuedMid++; return; }
+    const e=o.entry;
+    if(e && e.error){ if(e.retrying) retryLots.push(o.lot); else failedLines.push(_bpShortFail(o.lot, e.error)); }
+    else doneLots.push(o.lot);
+  });
+
   await new Promise(r=>setTimeout(r, 700));
   _bpClose();
-  let msg;
-  if(queuedMid>0){
-    msg=doneLots.length+' of '+total+' pushed; '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
-    if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
-  } else {
-    msg=doneLots.length+' of '+total+' lots updated.';
-    if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
-    if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
-  }
+  let msg = doneLots.length+' of '+total+' lots updated.';
+  if(doneLots.length)    msg+='\n\n✓ Done: '+doneLots.join(', ');
+  if(retryLots.length)   msg+='\n\n⏳ Still queued (will retry): '+retryLots.join(', ');
+  if(queuedMid>0)        msg+='\n\n⏳ '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
+  if(failedLines.length) msg+='\n\n✗ '+failedLines.join('\n');
   alert(msg);
 
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
