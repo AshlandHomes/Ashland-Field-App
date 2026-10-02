@@ -164,6 +164,9 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-lotstage{margin-left:auto;font-size:12px;color:#95a5a6}
 .bp-note-wrap{margin-top:14px;border-top:1px solid #eee;padding-top:12px}
 .bp-note-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:#34495e;cursor:pointer}
+.bp-struct-wrap{margin-top:14px;border-top:1px solid #eee;padding-top:12px}
+.bp-struct-hint{font-size:11px;color:#7f8c8d;margin-top:5px;line-height:1.35}
+.bp-note-toggle.bp-disabled{color:#b2bec3;cursor:not-allowed}
 .bp-note-toggle input{width:16px;height:16px}
 #bp-note-fields textarea{width:100%;margin-top:8px;min-height:64px;border:1px solid #dfe4e7;border-radius:8px;padding:8px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
 .bp-flags{display:flex;gap:6px;margin-top:8px}
@@ -2120,6 +2123,7 @@ let _bpSelected = {};      // {lotId: true}
 let _bpIncludeNote = false;
 let _bpNoteText = '';
 let _bpNoteFlag = 'none';
+let _bpStructure = false;   // "Also copy schedule changes" — lot mode only, OFF by default, online-only
 
 // candidate lots: same subdivision as curLot, active (not closed), not curLot
 function _bpCandidateLots(){
@@ -2138,7 +2142,7 @@ function openBulkPushTask(btNum){
   const cand=_bpCandidateLots();
   if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
   _bpMode='task'; _bpBtNum=btNum; _bpTargets=cand; _bpSelected={};
-  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none';
+  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none'; _bpStructure=false;
   _bpRenderPicker();
 }
 function openBulkPushLot(){
@@ -2146,7 +2150,7 @@ function openBulkPushLot(){
   const cand=_bpCandidateLots();
   if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
   _bpMode='lot'; _bpBtNum=null; _bpTargets=cand; _bpSelected={};
-  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none';
+  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none'; _bpStructure=false;
   _bpRenderPicker();
 }
 
@@ -2186,6 +2190,22 @@ function _bpRenderPicker(){
     +'</div></div></div>'
   ) : '';
 
+  // STRUCTURE copy — lot mode only; OFF by default; ONLINE-only (preview validates +
+  // atomic apply need the network). Offline → disabled with a one-line reason. Force OFF
+  // when not applicable so a stale checked state can't carry through.
+  if(_bpMode!=='lot' || !_isOnline) _bpStructure = false;
+  const structBlock = _bpMode==='lot' ? (
+    '<div class="bp-struct-wrap">'
+    +'<label class="bp-note-toggle'+(_isOnline?'':' bp-disabled')+'">'
+    +'<input type="checkbox" id="bp-struct-on" '+(_bpStructure?'checked':'')+(_isOnline?'':' disabled')+'> Also copy schedule changes'
+    +'</label>'
+    +'<div class="bp-struct-hint">'
+    +(_isOnline
+        ? 'Copies this lot’s task sequence (predecessors, durations, phases) to the targets. You’ll preview every change before it applies.'
+        : '⚠ Needs a connection — schedule copy is validated and applied online. The status push below still works offline.')
+    +'</div></div>'
+  ) : '';
+
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
     +'<div class="bp-head"><div class="bp-title">'+title+'</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
@@ -2194,6 +2214,7 @@ function _bpRenderPicker(){
     +'<div class="bp-select-row"><button type="button" class="bp-selall" onclick="_bpSelectAll(true)">Select all</button><button type="button" class="bp-selall" onclick="_bpSelectAll(false)">Clear</button></div>'
     +'<div class="bp-lots">'+rows+'</div>'
     +noteBlock
+    +structBlock
     +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">Cancel</button><button class="bp-next" onclick="_bpToPreview()">Preview →</button></div>'
     +'</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
@@ -2208,6 +2229,8 @@ function _bpRenderPicker(){
   }
   const nt=document.getElementById('bp-note-text');
   if(nt){ nt.oninput=()=>{_bpNoteText=nt.value;}; }
+  const structOn=document.getElementById('bp-struct-on');
+  if(structOn){ structOn.onchange=()=>{ _bpStructure=structOn.checked; }; }
   document.querySelectorAll('#bp-overlay .bp-flag').forEach(b=>{
     b.onclick=()=>{ _bpNoteFlag=b.dataset.flag; document.querySelectorAll('#bp-overlay .bp-flag').forEach(x=>x.classList.remove('on')); b.classList.add('on'); };
   });
