@@ -169,8 +169,10 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-note-toggle.bp-disabled{color:#b2bec3;cursor:not-allowed}
 .bp-cards{max-height:52vh;overflow-y:auto;margin:6px 0}
 .bp-card{border:1px solid #e5e7eb;border-radius:9px;margin-bottom:8px;background:#fff}
-.bp-card>summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.bp-card>summary{list-style:none;cursor:pointer;padding:10px 30px 10px 12px;display:flex;flex-direction:column;gap:2px;position:relative}
 .bp-card>summary::-webkit-details-marker{display:none}
+.bp-card>summary::after{content:'▸';position:absolute;right:12px;top:10px;color:#9ca3af;font-size:13px}
+.bp-card[open]>summary::after{content:'▾'}
 .bp-card-lot{font-weight:700;font-size:14px;color:#1f2937}
 .bp-card-sum{font-size:12px;color:#6b7280;line-height:1.3}
 .bp-card-blk{border-color:#f5b7b1;background:#fdecea}
@@ -2301,7 +2303,7 @@ function _bpFmtD(d){ return d ? fmt(new Date(d+'T00:00:00')) : '—'; }
 function _bpEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
 function _bpHumanChange(col, c){
   const nm = p => (bn[p] && bn[p].name) ? (_bpEsc(bn[p].name)+' (#'+p+')') : ('#'+p);
-  if(col==='duration')    return 'duration '+c.old+' → '+c.new+' days';
+  if(col==='duration')    return c.old+' → '+c.new+' days';
   if(col==='lag')         return 'lag '+c.old+' → '+c.new+' days';
   if(col==='phase_name')  return 'phase “'+_bpEsc(c.old||'—')+'” → “'+_bpEsc(c.new||'—')+'”';
   if(col==='phase_order') return 'phase order '+c.old+' → '+c.new;
@@ -2337,33 +2339,32 @@ async function _bpToStructurePreview(chosen){
 function _bpStructCard(entry){
   const l=entry.lot, lot=_bpEsc(l.lot_number);
   if(entry.status==='unavailable'||entry.status==='error'){
-    const why=entry.status==='error'?('couldn’t preview — '+_bpEsc(entry.reason)):('not available — '+_bpEsc(entry.reason));
-    return '<details class="bp-card bp-card-off"><summary><span class="bp-card-lot">'+lot+'</span>'
-      +'<span class="bp-card-sum">Schedule copy '+why+'. Status will still be pushed.</span></summary></details>';
+    const why=entry.status==='error'?'can’t preview':'can’t copy ('+_bpEsc(entry.reason)+')';
+    return '<details open class="bp-card bp-card-off"><summary><span class="bp-card-lot">'+lot+'</span>'
+      +'<span class="bp-card-sum">'+why+' — status still pushed</span></summary></details>';
   }
   const p=entry.preview, diff=p.diff||[], blk=p.blockers||[];
-  const caused=(p.warnings||[]).filter(w=>!_bpWarnIsExisting(w));
-  const already=(p.warnings||[]).filter(_bpWarnIsExisting);
+  // Builder view: ONLY copy-caused out-of-sequence (finished_before_predecessor). Template
+  // debt (multiple_sources / unreachable / neg-lag / orphan) and "already true" items are in
+  // the API response but intentionally NOT shown here.
+  const caused=(p.warnings||[]).filter(w=>w.rule==='finished_before_predecessor');
   const cb=(p.completion&&p.completion.before)||{}, ca=(p.completion&&p.completion.after)||{};
-  const compChanged = cb.projected!==ca.projected || cb.baseline!==ca.baseline;
+  const compChanged = cb.projected!==ca.projected;
   const sum = entry.status==='blocked'
-    ? '⛔ would break the schedule — '+blk.length+' issue'+(blk.length===1?'':'s')
-    : (diff.length? diff.length+' change'+(diff.length===1?'':'s')+(compChanged?' · completes '+_bpFmtD(cb.projected)+' → '+_bpFmtD(ca.projected):' · completion unchanged')
-                  : 'no schedule changes to copy');
+    ? '⛔ would break'
+    : (diff.length? diff.length+' change'+(diff.length===1?'':'s')+(compChanged?' · completes '+_bpFmtD(ca.projected):'') : 'no changes');
   let body='';
-  body+='<div class="bp-comp">Completion: <b>'+_bpFmtD(cb.projected)+'</b> → <b>'+_bpFmtD(ca.projected)+'</b>'
-       +'<span class="bp-comp-bl"> (baseline '+_bpFmtD(cb.baseline)+' → '+_bpFmtD(ca.baseline)+')</span></div>';
+  if(compChanged) body+='<div class="bp-comp">Completion '+_bpFmtD(cb.projected)+' → <b>'+_bpFmtD(ca.projected)+'</b></div>';
   if(diff.length){
-    body+='<div class="bp-sect-h">Task changes</div>'+diff.map(d=>{
+    body+=diff.map(d=>{
       const parts=Object.keys(d.changes).map(c=>_bpHumanChange(c,d.changes[c])).join('; ');
       return '<div class="bp-chg">'+_bpEsc(d.name)+' (#'+d.bt_num+'): '+parts+'</div>';
     }).join('');
-  }
-  if(blk.length)     body+='<div class="bp-sect-h bp-h-blk">⛔ Would break the schedule</div>'+blk.map(w=>'<div class="bp-w bp-w-blk">'+_bpEsc(w.message)+'</div>').join('');
-  if(caused.length)  body+='<div class="bp-sect-h bp-h-cause">⚠ Caused by this copy</div>'+caused.map(w=>'<div class="bp-w">'+_bpEsc(w.message)+'</div>').join('');
-  if(already.length) body+='<div class="bp-sect-h bp-h-ok">ℹ️ Already true on this lot today</div>'+already.map(w=>'<div class="bp-w bp-w-ok">'+_bpEsc(w.message)+'</div>').join('');
+  } else body+='<div class="bp-chg">No schedule changes.</div>';
+  if(blk.length)    body+='<div class="bp-sect-h bp-h-blk">⛔ Would break the schedule</div>'+blk.map(w=>'<div class="bp-w bp-w-blk">'+_bpEsc(w.message)+'</div>').join('');
+  if(caused.length) body+='<div class="bp-sect-h bp-h-cause">⚠ Caused by this copy</div>'+caused.map(w=>'<div class="bp-w">'+_bpEsc(w.message)+'</div>').join('');
   const cls=entry.status==='blocked'?'bp-card bp-card-blk':'bp-card';
-  return '<details class="'+cls+'"><summary><span class="bp-card-lot">'+lot+'</span><span class="bp-card-sum">'+sum+'</span></summary><div class="bp-card-body">'+body+'</div></details>';
+  return '<details open class="'+cls+'"><summary><span class="bp-card-lot">'+lot+'</span><span class="bp-card-sum">'+sum+'</span></summary><div class="bp-card-body">'+body+'</div></details>';
 }
 function _bpRenderStructurePreview(chosen){
   // order: blocked first, then ok, then unavailable/error (blockers bubble to top)
@@ -2376,8 +2377,8 @@ function _bpRenderStructurePreview(chosen){
   const bits=[]; if(nOk) bits.push(nOk+' ready'); if(nBlk) bits.push(nBlk+' would break'); if(nOff) bits.push(nOff+' unavailable');
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
-    +'<div class="bp-head"><div class="bp-title">Schedule changes to copy</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
-    +'<div class="bp-subtitle">From '+_bpEsc(curLot.lot_number)+' → '+entries.length+' lot'+(entries.length===1?'':'s')+': '+bits.join(' · ')+'. Tap a lot for details. Nothing changes until you confirm.</div>'
+    +'<div class="bp-head"><div class="bp-title">Schedule changes</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-subtitle">From '+_bpEsc(curLot.lot_number)+' · '+bits.join(' · ')+' · nothing changes until you confirm</div>'
     +'<div class="bp-cards">'+entries.map(_bpStructCard).join('')+'</div>'
     +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button>'
     +'<button class="bp-next" onclick="_bpToPreview(true)">Continue to push →</button></div>'
