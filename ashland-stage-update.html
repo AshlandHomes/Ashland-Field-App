@@ -147,6 +147,11 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .arc-banner.done{background:#f0fdf4;border:1px solid #86efac;color:var(--green)}
 
 /* ===== BULK PUSH ===== */
+.fs-list{max-height:60vh;overflow-y:auto;margin:6px 0}
+.fs-item{border:1px solid #f1d6d6;border-radius:9px;background:#fdf0f0;padding:10px 12px;margin-bottom:8px}
+.fs-what{font-weight:700;font-size:14px;color:#8a1c1c}
+.fs-why{font-size:12px;color:#6b7280;line-height:1.35;margin:3px 0 8px}
+.fs-dismiss{background:#fff;border:1px solid #d9b3b3;color:#8a1c1c;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}
 .bp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:flex-end;justify-content:center}
 .bp-modal{background:#fff;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
 @media(min-width:600px){.bp-overlay{align-items:center}.bp-modal{border-radius:16px}}
@@ -1328,8 +1333,12 @@ function _relTime(iso){
 async function updateSyncStatus(){
   const el = ensureSyncStatusEl();
   let s; try { s = await OfflineQueue.summary(); } catch(e){ return; }
-  if (s.failed > 0){ el.textContent = '⚠ ' + s.failed + ' failed' + (s.pending ? ' · ' + s.pending + ' queued' : '');
-    el.style.background = '#fee2e2'; el.style.color = '#b91c1c'; el.style.display = ''; return; }   // loud
+  const nFail = (s.failedUnack != null) ? s.failedUnack : s.failed;   // dismissed failures don't count
+  if (nFail > 0){ el.textContent = '⚠ ' + nFail + ' failed' + (s.pending ? ' · ' + s.pending + ' queued' : '');
+    el.style.background = '#fee2e2'; el.style.color = '#b91c1c';
+    el.style.pointerEvents = 'auto'; el.style.cursor = 'pointer'; el.onclick = _failSheetOpen;   // TAPPABLE -> failed-items sheet
+    el.style.display = ''; return; }   // loud
+  el.style.pointerEvents = 'none'; el.style.cursor = ''; el.onclick = null;   // non-failed states: not tappable
   if (!_isOnline){
     let synced=null; try { synced=_relTime(await OfflineData.lastSynced()); } catch(e){}
     el.textContent = '⚠ offline' + (s.pending ? ' · ' + s.pending + ' queued' : '') + (synced ? ' · synced ' + synced : '');
@@ -1337,6 +1346,45 @@ async function updateSyncStatus(){
   if (s.pending > 0){ el.textContent = '⏳ syncing ' + s.pending;
     el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }    // informative
   el.textContent = '✓ synced'; el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = ''; // quiet
+}
+
+// ── FAILED-ITEMS SHEET — tap the "⚠ N failed" badge to see what didn't apply and dismiss
+//    (acknowledge) each. Dismiss NEVER deletes: the queue row is kept for audit, it just
+//    stops counting toward the badge (summary.failedUnack). Dismissed items are hidden. ──
+function _fsEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
+function _failWhat(a){
+  if(a && a.kind==='push_lot') return 'Push '+((a.source_lot_number)||'lot')+' → '+((a.target&&a.target.lot_number)||'lot');
+  return (a && (a.apiAction||a.type)) || 'Update';
+}
+function _failReasonShort(a){
+  const r=(a&&a.failed_reason)||'';
+  const m=r.match(/rejected (\d+)/);
+  if(m) return m[1]+' task'+(m[1]==='1'?'':'s')+' not updated — dates before this lot’s start';
+  if(/did not fully apply|applied NOTHING/.test(r)) return 'Some tasks didn’t apply';
+  return r ? r.slice(0,110) : 'Didn’t apply';
+}
+function _failClose(){ const o=document.getElementById('fs-overlay'); if(o) o.remove(); }
+async function _failSheetOpen(){
+  let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ rows=[]; }
+  const items=(rows||[]).filter(r=>r.status==='failed' && !r.acknowledged_at)
+    .sort((a,b)=>String(b.failed_at||'').localeCompare(String(a.failed_at||'')));
+  _failClose();
+  if(!items.length){ updateSyncStatus(); return; }   // nothing left -> just refresh the badge
+  const list=items.map(a=>'<div class="fs-item"><div class="fs-what">'+_fsEsc(_failWhat(a))+'</div>'
+    +'<div class="fs-why">'+_fsEsc(_failReasonShort(a))+(a.failed_at?' · '+(_relTime(a.failed_at)||''):'')+'</div>'
+    +'<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Dismiss</button></div>').join('');
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="fs-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Didn’t apply</div><button class="bp-x" onclick="_failClose()">✕</button></div>'
+    +'<div class="fs-list">'+list+'</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_failClose()">Close</button></div>'
+    +'</div></div>');
+  document.querySelectorAll('#fs-overlay .fs-dismiss').forEach(b=>{ b.onclick=()=>_failSheetDismiss(b.dataset.id); });
+}
+async function _failSheetDismiss(id){
+  try{ await OfflineQueue.markAcknowledged(id); }catch(e){}
+  await updateSyncStatus();   // recount the badge
+  _failSheetOpen();           // re-render (auto-closes when none remain)
 }
 
 if (typeof window !== 'undefined'){
@@ -2498,7 +2546,8 @@ async function _bpApply(){
     else if(typeof OfflineQueue!=='undefined' && OfflineQueue.summary){
       try{
         const sm=await OfflineQueue.summary();
-        if(sm.failed>0)       label='⚠ '+sm.failed+' failed';
+        const nf=(sm.failedUnack!=null?sm.failedUnack:sm.failed);
+        if(nf>0)              label='⚠ '+nf+' failed';
         else if(sm.pending>0) label='⏳ '+sm.pending+' still queued';
       }catch(e){}
     }
