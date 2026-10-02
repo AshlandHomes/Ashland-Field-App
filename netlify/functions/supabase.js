@@ -169,23 +169,34 @@ function _structDiff(targetRows, structByBt) {
   return out;
 }
 
-// D-3: a FINISHED target task whose NEW predecessor (same lot, by bt) is not finished —
-// out of sequence under the copied structure. WARNING, never a blocker.
-function _finishedBeforePredWarnings(proposedRows) {
+// D-3: a FINISHED task whose predecessor (same lot, by bt) is not finished. WARNING, never
+// a blocker. Split by whether the copy CAUSES it: an edge the copy ADDS/changes (pred not in
+// the target's CURRENT predecessors for that task) is reported as caused by the copy; an edge
+// that already exists on the target is labelled distinctly (already_on_target) so the copy is
+// never implied to cause a pre-existing condition. currentRows = the target's rows today.
+function _finishedBeforePredWarnings(proposedRows, currentRows) {
   const byBt = {}; proposedRows.forEach(function (r) { byBt[r.bt_num] = r; });
+  const curPreds = {};
+  (currentRows || []).forEach(function (r) { curPreds[r.bt_num] = new Set(r.predecessors || []); });
   const w = [];
   proposedRows.forEach(function (t) {
     if (t.status !== 'finished') return;
+    const cur = curPreds[t.bt_num] || new Set();
     (t.predecessors || []).forEach(function (p) {
       const pr = byBt[p];
-      if (pr && pr.status !== 'finished') {
+      if (!pr || pr.status === 'finished') return;               // predecessor finished (or absent) → fine
+      if (!cur.has(p)) {
         w.push({ rule: 'finished_before_predecessor', num: t.bt_num, pred: p, pre_existing_in_source: false,
           message: 'Task ' + t.bt_num + ' (' + (t.name || '') + ') is finished but its predecessor ' + p + ' is not — out of sequence under the copied structure.' });
+      } else {
+        w.push({ rule: 'finished_before_predecessor_existing', num: t.bt_num, pred: p, pre_existing_in_source: false, already_on_target: true,
+          message: 'Task ' + t.bt_num + ' (' + (t.name || '') + ') is finished but its predecessor ' + p + ' is not — already true on this lot today (not caused by the copy).' });
       }
     });
   });
   return w;
 }
+exports._finishedBeforePredWarnings = _finishedBeforePredWarnings;   // test hook (not a Netlify action)
 
 async function _latestPushSnapshot(targetId) {
   const r = await supabaseRequest('GET', `field_ops_lot_structure_snapshots?target_lot_id=eq.${targetId}&kind=eq.push&select=id,created_at&order=created_at.desc&limit=1`);
@@ -201,7 +212,7 @@ function _buildStructurePreview(tgt, structByBt, srcRowsForLabel) {
   const srcKeys = new Set((srcRowsForLabel ? ScheduleEngine.validateSchedule(srcRowsForLabel).warnings : []).map(_warnKey));
   const warnings = vp.warnings.map(function (x) {
     return Object.assign({}, x, { pre_existing_in_source: srcKeys.has(_warnKey(x)) });
-  }).concat(_finishedBeforePredWarnings(proposed));
+  }).concat(_finishedBeforePredWarnings(proposed, tgt.rows));
   const before = ScheduleEngine.computeLotSchedule(_structClone(tgt.rows), tgt.start);
   const after = ScheduleEngine.computeLotSchedule(proposed, tgt.start);
   return {
