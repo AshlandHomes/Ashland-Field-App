@@ -97,6 +97,126 @@ function checkDateEntry(u, ctx, today) {
   return ScheduleEngine.validateDateEntry(setting);
 }
 
+// ── lot-structure push helpers (feature: whole-lot push carries schedule structure) ──
+// The structural columns a structure push mirrors (D-1). est_start_date is NOT here —
+// it stays lot-specific. All downstream math/validation goes through the shared engine.
+const STRUCT_COLS = ['predecessors', 'lag', 'duration', 'phase_name', 'phase_order', 'task_order'];
+
+function _structClone(rows) { return (rows || []).map(function (r) { return Object.assign({}, r); }); }
+function _warnKey(w) { return w.rule + ':' + (w.num != null ? w.num : (w.nums || []).join(',')); }
+
+// Read one lot's structure context: rows (ordered), construction start, template_id, and
+// any duplicate bt_num (a 1:1-by-set check would otherwise mask a dup). Returns {error} on
+// a failed read / missing lot.
+async function _loadStructureLot(lotId) {
+  const lr = await supabaseRequest('GET', `sched_lots?id=eq.${lotId}&select=id,template_id,construction_start_date`);
+  const lot = (lr.data || [])[0];
+  if (!lot) return { error: 'lot ' + lotId + ' not found' };
+  const tr = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lotId}&select=*&order=task_order`);
+  if (tr.error) return { error: 'could not read tasks for lot ' + lotId };
+  const rows = tr.data || [];
+  const byBt = {}; const dup = {};
+  rows.forEach(function (r) { if (byBt[r.bt_num] !== undefined) dup[r.bt_num] = true; byBt[r.bt_num] = r; });
+  return { rows: rows, start: lot.construction_start_date || null, template_id: lot.template_id, dupBt: Object.keys(dup), byBt: byBt };
+}
+
+// Hard, structural refusals (NOT graph blockers): self, missing lot, duplicate bt, different
+// template, not 1:1 by bt_num. Returns { refusals:[...], src?, tgt? }.
+async function _structurePushPrecheck(sourceId, targetId) {
+  if (!sourceId || !targetId) return { refusals: ['source_lot_id and target_lot_id are required'] };
+  const refusals = [];
+  if (String(sourceId) === String(targetId)) refusals.push('source and target are the same lot');
+  const src = await _loadStructureLot(sourceId);
+  const tgt = await _loadStructureLot(targetId);
+  if (src.error) refusals.push(src.error);
+  if (tgt.error) refusals.push(tgt.error);
+  if (refusals.length) return { refusals };
+  if (src.dupBt.length) refusals.push('source lot has duplicate bt_num(s): ' + src.dupBt.join(', '));
+  if (tgt.dupBt.length) refusals.push('target lot has duplicate bt_num(s): ' + tgt.dupBt.join(', '));
+  if (String(src.template_id) !== String(tgt.template_id)) refusals.push('source and target are on different templates');
+  const sBt = new Set(src.rows.map(function (r) { return r.bt_num; }));
+  const tBt = new Set(tgt.rows.map(function (r) { return r.bt_num; }));
+  const srcOnly = [...sBt].filter(function (b) { return !tBt.has(b); });
+  const tgtOnly = [...tBt].filter(function (b) { return !sBt.has(b); });
+  if (srcOnly.length || tgtOnly.length) {
+    refusals.push('task sets are not 1:1 by bt_num (source-only: [' + srcOnly.join(',') + '], target-only: [' + tgtOnly.join(',') + '])');
+  }
+  return { refusals: refusals, src: src, tgt: tgt };
+}
+
+// Clone target rows, overwriting ONLY the structural columns from structByBt (by bt_num);
+// keep the target's own status/actuals/est so projected completion reflects target reality.
+function _proposeRows(targetRows, structByBt) {
+  return targetRows.map(function (t) {
+    const s = structByBt[t.bt_num] || {};
+    const o = Object.assign({}, t);
+    STRUCT_COLS.forEach(function (c) { if (s[c] !== undefined) o[c] = s[c]; });
+    return o;
+  });
+}
+
+// Per-task old->new diff of the structural columns (only changed tasks).
+function _structDiff(targetRows, structByBt) {
+  const out = [];
+  targetRows.forEach(function (t) {
+    const s = structByBt[t.bt_num]; if (!s) return;
+    const changes = {};
+    STRUCT_COLS.forEach(function (c) {
+      if (JSON.stringify(t[c]) !== JSON.stringify(s[c])) changes[c] = { old: t[c], new: s[c] };
+    });
+    if (Object.keys(changes).length) out.push({ bt_num: t.bt_num, name: t.name, changes: changes });
+  });
+  return out;
+}
+
+// D-3: a FINISHED target task whose NEW predecessor (same lot, by bt) is not finished —
+// out of sequence under the copied structure. WARNING, never a blocker.
+function _finishedBeforePredWarnings(proposedRows) {
+  const byBt = {}; proposedRows.forEach(function (r) { byBt[r.bt_num] = r; });
+  const w = [];
+  proposedRows.forEach(function (t) {
+    if (t.status !== 'finished') return;
+    (t.predecessors || []).forEach(function (p) {
+      const pr = byBt[p];
+      if (pr && pr.status !== 'finished') {
+        w.push({ rule: 'finished_before_predecessor', num: t.bt_num, pred: p, pre_existing_in_source: false,
+          message: 'Task ' + t.bt_num + ' (' + (t.name || '') + ') is finished but its predecessor ' + p + ' is not — out of sequence under the copied structure.' });
+      }
+    });
+  });
+  return w;
+}
+
+async function _latestPushSnapshot(targetId) {
+  const r = await supabaseRequest('GET', `field_ops_lot_structure_snapshots?target_lot_id=eq.${targetId}&kind=eq.push&select=id,created_at&order=created_at.desc&limit=1`);
+  return (r.data || [])[0] || null;
+}
+
+// Build the preview body (diff + blockers + labeled warnings + before/after completion) for
+// a proposed structure on a target lot. `srcRowsForLabel` is the structure's origin graph
+// whose warnings mark a proposed warning "pre_existing_in_source".
+function _buildStructurePreview(tgt, structByBt, srcRowsForLabel) {
+  const proposed = _proposeRows(tgt.rows, structByBt);
+  const vp = ScheduleEngine.validateSchedule(proposed);
+  const srcKeys = new Set((srcRowsForLabel ? ScheduleEngine.validateSchedule(srcRowsForLabel).warnings : []).map(_warnKey));
+  const warnings = vp.warnings.map(function (x) {
+    return Object.assign({}, x, { pre_existing_in_source: srcKeys.has(_warnKey(x)) });
+  }).concat(_finishedBeforePredWarnings(proposed));
+  const before = ScheduleEngine.computeLotSchedule(_structClone(tgt.rows), tgt.start);
+  const after = ScheduleEngine.computeLotSchedule(proposed, tgt.start);
+  return {
+    can_apply: vp.blockers.length === 0,
+    refusals: [],
+    blockers: vp.blockers,
+    warnings: warnings,
+    diff: _structDiff(tgt.rows, structByBt),
+    completion: {
+      before: { baseline: before.planEndDate, projected: before.projEndDate },
+      after: { baseline: after.planEndDate, projected: after.projEndDate }
+    }
+  };
+}
+
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -1229,6 +1349,75 @@ exports.handler = async function(event) {
         if (phase_order !== undefined) updates.phase_order = phase_order;
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
         return { statusCode: 200, body: JSON.stringify(r.data) };
+      }
+
+      // ── lot-structure push: PREVIEW (read-only — no writes) ──
+      case 'previewLotStructurePush': {
+        const { source_lot_id, target_lot_id } = payload;
+        const pre = await _structurePushPrecheck(source_lot_id, target_lot_id);
+        if (pre.refusals.length) {
+          return { statusCode: 200, body: JSON.stringify({ can_apply: false, refusals: pre.refusals, blockers: [], warnings: [], diff: [], completion: null }) };
+        }
+        // proposed = target mirrors source's structure; label warnings against the source graph
+        const preview = _buildStructurePreview(pre.tgt, pre.src.byBt, pre.src.rows);
+        return { statusCode: 200, body: JSON.stringify(preview) };
+      }
+
+      // ── lot-structure push: APPLY (re-validates server-side, then atomic RPC) ──
+      case 'applyLotStructurePush': {
+        const { source_lot_id, target_lot_id, actor } = payload;
+        const pre = await _structurePushPrecheck(source_lot_id, target_lot_id);
+        if (pre.refusals.length) return { statusCode: 400, body: JSON.stringify({ error: pre.refusals.join('; ') }) };
+        const proposed = _proposeRows(pre.tgt.rows, pre.src.byBt);
+        const vp = ScheduleEngine.validateSchedule(proposed);
+        if (vp.blockers.length) return { statusCode: 400, body: JSON.stringify({ error: 'blocked', blockers: vp.blockers }) };
+        const r = await supabaseRequest('POST', 'rpc/field_ops_apply_lot_structure', {
+          p_target_lot_id: target_lot_id, p_source_lot_id: source_lot_id, p_actor: actor || null, p_kind: 'push'
+        });
+        if (r.error) {
+          let msg = r.error; try { const j = JSON.parse(r.error); msg = j.message || j.hint || j.details || r.error; } catch (_) {}
+          return { statusCode: r.status || 400, body: JSON.stringify({ error: msg }) };
+        }
+        return { statusCode: 200, body: JSON.stringify(r.data || {}) };   // { snapshot_id, applied }
+      }
+
+      // ── lot-structure UNDO: PREVIEW (restore the latest push snapshot) ──
+      case 'previewLotStructureUndo': {
+        const { target_lot_id } = payload;
+        if (!target_lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'target_lot_id is required' }) };
+        const snap = await _latestPushSnapshot(target_lot_id);
+        if (!snap) return { statusCode: 200, body: JSON.stringify({ can_apply: false, refusals: ['no push to undo for this lot'], blockers: [], warnings: [], diff: [], completion: null }) };
+        const tgt = await _loadStructureLot(target_lot_id);
+        if (tgt.error) return { statusCode: 400, body: JSON.stringify({ error: tgt.error }) };
+        const det = await supabaseRequest('GET', `field_ops_lot_structure_snapshot_tasks?snapshot_id=eq.${snap.id}&select=*`);
+        const byBt = {}; (det.data || []).forEach(function (d) { byBt[d.bt_num] = d; });
+        // restoring the lot's OWN prior structure — nothing to label pre-existing (no source)
+        const preview = _buildStructurePreview(tgt, byBt, null);
+        preview.restore_snapshot_id = snap.id;
+        preview.snapshot_at = snap.created_at;
+        return { statusCode: 200, body: JSON.stringify(preview) };
+      }
+
+      // ── lot-structure UNDO: APPLY (re-validates, then atomic RPC with kind='undo') ──
+      case 'applyLotStructureUndo': {
+        const { target_lot_id, actor } = payload;
+        if (!target_lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'target_lot_id is required' }) };
+        const snap = await _latestPushSnapshot(target_lot_id);
+        if (!snap) return { statusCode: 400, body: JSON.stringify({ error: 'no push to undo for this lot' }) };
+        const tgt = await _loadStructureLot(target_lot_id);
+        if (tgt.error) return { statusCode: 400, body: JSON.stringify({ error: tgt.error }) };
+        const det = await supabaseRequest('GET', `field_ops_lot_structure_snapshot_tasks?snapshot_id=eq.${snap.id}&select=*`);
+        const byBt = {}; (det.data || []).forEach(function (d) { byBt[d.bt_num] = d; });
+        const vp = ScheduleEngine.validateSchedule(_proposeRows(tgt.rows, byBt));
+        if (vp.blockers.length) return { statusCode: 400, body: JSON.stringify({ error: 'blocked', blockers: vp.blockers }) };
+        const r = await supabaseRequest('POST', 'rpc/field_ops_apply_lot_structure', {
+          p_target_lot_id: target_lot_id, p_restore_snapshot_id: snap.id, p_actor: actor || null, p_kind: 'undo'
+        });
+        if (r.error) {
+          let msg = r.error; try { const j = JSON.parse(r.error); msg = j.message || j.hint || j.details || r.error; } catch (_) {}
+          return { statusCode: r.status || 400, body: JSON.stringify({ error: msg }) };
+        }
+        return { statusCode: 200, body: JSON.stringify(r.data || {} ) };  // { snapshot_id, applied }
       }
 
       case 'getTemplateStageMap': {
