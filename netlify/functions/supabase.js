@@ -197,6 +197,7 @@ function _finishedBeforePredWarnings(proposedRows, currentRows) {
   return w;
 }
 exports._finishedBeforePredWarnings = _finishedBeforePredWarnings;   // test hook (not a Netlify action)
+exports._buildStructurePreview = (...a) => _buildStructurePreview(...a);   // test hook (defined below)
 
 async function _latestPushSnapshot(targetId) {
   const r = await supabaseRequest('GET', `field_ops_lot_structure_snapshots?target_lot_id=eq.${targetId}&kind=eq.push&select=id,created_at&order=created_at.desc&limit=1`);
@@ -204,15 +205,28 @@ async function _latestPushSnapshot(targetId) {
 }
 
 // Build the preview body (diff + blockers + labeled warnings + before/after completion) for
-// a proposed structure on a target lot. `srcRowsForLabel` is the structure's origin graph
-// whose warnings mark a proposed warning "pre_existing_in_source".
+// a proposed structure on a target lot.
+//   PUSH (srcRowsForLabel = the source graph): a proposed warning also present on the SOURCE
+//     is labelled pre_existing_in_source — the copy didn't introduce it.
+//   UNDO (srcRowsForLabel = null): there IS no source. A proposed (restored) warning also
+//     present on the CURRENT target is labelled already_on_target — the undo didn't introduce
+//     it. (Never imply a source/new condition that doesn't exist.)
 function _buildStructurePreview(tgt, structByBt, srcRowsForLabel) {
   const proposed = _proposeRows(tgt.rows, structByBt);
   const vp = ScheduleEngine.validateSchedule(proposed);
-  const srcKeys = new Set((srcRowsForLabel ? ScheduleEngine.validateSchedule(srcRowsForLabel).warnings : []).map(_warnKey));
-  const warnings = vp.warnings.map(function (x) {
-    return Object.assign({}, x, { pre_existing_in_source: srcKeys.has(_warnKey(x)) });
-  }).concat(_finishedBeforePredWarnings(proposed, tgt.rows));
+  let warnings;
+  if (srcRowsForLabel) {
+    const srcKeys = new Set(ScheduleEngine.validateSchedule(srcRowsForLabel).warnings.map(_warnKey));
+    warnings = vp.warnings.map(function (x) {
+      return Object.assign({}, x, { pre_existing_in_source: srcKeys.has(_warnKey(x)) });
+    });
+  } else {
+    const curKeys = new Set(ScheduleEngine.validateSchedule(tgt.rows).warnings.map(_warnKey));
+    warnings = vp.warnings.map(function (x) {
+      return Object.assign({}, x, { already_on_target: curKeys.has(_warnKey(x)) });
+    });
+  }
+  warnings = warnings.concat(_finishedBeforePredWarnings(proposed, tgt.rows));
   const before = ScheduleEngine.computeLotSchedule(_structClone(tgt.rows), tgt.start);
   const after = ScheduleEngine.computeLotSchedule(proposed, tgt.start);
   return {
