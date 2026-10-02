@@ -1119,8 +1119,11 @@ exports.handler = async function(event) {
         for (const u of updates) {
           if (!u || !u.task_id) { failed.push({ task_id: u && u.task_id, error: 'missing task_id' }); continue; }
           // Hard gate: skip (and report) any impossible date; valid updates still write.
+          // A date-guard rejection is a PERMANENT validation failure (the dates can never
+          // pass for this lot) — tag it so the client stops retrying it forever. A DB/
+          // network error below carries NO permanent flag (transient → retry).
           const gv = checkDateEntry(u, guardCtx, guardToday);
-          if (!gv.ok) { failed.push({ task_id: u.task_id, error: gv.message }); continue; }
+          if (!gv.ok) { failed.push({ task_id: u.task_id, error: gv.message, permanent: true }); continue; }
           const upd = { updated_at: stamp };
           if (u.status !== undefined) upd.status = u.status;
           if (u.actual_start !== undefined) upd.actual_start = u.actual_start;
