@@ -1033,9 +1033,9 @@ async function executePushLot(a){
   // A failed/empty TARGET READ is transient (server hiccup, reconnect race, not-yet-
   // loaded lot) — NOT a reason to drop the push. Return a non-permanent error so the
   // drain keeps it pending and retries; never markFailed on a read we couldn't trust.
-  if (data && data.error) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — could not read the target lot (' + data.error + '); will retry' };
+  if (data && data.error) return { error: 'Push to ' + (a.target && a.target.lot_number) + ' — could not read the target lot (' + data.error + '); will retry' };
   const rows = (data && data.tasks) || [];
-  if (!rows.length) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — target lot returned no tasks (not loaded yet?); will retry' };
+  if (!rows.length) return { error: 'Push to ' + (a.target && a.target.lot_number) + ' — target lot returned no tasks (not loaded yet?); will retry' };
   const gates = (data && data.gates) || [];
   const byNum = {}; rows.forEach(r => byNum[r.bt_num] = r);
 
@@ -1050,7 +1050,7 @@ async function executePushLot(a){
   // SURFACE (before any write): if nothing matched, this push applies zero writes — FAIL
   // with the reason (pushed vs target task lists) instead of a no-op that falsely "syncs".
   if (batch.length === 0) {
-    return { permanent: true, error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' applied NOTHING — pushed tasks ['
+    return { permanent: true, error: 'Push to ' + (a.target && a.target.lot_number) + ' applied NOTHING — pushed tasks ['
       + (a.pushed || []).map(p => p.bt_num).join(',') + '] matched none of the target\'s tasks ['
       + rows.map(r => r.bt_num).join(',') + ']' };
   }
@@ -1082,7 +1082,7 @@ async function executePushLot(a){
   // flag) → the drain keeps the push pending and retries; idempotent, so re-running is safe.
   for (const gw of gateWrites) {
     const gr = await sbCallRaw('updateScheduleLotGate', gw);
-    if (gr && gr.error) return { error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' — gate update failed (' + gr.error + '); will retry' };
+    if (gr && gr.error) return { error: 'Push to ' + (a.target && a.target.lot_number) + ' — gate update failed (' + gr.error + '); will retry' };
   }
 
   // 4) apply the task-status writes (the stage is NOT written — computed on read).
@@ -1100,12 +1100,16 @@ async function executePushLot(a){
     if (applied < batch.length) why.push('only ' + applied + ' of ' + batch.length + ' task writes applied');
     if (serverFailed.length) why.push('server rejected ' + serverFailed.length + ': ' + serverFailed.map(f => (f && f.error) || 'error').join('; '));
     if (notFound.length) why.push('tasks not on target: #' + notFound.join(', #'));
-    // PERMANENT only when the sole shortfall is structural (tasks that don't exist on the
-    // target — they will never appear). A server rejection or a short write count is
-    // TRANSIENT: leave it pending and retry (task writes are idempotent; note/delay have
-    // not run yet, so a retry can't double-post them).
-    const permanent = notFound.length > 0 && serverFailed.length === 0 && applied >= batch.length;
-    return { permanent: permanent, error: 'Push to Lot ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
+    // PERMANENT = no shortfall can self-heal on retry: notFound tasks never appear, and a
+    // server rejection flagged `permanent` (validation, e.g. the date guard — the dates can
+    // never pass for this lot) will never succeed. It's permanent only when there is NO
+    // transient server failure AND the batch is fully accounted for (applied + rejected ===
+    // batch). Any transient failure, or an unexplained short write, stays TRANSIENT → keep
+    // pending and retry (task writes are idempotent).
+    const transientFailed = serverFailed.filter(f => !(f && f.permanent));
+    const accounted = (applied + serverFailed.length) >= batch.length;
+    const permanent = transientFailed.length === 0 && accounted;
+    return { permanent: permanent, error: 'Push to ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
   }
 
   // Full task write confirmed. 5) optional note (frozen), then 6) inherited delays (frozen).
@@ -1141,10 +1145,10 @@ function _surfacePushReport(){
   const partial  = rep.filter(x => !x.error && x.notFound && x.notFound.length);
   if (!retrying.length && !failed.length && !partial.length) return;
   let msg = '';
-  if (failed.length)   msg += '⚠ A queued push did NOT apply:\n' + failed.map(f => '• Lot ' + f.lot + ' — ' + f.error).join('\n');
-  if (partial.length)  msg += (msg ? '\n\n' : '') + '⚠ Pushed, but some tasks weren\'t on the target:\n' + partial.map(p => '• Lot ' + p.lot + ' — missing task #' + p.notFound.join(', #')).join('\n');
+  if (failed.length)   msg += '⚠ A queued push could not be applied (it has STOPPED retrying — nothing else is affected):\n' + failed.map(f => '• ' + f.lot + ' — ' + f.error).join('\n');
+  if (partial.length)  msg += (msg ? '\n\n' : '') + '⚠ Pushed, but some tasks weren\'t on the target:\n' + partial.map(p => '• ' + p.lot + ' — missing task #' + p.notFound.join(', #')).join('\n');
   // Still-queued pushes: reassure — nothing lost, it will apply on the next sync.
-  if (retrying.length) msg += (msg ? '\n\n' : '') + '⏳ Still queued (will retry — nothing lost):\n' + retrying.map(r => '• Lot ' + r.lot + ' — ' + r.error).join('\n');
+  if (retrying.length) msg += (msg ? '\n\n' : '') + '⏳ Still queued (will retry — nothing lost):\n' + retrying.map(r => '• ' + r.lot + ' — ' + r.error).join('\n');
   try { alert(msg); } catch(e){}
 }
 
