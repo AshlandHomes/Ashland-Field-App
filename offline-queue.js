@@ -159,10 +159,14 @@
     return updateById(id, function (r) { r.status = 'synced'; r.synced_at = nowISO(); r.failed_reason = null; });
   }
 
-  function markFailed(id, reason) {
-    // RETAIN + surface; never drop. Bumps attempts so Layer 3 can back off.
+  function markFailed(id, reason, extra) {
+    // RETAIN + surface; never drop. Bumps attempts so Layer 3 can back off. `extra` (optional)
+    // stows structured detail on the row (e.g. failed_tasks) for a later readable surface.
     return updateById(id, function (r) {
       r.status = 'failed'; r.failed_reason = reason || null;
+      if (extra && typeof extra === 'object') {
+        for (var k in extra) { if (Object.prototype.hasOwnProperty.call(extra, k)) r[k] = extra[k]; }
+      }
       r.attempts = (r.attempts || 0) + 1; r.failed_at = nowISO();
     });
   }
