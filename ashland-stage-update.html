@@ -154,6 +154,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .fs-count{font-size:12px;color:#6b7280;margin:2px 0}
 .fs-group{margin:4px 0 6px}
 .fs-names{font-size:13px;color:#334155;line-height:1.35}
+.fs-nonames{font-size:12px;color:#9ca3af;font-style:italic;line-height:1.35}
 .fs-why{font-size:12px;color:#6b7280;line-height:1.35;margin:2px 0 0}
 .fs-time{font-size:11px;color:#9ca3af;margin:6px 0 8px}
 .fs-dismiss{background:#fff;border:1px solid #d9b3b3;color:#8a1c1c;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}
@@ -1425,13 +1426,28 @@ function _failWhen(iso){
   const t=d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
   return (d.toDateString()===new Date().toDateString()) ? t : (fmt(d)+', '+t);
 }
+// Older push rows (queued-failed before failed_tasks / per-task reasons were stored — e.g. the
+// 5dc81c8 hotfix) carry only `failed_reason` + the frozen `pushed` intent, no task names. Parse
+// the counts out of the stored reason so the sheet still shows "N of M". (`before construction
+// started (YYYY-MM-DD)` is still read by _failReasonCat/_failWhenDate, so the Why line is right.)
+function _failLegacyCounts(reason, total){
+  const s=String(reason||'');
+  let m=s.match(/only (\d+) of (\d+) task writes applied/);
+  if(m) return { failed: Math.max(0,(+m[2])-(+m[1])), total:+m[2] };
+  m=s.match(/(?:server )?rejected (\d+)/);
+  if(m) return { failed:+m[1], total: total };
+  return null;
+}
 // Render ONE failed item's body (subject → counts → per-reason groups → time → Got it).
 function _failItem(a, showTitle){
   const isPush = !!(a && a.kind==='push_lot');
   const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
   const subject = isPush ? ((src||'?')+' → '+(tgt||'?')) : (tgt||'?');   // lot_number already includes "Lot"
-  const total = (isPush && Array.isArray(a.pushed)) ? a.pushed.length : null;
-  const failedN = (Array.isArray(a&&a.failed_tasks)&&a.failed_tasks.length) ? a.failed_tasks.length : null;
+  const hasTasks = !!(Array.isArray(a&&a.failed_tasks) && a.failed_tasks.length);
+  const legacyPush = isPush && !hasTasks;                                // old row: counts/reason only, no names
+  let total = (isPush && Array.isArray(a.pushed)) ? a.pushed.length : null;
+  let failedN = hasTasks ? a.failed_tasks.length : null;
+  if(legacyPush){ const lc=_failLegacyCounts(a&&a.failed_reason, total); if(lc){ failedN=lc.failed; if(total==null) total=lc.total; } }
   const groups=_failGroups(a);
   let html='';
   if(showTitle) html+='<div class="fs-what">'+_fsEsc(_failTitle(a))+'</div>';
@@ -1441,6 +1457,7 @@ function _failItem(a, showTitle){
     const names=_failNames(g.names);
     html+='<div class="fs-group">';
     if(names) html+='<div class="fs-names">'+_fsEsc(names)+'</div>';
+    else if(legacyPush) html+='<div class="fs-nonames">Task names weren’t recorded for this older push.</div>';
     html+='<div class="fs-why">'+_fsEsc(_failWhy(g.cat, src, tgt, g.dateStr))+'</div>';
     html+='</div>';
   });
