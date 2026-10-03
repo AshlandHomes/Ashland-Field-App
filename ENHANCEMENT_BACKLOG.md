@@ -5,6 +5,38 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## ⏭️ NEXT — queue failure-classification fixes (2026-10-03, from the failed-items audit)
+
+**Priority: build IMMEDIATELY after the failed-items sheet wording hotfix ships. NOT backlog.
+Lot-structure push 5c/5d stays ON HOLD until both are live.** Found during the audit of every
+permanent queue-failure path (SESSION_NOTES 2026-10-03). Both violate the never-silent-drop rule.
+
+- **GAP 2 (SILENT DATA LOSS — LIVE TODAY, do first).** Six write handlers return
+  `{statusCode:200, body: JSON.stringify(r.data)}` **without checking `r.error`**, so a real
+  DB/RLS/constraint failure comes back as `r.data = null` → the drain marks the action
+  **synced** → the write is silently lost while the builder sees success. Evidence
+  (`netlify/functions/supabase.js`): `updateScheduleLotTask` :1344–1348, `editLotTask` :1378,
+  `addTaskNote` :1504–1508, `updateTaskNote` :1528, `updateScheduleLotGate` :1483,
+  `addTaskDelay` :1133–1142. (`supabaseRequest` already surfaces the error as `{status,error}`
+  — :51–54 — the handlers just ignore it.) **Fix:** each handler must detect `r.error`/`r.status>=400`
+  and return a real error response (with a `permanent` flag where the failure is structural),
+  so the drain retains + surfaces it instead of reporting success.
+
+- **GAP 1 (no transient/permanent split for non-push actions).** The drain treats **any**
+  server-returned `.error` on a non-push action as permanent → `markFailed` → never retried
+  (`ashland-stage-update-dev.html` drain `:1194–1205`, the `else` at `:1203`; only `push_lot`
+  honors a `permanent` flag, `:1201`). A transient 500 / DB blip
+  (`respondNoteResolution` 500 `supabase.js:1584`; outer `catch` 500 `:1830`) is thus dropped
+  permanently — the opposite of "never lose a queued action." **Fix:** give non-push actions
+  the same `permanent`-flag classification `executePushLot` already uses — only structural
+  (validation) failures become `failed`; transient ones stay `pending` and retry.
+
+Today GAP 1 rarely fires (non-push validation errors are pre-caught client-side, so the common
+case never reaches the queue) but GAP 2 is active silent loss on every DB-level write rejection.
+The failed-items sheet is honest about push failures but blind to both of these until fixed.
+
+---
+
 ## 🔐 SECURITY (2026-09-27 — from the live-exposure assessment)
 
 Recorded during the live anon-exposure work.

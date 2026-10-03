@@ -28,6 +28,32 @@ LandIQ table.**
 
 ---
 
+## 2026-10-03 — Failed-items sheet: redesign + reason-grouped wording (hotfix, on Dev)
+
+**Hotfix `hotfix/failed-badge-sheet` + Dev mirror — tested on Dev, NOT yet merged to main.**
+Finished the "Didn't apply" sheet: the ⚠-badge is gone, the sheet auto-opens after a push that
+partially fails and on app open, names the tasks, and uses "Got it" / "Remind me later". This
+session rewrote the copy to the approved wording (Collin): per-kind item titles ("Push didn't
+fully apply" / "Update didn't save"; multi-item header "Some updates didn't apply"), per-item
+layout (subject → "N of M tasks weren't updated:" → task names first-3+"and N more" → plain
+"Why:" line → time on its own grey line), reason-specific Why lines, and **mixed reasons grouped**
+one block each. `executePushLot` now carries each failed task's server error as `reason` so the
+sheet groups by reason. In-step proof held (generate-live(Dev) vs hotfix-live = only 5a/5b lines;
+failed-sheet region byte-identical). `offline-queue.js` unchanged (no `?v` bump). Dev commits
+`3a963d4` (redesign mirror) + `9307529` (wording); live mirror `d53d37f`.
+
+**AUDIT done — every permanent queue-failure path.** Key finding: the queue has TWO failure
+models — `push_lot` honors a `permanent` flag (retain vs retry), but **every other action treats
+any server `.error` as permanent** (no transient/retry). Single-task date entries are
+pre-validated client-side (same engine, online+offline), so the date-guard only produces a
+*queued* permanent failure through a **push** (source dates stamped onto a later-start target —
+the CW Lot 1 → Lot 26 case). Full table in the 2026-10-03 chat log. Two gaps recorded in
+ENHANCEMENT_BACKLOG as **NEXT (not backlog)**: GAP 2 = silent data loss LIVE today (six write
+handlers ignore `r.error`, report success on DB rejection); GAP 1 = non-push actions never retry
+a transient failure. **5c/5d of lot-structure push stay ON HOLD until GAPs 1–2 are live.**
+
+---
+
 ## 2026-09-27 — LIVE anon lockdown (security) — RESOLVED
 
 **Closed the anon read/write/delete exposure on the live field-app tables.** The shared
