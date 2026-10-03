@@ -149,8 +149,13 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 /* ===== BULK PUSH ===== */
 .fs-list{max-height:60vh;overflow-y:auto;margin:6px 0}
 .fs-item{border:1px solid #f1d6d6;border-radius:9px;background:#fdf0f0;padding:10px 12px;margin-bottom:8px}
-.fs-what{font-weight:700;font-size:14px;color:#8a1c1c}
-.fs-why{font-size:12px;color:#6b7280;line-height:1.35;margin:3px 0 8px}
+.fs-what{font-weight:700;font-size:14px;color:#8a1c1c;margin-bottom:2px}
+.fs-sub{font-weight:700;font-size:13px;color:#8a1c1c}
+.fs-count{font-size:12px;color:#6b7280;margin:2px 0}
+.fs-group{margin:4px 0 6px}
+.fs-names{font-size:13px;color:#334155;line-height:1.35}
+.fs-why{font-size:12px;color:#6b7280;line-height:1.35;margin:2px 0 0}
+.fs-time{font-size:11px;color:#9ca3af;margin:6px 0 8px}
 .fs-dismiss{background:#fff;border:1px solid #d9b3b3;color:#8a1c1c;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}
 .bp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:flex-end;justify-content:center}
 .bp-modal{background:#fff;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
@@ -1138,8 +1143,8 @@ async function executePushLot(a){
     // Name the tasks that didn't update (for the failure sheet): server-rejected tasks by
     // id -> target row (name), plus any notFound by bt_num.
     const byId = {}; rows.forEach(r => { byId[r.id] = r; });
-    const failedTasks = serverFailed.map(f => { const r = byId[f && f.task_id]; return { bt_num: r ? r.bt_num : null, name: r ? r.name : null, permanent: !!(f && f.permanent) }; });
-    notFound.forEach(bt => failedTasks.push({ bt_num: bt, name: null, permanent: true }));
+    const failedTasks = serverFailed.map(f => { const r = byId[f && f.task_id]; return { bt_num: r ? r.bt_num : null, name: r ? r.name : null, permanent: !!(f && f.permanent), reason: (f && f.error) || null }; });
+    notFound.forEach(bt => failedTasks.push({ bt_num: bt, name: null, permanent: true, reason: 'not_on_target' }));
     return { permanent: permanent, error: 'Push to ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound, failedTasks: failedTasks };
   }
 
@@ -1376,24 +1381,94 @@ async function updateSyncStatus(){
 //    stops counting as unacknowledged). "Remind me later" / ✕ just close → shows again next
 //    app open. There is no failed badge; this sheet is the surface. ──
 function _fsEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
-function _failWhat(a){
-  if(a && a.kind==='push_lot') return 'Push '+((a.source_lot_number)||'lot')+' → '+((a.target&&a.target.lot_number)||'lot');
-  return (a && (a.apiAction||a.type)) || 'Update';
+// Per-item TITLE by action kind (the sheet header uses this for a single item; a multi-item
+// sheet gets "Some updates didn’t apply" and each item keeps its own title).
+function _failTitle(a){ return (a && a.kind==='push_lot') ? 'Push didn’t fully apply' : 'Update didn’t save'; }
+// Map a server/engine error string to a reason CATEGORY (drives grouping + the plain "Why:").
+function _failReasonCat(err){
+  const s=String(err||'');
+  if(/not on target|matched none|not_on_target/.test(s)) return 'not_on_target';
+  if(/override is before construction started/.test(s)) return 'est_before_start';
+  if(/before construction started/.test(s)) return 'before_start';
+  if(/in the future/.test(s)) return 'future';
+  if(/Finish date can.t be before/.test(s)) return 'finish_before_start';
+  return 'unknown';
 }
-// "Lot 26: Clearing & Hauling, Permit, Survey — dates before this lot’s start" (first 3 + "and N more").
-function _failTasksLine(a){
-  const suffix = /before construction started|rejected/.test((a&&a.failed_reason)||'') ? 'dates before this lot’s start' : 'couldn’t be updated';
-  const t=(a&&a.failed_tasks);
-  if(Array.isArray(t)&&t.length){
-    const names=t.map(x=>(x&&x.name)?x.name:('#'+(x&&x.bt_num))).filter(Boolean);
-    const shown=names.slice(0,3).join(', ');
-    const more=names.length>3?(' and '+(names.length-3)+' more'):'';
-    return shown+more+' — '+suffix;
+// Pull the construction-start date out of a before_start message ("...started (2026-06-08).")
+// and pretty-print it ("Jun 8"). Used only for the before_start "Why:" line.
+function _failWhenDate(err){
+  const m=String(err||'').match(/(\d{4})-\d{2}-\d{2}/);
+  if(!m) return null;
+  try{ return fmt(new Date(m[0]+'T00:00:00')); }catch(e){ return m[0]; }
+}
+// The approved plain-English "Why:" line per reason category (Table 2). src/tgt are bare lot
+// numbers (we add the "Lot " label). Unknown → a safe generic that never shows a raw error;
+// the item's subject + task names (rendered above it) say which lot/task.
+function _failWhy(cat, src, tgt, dateStr){
+  const T='Lot '+(tgt||'this lot'), S='Lot '+(src||'the source lot');
+  switch(cat){
+    case 'before_start':        return 'Why: '+S+'’s dates for these are before '+T+'’s start date'+(dateStr?(' ('+dateStr+')'):'')+'. Enter the real dates on '+T+'.';
+    case 'future':              return 'Why: these dates are in the future, and a task can’t be completed before it happens. Enter the real dates on '+T+'.';
+    case 'finish_before_start': return 'Why: the finish date is before the start date on these. Fix the dates on '+T+'.';
+    case 'not_on_target':       return 'Why: these tasks aren’t on '+T+'’s schedule, so they couldn’t be copied. The lots may be on different schedules. Contact the office.';
+    case 'est_before_start':    return 'Why: that start-date override is before construction started on this lot. Enter a date on or after it.';
+    default:                    return 'Why: this didn’t save for a reason the app couldn’t read. Please contact the office.';
   }
-  const r=(a&&a.failed_reason)||'';                       // fallback (older rows / non-push)
-  const m=r.match(/rejected (\d+)/);
-  if(m) return m[1]+' task'+(m[1]==='1'?'':'s')+' not updated — '+suffix;
-  return r ? r.slice(0,110) : 'Didn’t apply';
+}
+// first 3 task names + "and N more".
+function _failNames(names){
+  const n=(names||[]).filter(Boolean);
+  if(!n.length) return '';
+  return n.slice(0,3).join(', ') + (n.length>3 ? (' and '+(n.length-3)+' more') : '');
+}
+// Group an item's failed tasks BY reason category (mixed reasons → one block each), preserving
+// first-seen order. Push rows carry per-task `reason` (the server error); non-push/older rows
+// fall back to the single `failed_reason`.
+function _failGroups(a){
+  const t=(a&&a.failed_tasks);
+  const groups={}; const order=[];
+  function add(cat, name, err){
+    if(!groups[cat]){ groups[cat]={cat:cat, names:[], dateStr:null}; order.push(cat); }
+    if(name) groups[cat].names.push(name);
+    if(!groups[cat].dateStr){ const ds=_failWhenDate(err); if(ds) groups[cat].dateStr=ds; }
+  }
+  if(Array.isArray(t)&&t.length){
+    t.forEach(x=>{ const err=(x&&x.reason)||(a&&a.failed_reason); add(_failReasonCat(err), (x&&x.name)?x.name:('#'+(x&&x.bt_num)), err); });
+  } else {
+    add(_failReasonCat(a&&a.failed_reason), null, a&&a.failed_reason);   // non-push / older row — one group
+  }
+  return order.map(c=>groups[c]);
+}
+// Time on its OWN line, small/grey: clock for today, date+clock otherwise. Never run into the message.
+function _failWhen(iso){
+  if(!iso) return '';
+  const d=new Date(iso); if(isNaN(d.getTime())) return '';
+  const t=d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  return (d.toDateString()===new Date().toDateString()) ? t : (fmt(d)+', '+t);
+}
+// Render ONE failed item's body (subject → counts → per-reason groups → time → Got it).
+function _failItem(a, showTitle){
+  const isPush = !!(a && a.kind==='push_lot');
+  const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
+  const subject = isPush ? ('Lot '+(src||'?')+' → Lot '+(tgt||'?')) : ('Lot '+(tgt||'?'));
+  const total = (isPush && Array.isArray(a.pushed)) ? a.pushed.length : null;
+  const failedN = (Array.isArray(a&&a.failed_tasks)&&a.failed_tasks.length) ? a.failed_tasks.length : null;
+  const groups=_failGroups(a);
+  let html='';
+  if(showTitle) html+='<div class="fs-what">'+_fsEsc(_failTitle(a))+'</div>';
+  html+='<div class="fs-sub">'+_fsEsc(subject)+'</div>';
+  if(isPush && total!=null && failedN!=null) html+='<div class="fs-count">'+failedN+' of '+total+' task'+(total===1?'':'s')+' weren’t updated:</div>';
+  groups.forEach(g=>{
+    const names=_failNames(g.names);
+    html+='<div class="fs-group">';
+    if(names) html+='<div class="fs-names">'+_fsEsc(names)+'</div>';
+    html+='<div class="fs-why">'+_fsEsc(_failWhy(g.cat, src, tgt, g.dateStr))+'</div>';
+    html+='</div>';
+  });
+  const when=_failWhen(a&&a.failed_at);
+  if(when) html+='<div class="fs-time">'+_fsEsc(when)+'</div>';
+  html+='<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Got it</button>';
+  return html;
 }
 function _failClose(){ const o=document.getElementById('fs-overlay'); if(o) o.remove(); }
 // Auto-open only at natural points (app open, after a push). Never while a modal/form is in use.
@@ -1410,12 +1485,12 @@ async function _failSheetOpen(){
     .sort((a,b)=>String(b.failed_at||'').localeCompare(String(a.failed_at||'')));
   _failClose();
   if(!items.length){ return; }   // nothing to show
-  const list=items.map(a=>'<div class="fs-item"><div class="fs-what">'+_fsEsc(_failWhat(a))+'</div>'
-    +'<div class="fs-why">'+_fsEsc(_failTasksLine(a))+(a.failed_at?' · '+(_relTime(a.failed_at)||''):'')+'</div>'
-    +'<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Got it</button></div>').join('');
+  const multi=items.length>1;
+  const header=multi ? 'Some updates didn’t apply' : _failTitle(items[0]);   // single → that item's own title
+  const list=items.map(a=>'<div class="fs-item">'+_failItem(a, multi)+'</div>').join('');
   document.body.insertAdjacentHTML('beforeend',
     '<div id="fs-overlay" class="bp-overlay"><div class="bp-modal">'
-    +'<div class="bp-head"><div class="bp-title">Didn’t apply</div><button class="bp-x" onclick="_failClose()">✕</button></div>'
+    +'<div class="bp-head"><div class="bp-title">'+_fsEsc(header)+'</div><button class="bp-x" onclick="_failClose()">✕</button></div>'
     +'<div class="fs-list">'+list+'</div>'
     +'<div class="bp-foot"><button class="bp-cancel" onclick="_failClose()">Remind me later</button></div>'
     +'</div></div>');
