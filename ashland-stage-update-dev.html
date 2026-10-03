@@ -608,7 +608,7 @@ async function checkPendingResolutions(){
   if(!Array.isArray(pending)||!pending.length) return;
   for(const p of pending){
     const ans = await appModal({
-      title:'Flag check — Lot '+(p.lot_number||'')+(p.community?' ('+p.community+')':''),
+      title:'Flag check — '+(p.lot_number||'')+(p.community?' ('+p.community+')':''),   // lot_number already includes "Lot"
       sub:'<b>Task #'+(p.bt_num!=null?p.bt_num:'—')+'</b><br>'
          +'<span style="color:#e74c3c">🔴</span> "'+escapeHtml(p.note||'')+'"<br><br>'
          +'<b>'+escapeHtml(p.resolution_prompt||'Has this been resolved?')+'</b>',
@@ -1401,11 +1401,12 @@ function _failWhenDate(err){
   if(!m) return null;
   try{ return fmt(new Date(m[0]+'T00:00:00')); }catch(e){ return m[0]; }
 }
-// The approved plain-English "Why:" line per reason category (Table 2). src/tgt are bare lot
-// numbers (we add the "Lot " label). Unknown → a safe generic that never shows a raw error;
-// the item's subject + task names (rendered above it) say which lot/task.
+// The approved plain-English "Why:" line per reason category (Table 2). src/tgt are the stored
+// lot_number values, which ALREADY include "Lot" (e.g. "Lot 26") — never prepend "Lot ". Unknown
+// → a safe generic that never shows a raw error; the item's subject + task names (rendered above
+// it) say which lot/task.
 function _failWhy(cat, src, tgt, dateStr){
-  const T='Lot '+(tgt||'this lot'), S='Lot '+(src||'the source lot');
+  const T=(tgt||'this lot'), S=(src||'the source lot');
   switch(cat){
     case 'before_start':        return 'Why: '+S+'’s dates for these are before '+T+'’s start date'+(dateStr?(' ('+dateStr+')'):'')+'. Enter the real dates on '+T+'.';
     case 'future':              return 'Why: these dates are in the future, and a task can’t be completed before it happens. Enter the real dates on '+T+'.';
@@ -1450,7 +1451,7 @@ function _failWhen(iso){
 function _failItem(a, showTitle){
   const isPush = !!(a && a.kind==='push_lot');
   const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
-  const subject = isPush ? ('Lot '+(src||'?')+' → Lot '+(tgt||'?')) : ('Lot '+(tgt||'?'));
+  const subject = isPush ? ((src||'?')+' → '+(tgt||'?')) : (tgt||'?');   // lot_number already includes "Lot"
   const total = (isPush && Array.isArray(a.pushed)) ? a.pushed.length : null;
   const failedN = (Array.isArray(a&&a.failed_tasks)&&a.failed_tasks.length) ? a.failed_tasks.length : null;
   const groups=_failGroups(a);
