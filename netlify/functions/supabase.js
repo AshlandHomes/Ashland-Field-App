@@ -1496,6 +1496,15 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data || {} ) };  // { snapshot_id, applied }
       }
 
+      // 5d: cheap existence check — does this lot have a push snapshot to undo? (one limit-1 row,
+      // no preview built). The field app calls this in the background after a lot renders.
+      case 'hasLotStructureUndo': {
+        const { target_lot_id } = payload;
+        if (!target_lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'target_lot_id is required' }) };
+        const snap = await _latestPushSnapshot(target_lot_id);
+        return { statusCode: 200, body: JSON.stringify({ exists: !!snap, snapshot_at: snap ? snap.created_at : null }) };
+      }
+
       case 'getTemplateStageMap': {
         const { template_id } = payload;
         if (!template_id) {

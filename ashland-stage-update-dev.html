@@ -224,6 +224,9 @@ html,body{overscroll-behavior-y:contain}
 .ab.push{background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5}
 /* whole-lot push button in schedule header */
 .bp-lotbtn{display:inline-block;margin-left:8px;background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:middle}
+.sched-undobtn{display:inline-block;background:#fef3e8;color:#b9770e;border:1px solid #f3d9b5;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer}
+.vtoast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:100001;background:#1f2937;color:#fff;font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px;box-shadow:0 2px 10px rgba(0,0,0,.25);opacity:0;transition:opacity .2s}
+.vtoast.show{opacity:1}
 /* progress */
 .bp-progbar{height:12px;background:#ecf0f1;border-radius:7px;overflow:hidden;margin:6px 0}
 .bp-progfill{height:100%;background:#27ae60;border-radius:7px;transition:width .25s ease}
@@ -709,6 +712,7 @@ function backToLots(){refreshCurLotInList();showScreen('screen-lots');renderLots
 let TASKS=[],bn={},act={},startDate=null;
 let collapsedPhases={},userToggledPhases=false;
 let curLot=null,stageMap=[],lotGates=[],curManual=null;
+let _undoForLot=null;   // 5d: lot id that currently has a push snapshot to undo (set by the cheap background check)
 
 // Working-day helpers now live in the single shared engine (schedule-engine.js).
 // Thin hoisted wrappers preserve the existing call convention (startDate is a module global here).
@@ -820,9 +824,10 @@ function openDatePicker(title,defaultDate){
   });
 }
 
-async function openLot(id){
+async function openLot(id, skipUndoCheck){
   curLot=myLots.find(l=>l.id===id);
   if(!curLot)return;
+  _undoForLot=null;   // 5d: reset; re-checked in the background after render
   showScreen('screen-schedule');
   document.getElementById('sched-view').innerHTML='<div class="loading">Loading schedule…</div>';
   const data=await sbRead('getScheduleLotTasks',{lot_id:id});
@@ -838,6 +843,82 @@ async function openLot(id){
   lotNotes=await sbRead('getTaskNotes',{lot_id:id})||[];
   userToggledPhases=false;collapsedPhases={};
   renderSchedule();
+  if(_isOnline && !skipUndoCheck) _checkUndoAffordance(id);   // 5d: cheap background check — never blocks the render, skipped offline
+}
+
+// 5d: one limit-1 existence query (no preview). If this lot has a push snapshot, reveal the
+// "Undo schedule copy" button. Background + silent — a failure just leaves the button hidden.
+async function _checkUndoAffordance(id){
+  try{
+    const r=await sbCallRaw('hasLotStructureUndo',{target_lot_id:id});
+    if(r && r.exists && curLot && curLot.id===id){ _undoForLot=id; renderSchedule(); }
+  }catch(e){}
+}
+// 5d: tap "Undo schedule copy" → preview (same trimmed style as the push), confirm → apply.
+async function openUndoSchedule(){
+  if(!curLot) return;
+  if(!_isOnline){ _toast('Undo needs a connection.'); return; }
+  const lotId=curLot.id, lotNum=curLot.lot_number;
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Checking…</div></div>'
+    +'<div class="bp-subtitle">Reading the last schedule copy for '+_bpEsc(lotNum)+'…</div></div></div>');
+  let p; try{ p=await sbCallRaw('previewLotStructureUndo',{target_lot_id:lotId}); }
+  catch(e){ _bpClose(); _toast('Couldn’t reach the server.'); return; }
+  if(!p || p.error){ _bpClose(); _toast('Couldn’t preview the undo.'); return; }
+  if(p.can_apply===false || (p.refusals&&p.refusals.length)){ _bpClose(); _undoForLot=null; renderSchedule(); _toast('Nothing to undo on this lot.'); return; }
+  _undoRenderPreview(p, lotId, lotNum);
+}
+function _undoRenderPreview(p, lotId, lotNum){
+  const diff=p.diff||[], blk=p.blockers||[];
+  const caused=(p.warnings||[]).filter(w=>w.rule==='finished_before_predecessor');   // only copy/undo-caused; pre-existing hidden
+  const cb=(p.completion&&p.completion.before)||{}, ca=(p.completion&&p.completion.after)||{};
+  const compChanged=cb.projected!==ca.projected;
+  let body='';
+  if(compChanged) body+='<div class="bp-comp">Completion '+_bpFmtD(cb.projected)+' → <b>'+_bpFmtD(ca.projected)+'</b></div>';
+  if(diff.length){
+    body+=diff.map(d=>{ const parts=Object.keys(d.changes).map(c=>_bpHumanChange(c,d.changes[c])).join('; ');
+      return '<div class="bp-chg">'+_bpEsc(d.name)+' (#'+d.bt_num+'): '+parts+'</div>'; }).join('');
+  } else body+='<div class="bp-chg">No schedule changes to restore.</div>';
+  if(blk.length)    body+='<div class="bp-sect-h bp-h-blk">⛔ Would break the schedule</div>'+blk.map(w=>'<div class="bp-w bp-w-blk">'+_bpEsc(w.message)+'</div>').join('');
+  if(caused.length) body+='<div class="bp-sect-h bp-h-cause">⚠ Caused by this undo</div>'+caused.map(w=>'<div class="bp-w">'+_bpEsc(w.message)+'</div>').join('');
+  const blocked=blk.length>0;
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Undo schedule copy</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-subtitle">Restoring '+_bpEsc(lotNum)+' · nothing changes until you confirm</div>'
+    +'<div class="bp-cards"><div class="bp-card'+(blocked?' bp-card-blk':'')+'"><div class="bp-card-body">'+body+'</div></div></div>'
+    +'<div class="bp-struct-hint">Also reverts any schedule edits made on this lot since the copy.</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">← Back</button>'
+    +(blocked?'<button class="bp-apply" disabled style="opacity:.5">Can’t undo</button>'
+             :'<button class="bp-apply" onclick="_undoApply(\''+lotId+'\')">Undo schedule copy</button>')+'</div>'
+    +'</div></div>';
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function _undoApply(lotId){
+  const lotNum=(curLot&&curLot.id===lotId)?curLot.lot_number:lotId;
+  const btn=document.querySelector('#bp-overlay .bp-apply'); if(btn){ btn.disabled=true; btn.textContent='Undoing…'; }
+  let d; try{ d=await sbCallRaw('applyLotStructureUndo',{target_lot_id:lotId, actor:currentBuilder}); }
+  catch(e){ _bpClose(); _toast('Couldn’t reach the server — not undone.'); return; }
+  _bpClose();
+  if(d && d.error){
+    // permanent failure → the existing "didn't apply" sheet convention (a retained failed row)
+    try{ const act=await OfflineQueue.enqueue({kind:'structure_copy', apiAction:'__structure_undo', type:'structure',
+          target:{lot_number:lotNum}, source_lot_number:lotNum, builder:currentBuilder});
+      await OfflineQueue.markFailed(act.id, 'Undo schedule copy on '+lotNum+' didn’t apply — '+((d.blockers&&d.blockers.length)?'would break the schedule':_bpShortReason(d.error)), {}); }catch(e){}
+    await updateSyncStatus(); _failSheetOpen(); return;
+  }
+  _undoForLot=null;
+  if(typeof loadMyLots==='function'){ await loadMyLots(); }
+  await openLot(lotId, true);   // reload + skip the undo re-check so the button stays gone after a successful undo
+  _toast('Schedule restored.');
+}
+function _toast(msg){
+  try{ const t=document.createElement('div'); t.className='vtoast'; t.textContent=msg; document.body.appendChild(t);
+    requestAnimationFrame(()=>t.classList.add('show'));
+    setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>{ try{t.remove();}catch(_){}}, 260); }, 2200); }catch(e){}
 }
 
 function renderSchedule(){
@@ -860,7 +941,9 @@ function renderSchedule(){
     +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
     +'</div>'+(noStages?'':'<div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div>')+'</div>'
     +'<div class="sub">'+(noStages?'No stages defined for this template':(st.held?'⚡ Held at '+st.reportedCode+(st.blockingName?' ('+st.blockingName+')':'')+' — actually '+st.trueCode:st.reportedLabel))+' · finish '+fmt(projEndDate)+'</div></div>';
-  h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button></div>';
+  h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button>'
+    +((_undoForLot===curLot.id) ? '<button class="sched-undobtn" style="margin-left:8px" onclick="openUndoSchedule()">⟲ Undo schedule copy</button>' : '')
+    +'</div>';
 
   // ── Stat cards (Items 5+6) ──
   const hdCls=healthDelta>0?'ahead':(healthDelta<0?'behind':'');
@@ -2844,15 +2927,22 @@ async function _bpApply(){
     _failSheetOpen();
     return;
   }
-  // No permanent failures → brief confirmation (today's behavior) + a short per-target
-  // "Schedule copy" line when the copy ran (5c).
+  // No permanent failures → brief confirmation.
+  if(_structResults){
+    // 5c (copy on): ONE trimmed line per target — "Lot 32: updated · schedule copied" /
+    // "... · schedule not copied — <reason>". Header only when more than one target.
+    const statusOf=(lotNum)=>{ const o=outcomes.find(x=>x.lot===lotNum); if(!o) return 'updated';
+      if(o.queued) return 'queued (offline)'; const e=o.entry; if(e && e.error && e.retrying) return 'queued (will retry)'; return 'updated'; };
+    const lines=chosen.map(t=>{ const sr=_structResults[t.id];
+      const sched = sr ? (sr.copied ? ' · schedule copied' : ' · schedule not copied — '+sr.reason) : '';
+      return t.lot_number+': '+statusOf(t.lot_number)+sched; });
+    const msg=(chosen.length>1 ? chosen.length+' lots updated.\n\n' : '') + lines.join('\n');
+    alert(msg);
+    return;
+  }
+  // Status-only push (copy off): today's wording, unchanged.
   let msg = doneLots.length+' of '+total+' lots updated.';
   if(doneLots.length)  msg+='\n\n✓ Done: '+doneLots.join(', ');
-  if(_structResults){
-    const copyLines=chosen.map(t=>{ const sr=_structResults[t.id]; if(!sr) return null;
-      return sr.copied ? (sr.lot_number+': schedule copied') : (sr.lot_number+': schedule not copied — '+sr.reason); }).filter(Boolean);
-    if(copyLines.length) msg+='\n\nSchedule copy:\n'+copyLines.map(l=>'• '+l).join('\n');
-  }
   if(retryLots.length) msg+='\n\n⏳ Still queued (will retry): '+retryLots.join(', ');
   if(queuedMid>0)      msg+='\n\n⏳ '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
   alert(msg);
