@@ -147,6 +147,17 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .arc-banner.done{background:#f0fdf4;border:1px solid #86efac;color:var(--green)}
 
 /* ===== BULK PUSH ===== */
+.fs-list{max-height:60vh;overflow-y:auto;margin:6px 0}
+.fs-item{border:1px solid #f1d6d6;border-radius:9px;background:#fdf0f0;padding:10px 12px;margin-bottom:8px}
+.fs-what{font-weight:700;font-size:14px;color:#8a1c1c;margin-bottom:2px}
+.fs-sub{font-weight:700;font-size:13px;color:#8a1c1c}
+.fs-count{font-size:12px;color:#6b7280;margin:2px 0}
+.fs-group{margin:4px 0 6px}
+.fs-names{font-size:13px;color:#334155;line-height:1.35}
+.fs-nonames{font-size:12px;color:#9ca3af;font-style:italic;line-height:1.35}
+.fs-why{font-size:12px;color:#6b7280;line-height:1.35;margin:2px 0 0}
+.fs-time{font-size:11px;color:#9ca3af;margin:6px 0 8px}
+.fs-dismiss{background:#fff;border:1px solid #d9b3b3;color:#8a1c1c;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}
 .bp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:flex-end;justify-content:center}
 .bp-modal{background:#fff;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
 @media(min-width:600px){.bp-overlay{align-items:center}.bp-modal{border-radius:16px}}
@@ -385,7 +396,7 @@ html,body{overscroll-behavior-y:contain}
 
 <script src="schedule-engine.js?v=3"></script>
 <script src="note-resolution.js?v=1"></script>
-<script src="offline-queue.js?v=1"></script>
+<script src="offline-queue.js?v=2"></script>
 <script src="offline-data.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
@@ -563,7 +574,7 @@ async function setPinKey(k){
 const SUB_NAMES={RC:'Ruby Creek',CO:'Chimney Oaks',TB:'Traditions of Braselton',CT:'Clocktower',TE:'Thurgood Estates',CW:'Carrington Walk'};
 let curSub=null;
 
-function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>{checkPendingResolutions();prefetchOffline();});}
+function enterApp(){document.getElementById('subs-who').textContent=currentBuilder;showScreen('screen-subs');loadMyLots().then(()=>{checkPendingResolutions();prefetchOffline();_maybeAutoFailSheet();});}
 
 // ── RED-FLAG RESOLUTION (builder side) ──
 // On app open, if the admin has asked about any of this builder's red flags, pop
@@ -576,7 +587,7 @@ async function checkPendingResolutions(){
   if(!Array.isArray(pending)||!pending.length) return;
   for(const p of pending){
     const ans = await appModal({
-      title:'Flag check — Lot '+(p.lot_number||'')+(p.community?' ('+p.community+')':''),
+      title:'Flag check — '+(p.lot_number||'')+(p.community?' ('+p.community+')':''),   // lot_number already includes "Lot"
       sub:'<b>Task #'+(p.bt_num!=null?p.bt_num:'—')+'</b><br>'
          +'<span style="color:#e74c3c">🔴</span> "'+escapeHtml(p.note||'')+'"<br><br>'
          +'<b>'+escapeHtml(p.resolution_prompt||'Has this been resolved?')+'</b>',
@@ -1108,7 +1119,12 @@ async function executePushLot(a){
     const transientFailed = serverFailed.filter(f => !(f && f.permanent));
     const accounted = (applied + serverFailed.length) >= batch.length;
     const permanent = transientFailed.length === 0 && accounted;
-    return { permanent: permanent, error: 'Push to ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound };
+    // Name the tasks that didn't update (for the failure sheet): server-rejected tasks by
+    // id -> target row (name), plus any notFound by bt_num.
+    const byId = {}; rows.forEach(r => { byId[r.id] = r; });
+    const failedTasks = serverFailed.map(f => { const r = byId[f && f.task_id]; return { bt_num: r ? r.bt_num : null, name: r ? r.name : null, permanent: !!(f && f.permanent), reason: (f && f.error) || null }; });
+    notFound.forEach(bt => failedTasks.push({ bt_num: bt, name: null, permanent: true, reason: 'not_on_target' }));
+    return { permanent: permanent, error: 'Push to ' + (a.target && a.target.lot_number) + ' did not fully apply — ' + why.join('; '), done: applied, notFound: notFound, failedTasks: failedTasks };
   }
 
   // Full task write confirmed. 5) optional note (frozen), then 6) inherited delays (frozen).
@@ -1169,7 +1185,7 @@ async function drainQueue(){
       if (a.kind === 'push_lot' && !d.permanent){
         leftPending = true;                            // stays 'pending' → retried next sync
       } else {
-        await OfflineQueue.markFailed(a.id, String(d.error));
+        await OfflineQueue.markFailed(a.id, String(d.error), { failed_tasks: (d && d.failedTasks) || null });
       }
     }
     else {
@@ -1327,9 +1343,8 @@ function _relTime(iso){
 }
 async function updateSyncStatus(){
   const el = ensureSyncStatusEl();
+  el.onclick = null; el.style.pointerEvents = 'none'; el.style.cursor = '';   // sync badge is never tappable; FAILURES surface via the auto-sheet, not here
   let s; try { s = await OfflineQueue.summary(); } catch(e){ return; }
-  if (s.failed > 0){ el.textContent = '⚠ ' + s.failed + ' failed' + (s.pending ? ' · ' + s.pending + ' queued' : '');
-    el.style.background = '#fee2e2'; el.style.color = '#b91c1c'; el.style.display = ''; return; }   // loud
   if (!_isOnline){
     let synced=null; try { synced=_relTime(await OfflineData.lastSynced()); } catch(e){}
     el.textContent = '⚠ offline' + (s.pending ? ' · ' + s.pending + ' queued' : '') + (synced ? ' · synced ' + synced : '');
@@ -1337,6 +1352,155 @@ async function updateSyncStatus(){
   if (s.pending > 0){ el.textContent = '⏳ syncing ' + s.pending;
     el.style.background = '#e0f2fe'; el.style.color = '#0369a1'; el.style.display = ''; return; }    // informative
   el.textContent = '✓ synced'; el.style.background = '#dcfce7'; el.style.color = '#15803d'; el.style.display = ''; // quiet
+}
+
+// ── FAILED-ITEMS SHEET — opens AUTOMATICALLY after a push with a permanent failure and on
+//    app open if anything is still unacknowledged (never while a modal/form is up). Names the
+//    tasks that didn't update. "Got it" acknowledges (NEVER deletes — row kept for audit;
+//    stops counting as unacknowledged). "Remind me later" / ✕ just close → shows again next
+//    app open. There is no failed badge; this sheet is the surface. ──
+function _fsEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
+// Per-item TITLE by action kind (the sheet header uses this for a single item; a multi-item
+// sheet gets "Some updates didn’t apply" and each item keeps its own title).
+function _failTitle(a){ return (a && a.kind==='push_lot') ? 'Push didn’t fully apply' : 'Update didn’t save'; }
+// Map a server/engine error string to a reason CATEGORY (drives grouping + the plain "Why:").
+function _failReasonCat(err){
+  const s=String(err||'');
+  if(/not on target|matched none|not_on_target/.test(s)) return 'not_on_target';
+  if(/override is before construction started/.test(s)) return 'est_before_start';
+  if(/before construction started/.test(s)) return 'before_start';
+  if(/in the future/.test(s)) return 'future';
+  if(/Finish date can.t be before/.test(s)) return 'finish_before_start';
+  return 'unknown';
+}
+// Pull the construction-start date out of a before_start message ("...started (2026-06-08).")
+// and pretty-print it ("Jun 8"). Used only for the before_start "Why:" line.
+function _failWhenDate(err){
+  const m=String(err||'').match(/(\d{4})-\d{2}-\d{2}/);
+  if(!m) return null;
+  try{ return fmt(new Date(m[0]+'T00:00:00')); }catch(e){ return m[0]; }
+}
+// The approved plain-English "Why:" line per reason category (Table 2). src/tgt are the stored
+// lot_number values, which ALREADY include "Lot" (e.g. "Lot 26") — never prepend "Lot ". Unknown
+// → a safe generic that never shows a raw error; the item's subject + task names (rendered above
+// it) say which lot/task.
+function _failWhy(cat, src, tgt, dateStr){
+  const T=(tgt||'this lot'), S=(src||'the source lot');
+  switch(cat){
+    case 'before_start':        return 'Why: '+S+'’s dates for these are before '+T+'’s start date'+(dateStr?(' ('+dateStr+')'):'')+'. Enter the real dates on '+T+'.';
+    case 'future':              return 'Why: these dates are in the future, and a task can’t be completed before it happens. Enter the real dates on '+T+'.';
+    case 'finish_before_start': return 'Why: the finish date is before the start date on these. Fix the dates on '+T+'.';
+    case 'not_on_target':       return 'Why: these tasks aren’t on '+T+'’s schedule, so they couldn’t be copied. The lots may be on different schedules. Contact the office.';
+    case 'est_before_start':    return 'Why: that start-date override is before construction started on this lot. Enter a date on or after it.';
+    default:                    return 'Why: this didn’t save for a reason the app couldn’t read. Please contact the office.';
+  }
+}
+// first 3 task names + "and N more".
+function _failNames(names){
+  const n=(names||[]).filter(Boolean);
+  if(!n.length) return '';
+  return n.slice(0,3).join(', ') + (n.length>3 ? (' and '+(n.length-3)+' more') : '');
+}
+// Group an item's failed tasks BY reason category (mixed reasons → one block each), preserving
+// first-seen order. Push rows carry per-task `reason` (the server error); non-push/older rows
+// fall back to the single `failed_reason`.
+function _failGroups(a){
+  const t=(a&&a.failed_tasks);
+  const groups={}; const order=[];
+  function add(cat, name, err){
+    if(!groups[cat]){ groups[cat]={cat:cat, names:[], dateStr:null}; order.push(cat); }
+    if(name) groups[cat].names.push(name);
+    if(!groups[cat].dateStr){ const ds=_failWhenDate(err); if(ds) groups[cat].dateStr=ds; }
+  }
+  if(Array.isArray(t)&&t.length){
+    t.forEach(x=>{ const err=(x&&x.reason)||(a&&a.failed_reason); add(_failReasonCat(err), (x&&x.name)?x.name:('#'+(x&&x.bt_num)), err); });
+  } else {
+    add(_failReasonCat(a&&a.failed_reason), null, a&&a.failed_reason);   // non-push / older row — one group
+  }
+  return order.map(c=>groups[c]);
+}
+// Time on its OWN line, small/grey: clock for today, date+clock otherwise. Never run into the message.
+function _failWhen(iso){
+  if(!iso) return '';
+  const d=new Date(iso); if(isNaN(d.getTime())) return '';
+  const t=d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  return (d.toDateString()===new Date().toDateString()) ? t : (fmt(d)+', '+t);
+}
+// Older push rows (queued-failed before failed_tasks / per-task reasons were stored — e.g. the
+// 5dc81c8 hotfix) carry only `failed_reason` + the frozen `pushed` intent, no task names. Parse
+// the counts out of the stored reason so the sheet still shows "N of M". (`before construction
+// started (YYYY-MM-DD)` is still read by _failReasonCat/_failWhenDate, so the Why line is right.)
+function _failLegacyCounts(reason, total){
+  const s=String(reason||'');
+  let m=s.match(/only (\d+) of (\d+) task writes applied/);
+  if(m) return { failed: Math.max(0,(+m[2])-(+m[1])), total:+m[2] };
+  m=s.match(/(?:server )?rejected (\d+)/);
+  if(m) return { failed:+m[1], total: total };
+  return null;
+}
+// Render ONE failed item's body (subject → counts → per-reason groups → time → Got it).
+function _failItem(a, showTitle){
+  const isPush = !!(a && a.kind==='push_lot');
+  const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
+  const subject = isPush ? ((src||'?')+' → '+(tgt||'?')) : (tgt||'?');   // lot_number already includes "Lot"
+  const hasTasks = !!(Array.isArray(a&&a.failed_tasks) && a.failed_tasks.length);
+  const legacyPush = isPush && !hasTasks;                                // old row: counts/reason only, no names
+  let total = (isPush && Array.isArray(a.pushed)) ? a.pushed.length : null;
+  let failedN = hasTasks ? a.failed_tasks.length : null;
+  if(legacyPush){ const lc=_failLegacyCounts(a&&a.failed_reason, total); if(lc){ failedN=lc.failed; if(total==null) total=lc.total; } }
+  const groups=_failGroups(a);
+  let html='';
+  if(showTitle) html+='<div class="fs-what">'+_fsEsc(_failTitle(a))+'</div>';
+  html+='<div class="fs-sub">'+_fsEsc(subject)+'</div>';
+  if(isPush && total!=null && failedN!=null) html+='<div class="fs-count">'+failedN+' of '+total+' task'+(total===1?'':'s')+' weren’t updated:</div>';
+  groups.forEach(g=>{
+    const names=_failNames(g.names);
+    html+='<div class="fs-group">';
+    if(names) html+='<div class="fs-names">'+_fsEsc(names)+'</div>';
+    else if(legacyPush) html+='<div class="fs-nonames">Task names weren’t recorded for this older push.</div>';
+    html+='<div class="fs-why">'+_fsEsc(_failWhy(g.cat, src, tgt, g.dateStr))+'</div>';
+    html+='</div>';
+  });
+  const when=_failWhen(a&&a.failed_at);
+  if(when) html+='<div class="fs-time">'+_fsEsc(when)+'</div>';
+  html+='<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Got it</button>';
+  return html;
+}
+function _failClose(){ const o=document.getElementById('fs-overlay'); if(o) o.remove(); }
+// Auto-open only at natural points (app open, after a push). Never while a modal/form is in use.
+async function _maybeAutoFailSheet(){
+  if(document.getElementById('fs-overlay') || document.getElementById('bp-overlay')) return;  // something's already up
+  const sc=((document.querySelector('.screen.active')||{}).id)||'';                           // global-safe (no IIFE-local helper)
+  if(sc==='screen-pin'||sc==='screen-builders'||sc==='screen-setpin') return;                 // not during login/PIN
+  let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ return; }
+  if((rows||[]).some(r=>r.status==='failed' && !r.acknowledged_at)) _failSheetOpen();
+}
+async function _failSheetOpen(){
+  let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ rows=[]; }
+  const items=(rows||[]).filter(r=>r.status==='failed' && !r.acknowledged_at)
+    .sort((a,b)=>String(b.failed_at||'').localeCompare(String(a.failed_at||'')));
+  _failClose();
+  if(!items.length){ return; }   // nothing to show
+  const multi=items.length>1;
+  const header=multi ? 'Some updates didn’t apply' : _failTitle(items[0]);   // single → that item's own title
+  const list=items.map(a=>'<div class="fs-item">'+_failItem(a, multi)+'</div>').join('');
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="fs-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">'+_fsEsc(header)+'</div><button class="bp-x" onclick="_failClose()">✕</button></div>'
+    +'<div class="fs-list">'+list+'</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_failClose()">Remind me later</button></div>'
+    +'</div></div>');
+  document.querySelectorAll('#fs-overlay .fs-dismiss').forEach(b=>{ b.onclick=()=>_failSheetDismiss(b.dataset.id); });
+}
+async function _failSheetDismiss(id){
+  // Graceful degrade: if an OLD offline-queue.js is somehow loaded next to this HTML,
+  // markAcknowledged won't exist — tell the user to reload rather than silently no-op.
+  if(typeof OfflineQueue==='undefined' || typeof OfflineQueue.markAcknowledged!=='function'){
+    alert('Please reload the app to update, then dismiss.'); return;
+  }
+  try{ await OfflineQueue.markAcknowledged(id); }catch(e){}
+  await updateSyncStatus();   // recount the badge
+  _failSheetOpen();           // re-render (auto-closes when none remain)
 }
 
 if (typeof window !== 'undefined'){
@@ -2394,36 +2558,52 @@ async function _bpApply(){
     return;
   }
 
-  // ONLINE: route each through the durable queue, which drains IMMEDIATELY — same instant
-  // round-trip, same executePushLot writes, same progress + summary as the old inline path.
+  // ONLINE: route each through the durable queue, which drains IMMEDIATELY. Classify from
+  // the honest drain report (_pushDrainReport), NOT `result` — drainQueue only returns a
+  // result for SYNCED items, so a permanent failure returns null and would otherwise be
+  // miscounted as success with no message (the bug: an online push that failed 3 tasks
+  // showed "Done"). Capture each push's report entry right after its drain.
   _bpProgressScreen(total);
-  const doneLots=[], failedLots=[]; let completed=0, queuedMid=0;
+  _pushDrainReport = [];
+  const outcomes=[]; let completed=0;
   try{
     for(const intent of intents){
       _bpProgress(completed, total, intent.target.lot_number);
-      const {result}=await queueAndSync(intent);         // enqueue + (online) drain now
-      if(!_isOnline){ queuedMid++; }                     // transport dropped mid-push -> remaining queued
-      else if(result && result.error){ failedLots.push(intent.target.lot_number); }
-      else { doneLots.push(intent.target.lot_number); }
+      await queueAndSync(intent);                        // enqueue + (online) drain now
+      if(!_isOnline){ outcomes.push({lot:intent.target.lot_number, queued:true}); }
+      else {
+        const e=[..._pushDrainReport].reverse().find(x=>x && x.lot===intent.target.lot_number);
+        outcomes.push({lot:intent.target.lot_number, entry:e||null});
+      }
       completed++;
       _bpProgress(completed, total, null);
     }
   } finally { _bpGuardOff(); }
 
+  const doneLots=[], retryLots=[]; let queuedMid=0, failedCount=0;
+  outcomes.forEach(o=>{
+    if(o.queued){ queuedMid++; return; }
+    const e=o.entry;
+    if(e && e.error){ if(e.retrying) retryLots.push(o.lot); else failedCount++; }
+    else doneLots.push(o.lot);
+  });
+
   await new Promise(r=>setTimeout(r, 700));
   _bpClose();
-  let msg;
-  if(queuedMid>0){
-    msg=doneLots.length+' of '+total+' pushed; '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
-    if(doneLots.length) msg+='\n\n✓ '+doneLots.join(', ');
-  } else {
-    msg=doneLots.length+' of '+total+' lots updated.';
-    if(doneLots.length) msg+='\n\n✓ Done: '+doneLots.join(', ');
-    if(failedLots.length) msg+='\n\n✗ Not completed: '+failedLots.join(', ')+'\n(re-run the push for just these lots)';
-  }
-  alert(msg);
-
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
+  if(failedCount>0){
+    // ONE clear window for failures — the auto-sheet lists exactly what didn't apply (task
+    // names). Replaces the failure alert; done/queued lots are visible in the schedule.
+    await updateSyncStatus();
+    _failSheetOpen();
+    return;
+  }
+  // No failures → brief confirmation (today's behavior).
+  let msg = doneLots.length+' of '+total+' lots updated.';
+  if(doneLots.length)  msg+='\n\n✓ Done: '+doneLots.join(', ');
+  if(retryLots.length) msg+='\n\n⏳ Still queued (will retry): '+retryLots.join(', ');
+  if(queuedMid>0)      msg+='\n\n⏳ '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
+  alert(msg);
 }
 
 // ── PULL-TO-REFRESH = sync-now + hard refresh ──────────────────────────────
@@ -2498,7 +2678,8 @@ async function _bpApply(){
     else if(typeof OfflineQueue!=='undefined' && OfflineQueue.summary){
       try{
         const sm=await OfflineQueue.summary();
-        if(sm.failed>0)       label='⚠ '+sm.failed+' failed';
+        const nf=(sm.failedUnack!=null?sm.failedUnack:sm.failed);
+        if(nf>0)              label='⚠ '+nf+' failed';
         else if(sm.pending>0) label='⏳ '+sm.pending+' still queued';
       }catch(e){}
     }

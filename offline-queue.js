@@ -159,19 +159,32 @@
     return updateById(id, function (r) { r.status = 'synced'; r.synced_at = nowISO(); r.failed_reason = null; });
   }
 
-  function markFailed(id, reason) {
-    // RETAIN + surface; never drop. Bumps attempts so Layer 3 can back off.
+  function markFailed(id, reason, extra) {
+    // RETAIN + surface; never drop. Bumps attempts so Layer 3 can back off. `extra` (optional)
+    // stows structured detail on the row (e.g. failed_tasks) for a later readable surface.
     return updateById(id, function (r) {
       r.status = 'failed'; r.failed_reason = reason || null;
+      if (extra && typeof extra === 'object') {
+        for (var k in extra) { if (Object.prototype.hasOwnProperty.call(extra, k)) r[k] = extra[k]; }
+      }
       r.attempts = (r.attempts || 0) + 1; r.failed_at = nowISO();
     });
+  }
+
+  // DISMISS a failed item: acknowledge it so the badge stops counting it — NEVER delete.
+  // The row is kept (status stays 'failed') for audit.
+  function markAcknowledged(id) {
+    return updateById(id, function (r) { r.acknowledged_at = nowISO(); });
   }
 
   // counts for the sync-status indicator (Layer 2+ weaves this through the UI).
   function summary() {
     return getAll().then(function (rows) {
-      var s = { pending: 0, synced: 0, failed: 0, total: rows.length };
-      rows.forEach(function (r) { if (s[r.status] != null) s[r.status]++; });
+      var s = { pending: 0, synced: 0, failed: 0, failedUnack: 0, total: rows.length };
+      rows.forEach(function (r) {
+        if (s[r.status] != null) s[r.status]++;
+        if (r.status === 'failed' && !r.acknowledged_at) s.failedUnack++;   // dismissed failures excluded
+      });
       return s;
     });
   }
@@ -187,6 +200,7 @@
     getAll: getAll,
     markSynced: markSynced,
     markFailed: markFailed,
+    markAcknowledged: markAcknowledged,
     remapNoteId: remapNoteId,
     summary: summary,
     VALID_STATUS: VALID_STATUS,
