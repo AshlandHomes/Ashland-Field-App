@@ -171,6 +171,18 @@
     });
   }
 
+  // A TRANSIENT failure (server unreachable / 5xx / auth blip / untagged error): keep the action
+  // PENDING so it retries — NEVER dropped — but bump attempts + record the reason + time, so the
+  // UI can surface a "still saving" notice once it has been stuck for a few passes. Status stays
+  // 'pending' (it remains in getPending() and keeps retrying).
+  function markTransient(id, reason) {
+    return updateById(id, function (r) {
+      r.attempts = (r.attempts || 0) + 1;
+      r.last_transient_reason = reason || null;
+      r.last_attempt_at = nowISO();
+    });
+  }
+
   // DISMISS a failed item: acknowledge it so the badge stops counting it — NEVER delete.
   // The row is kept (status stays 'failed') for audit.
   function markAcknowledged(id) {
@@ -178,12 +190,16 @@
   }
 
   // counts for the sync-status indicator (Layer 2+ weaves this through the UI).
+  // transientStuck = pending actions that have failed transiently >= STUCK_ATTEMPTS times
+  // (server reachable but rejecting, or repeatedly unreachable) — surfaced, never silent.
+  var STUCK_ATTEMPTS = 3;
   function summary() {
     return getAll().then(function (rows) {
-      var s = { pending: 0, synced: 0, failed: 0, failedUnack: 0, total: rows.length };
+      var s = { pending: 0, synced: 0, failed: 0, failedUnack: 0, transientStuck: 0, total: rows.length };
       rows.forEach(function (r) {
         if (s[r.status] != null) s[r.status]++;
         if (r.status === 'failed' && !r.acknowledged_at) s.failedUnack++;   // dismissed failures excluded
+        if (r.status === 'pending' && (r.attempts || 0) >= STUCK_ATTEMPTS) s.transientStuck++;
       });
       return s;
     });
@@ -200,9 +216,11 @@
     getAll: getAll,
     markSynced: markSynced,
     markFailed: markFailed,
+    markTransient: markTransient,
     markAcknowledged: markAcknowledged,
     remapNoteId: remapNoteId,
     summary: summary,
+    STUCK_ATTEMPTS: STUCK_ATTEMPTS,
     VALID_STATUS: VALID_STATUS,
     _clearAll: _clearAll,
     _dbName: DB_NAME,
