@@ -265,7 +265,11 @@ exports.handler = async function(event) {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
-        return { statusCode: 200, body: JSON.stringify(r.data) };
+        // SECURITY: the server never returns a PIN. return=representation echoes the row
+        // (incl. pin_hash/temp_pin); the admin UI ignores it (submitAddBuilder re-fetches
+        // via getBuilders), so return success only and surface any error.
+        if (r.error) return { statusCode: r.status || 400, body: JSON.stringify({ error: r.error }) };
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       case 'addDelay': {
