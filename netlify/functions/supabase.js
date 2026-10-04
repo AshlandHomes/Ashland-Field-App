@@ -171,7 +171,14 @@ exports.handler = async function(event) {
 
       case 'getBuilders': {
         const r = await supabaseRequest('GET', 'field_ops_builders?select=*&order=name');
-        return { statusCode: 200, body: JSON.stringify(r.data || []) };
+        // SECURITY: never send credentials to the browser. Strip pin_hash/temp_pin and
+        // expose only boolean PIN-status flags (admin shows "Temp PIN"/"PIN set"; the
+        // field-app login list uses name/is_admin only).
+        const rows = (r.data || []).map(b => {
+          const { pin_hash, temp_pin, ...safe } = b;
+          return { ...safe, has_pin: !!pin_hash, has_temp_pin: !!temp_pin };
+        });
+        return { statusCode: 200, body: JSON.stringify(rows) };
       }
 
       case 'updateBuilderPin': {
@@ -181,7 +188,10 @@ exports.handler = async function(event) {
         if (temp_pin !== undefined) updates.temp_pin = temp_pin;
         if (subdivisions !== undefined) updates.subdivisions = subdivisions;
         const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, updates);
-        return { statusCode: 200, body: JSON.stringify(r.data) };
+        // SECURITY: PATCH return=representation echoes the row (incl. pin_hash/temp_pin).
+        // The caller ignores the body — return only success, never the credentials.
+        if (r.error) return { statusCode: r.status || 400, body: JSON.stringify({ error: r.error }) };
+        return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       case 'verifyAdminPin': {
