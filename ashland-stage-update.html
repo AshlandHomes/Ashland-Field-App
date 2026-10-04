@@ -158,6 +158,9 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .fs-why{font-size:12px;color:#6b7280;line-height:1.35;margin:2px 0 0}
 .fs-time{font-size:11px;color:#9ca3af;margin:6px 0 8px}
 .fs-dismiss{background:#fff;border:1px solid #d9b3b3;color:#8a1c1c;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}
+.fs-item-wait{border-color:#bfdbfe;background:#eff6ff}
+.fs-item-wait .fs-what,.fs-item-wait .fs-sub{color:#1e40af}
+.fs-item-wait .fs-why{color:#3b5bdb}
 .bp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:flex-end;justify-content:center}
 .bp-modal{background:#fff;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px 16px 22px;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
 @media(min-width:600px){.bp-overlay{align-items:center}.bp-modal{border-radius:16px}}
@@ -396,7 +399,7 @@ html,body{overscroll-behavior-y:contain}
 
 <script src="schedule-engine.js?v=3"></script>
 <script src="note-resolution.js?v=1"></script>
-<script src="offline-queue.js?v=2"></script>
+<script src="offline-queue.js?v=3"></script>
 <script src="offline-data.js?v=1"></script>
 <script>
 const SUPABASE_FN='/.netlify/functions/supabase';
@@ -1170,22 +1173,35 @@ function _surfacePushReport(){
 async function drainQueue(){
   const pending = await OfflineQueue.getPending();
   const results = {};
+  // ORDERING BARRIER (GAP 1): once any action on a lot is left pending this pass, HOLD every
+  // later action on that same lot — so a retry can never land after, and overwrite, a newer
+  // edit to the same lot (the push re-send lesson). Keyed by lot so it covers both directions:
+  // a pending push holds later single-task edits on its target lot, and a pending single-task
+  // edit holds a later push to that lot. Strictly in seq order; next pass starts clean.
+  const blockedLots = new Set();
   for (const a of pending){
+    const lotId = (a.target && (a.target.lot_id || a.target.lotId)) || null;
+    if (lotId && blockedLots.has(lotId)){
+      if (a.kind === 'push_lot'){ _pushDrainReport.push({ lot:(a.target && a.target.lot_number), error:'waiting on an earlier change to this lot', notFound:[], retrying:true }); }
+      continue;                                        // leave PENDING; retried next pass, in order
+    }
     let d;
     try { d = (a.kind === 'push_lot') ? await executePushLot(a) : await sbCallRaw(a.apiAction, a.payload); }
     catch(e){ _isOnline = false; break; }              // transport failure = offline
     let leftPending = false;
     if (d && d.error){
-      // A push_lot that failed for a TRANSIENT reason MUST NOT be marked failed —
-      // markFailed removes it from getPending() so it would never retry, and the
-      // builder's queued push would be silently lost (Collin's hard rule: NEVER lose
-      // a queued action until it has actually applied). Leave it PENDING so the next
-      // sync retries it; only a PERMANENT (structural) failure is retained as 'failed'
-      // (still not deleted — surfaced loudly). Non-push actions keep the old behavior.
-      if (a.kind === 'push_lot' && !d.permanent){
-        leftPending = true;                            // stays 'pending' → retried next sync
-      } else {
+      // ONE classification for EVERY kind (push + single actions): the server tags a data
+      // problem `permanent:true` (400/409/422, date-guard, not-found, unknown action).
+      // PERMANENT → retained as 'failed' and surfaced in the sheet. Anything else — 5xx, auth
+      // (401/403), 404 schema-cache, network, or any UNTAGGED error — is TRANSIENT: stays
+      // PENDING and retries (NEVER lose a queued action until it has applied). executePushLot
+      // already returns `permanent`, so pushes flow through the same branch.
+      if (d.permanent){
         await OfflineQueue.markFailed(a.id, String(d.error), { failed_tasks: (d && d.failedTasks) || null });
+      } else {
+        leftPending = true;                            // stays 'pending' → retried next sync
+        if (lotId) blockedLots.add(lotId);             // hold later same-lot actions this pass
+        try { await OfflineQueue.markTransient(a.id, String(d.error)); } catch(e){}   // bump attempts; status stays 'pending'
       }
     }
     else {
@@ -1466,24 +1482,44 @@ function _failItem(a, showTitle){
   html+='<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Got it</button>';
   return html;
 }
+// A still-PENDING action that has failed transiently several times (server unreachable / rejecting):
+// surfaced so it's never silent, but it keeps retrying — no "Got it" (it clears itself on sync).
+function _failStillItem(a, showTitle){
+  const isPush=!!(a&&a.kind==='push_lot');
+  const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
+  const subject = isPush ? ((src||'?')+' → '+(tgt||'?')) : (tgt||'Update');
+  let html='';
+  if(showTitle) html+='<div class="fs-what">Still saving</div>';
+  html+='<div class="fs-sub">'+_fsEsc(subject)+'</div>';
+  html+='<div class="fs-why">Still saving — can’t reach the server. It’ll keep trying.</div>';
+  return html;
+}
 function _failClose(){ const o=document.getElementById('fs-overlay'); if(o) o.remove(); }
+function _fsStuck(){ return (typeof OfflineQueue!=='undefined' && OfflineQueue.STUCK_ATTEMPTS) || 3; }
 // Auto-open only at natural points (app open, after a push). Never while a modal/form is in use.
 async function _maybeAutoFailSheet(){
   if(document.getElementById('fs-overlay') || document.getElementById('bp-overlay')) return;  // something's already up
   const sc=((document.querySelector('.screen.active')||{}).id)||'';                           // global-safe (no IIFE-local helper)
   if(sc==='screen-pin'||sc==='screen-builders'||sc==='screen-setpin') return;                 // not during login/PIN
   let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ return; }
-  if((rows||[]).some(r=>r.status==='failed' && !r.acknowledged_at)) _failSheetOpen();
+  const stuck=_fsStuck();
+  if((rows||[]).some(r=>(r.status==='failed' && !r.acknowledged_at) || (r.status==='pending' && (r.attempts||0)>=stuck))) _failSheetOpen();
 }
 async function _failSheetOpen(){
   let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ rows=[]; }
-  const items=(rows||[]).filter(r=>r.status==='failed' && !r.acknowledged_at)
+  const stuck=_fsStuck();
+  const failedItems=(rows||[]).filter(r=>r.status==='failed' && !r.acknowledged_at)
     .sort((a,b)=>String(b.failed_at||'').localeCompare(String(a.failed_at||'')));
+  const waitItems=(rows||[]).filter(r=>r.status==='pending' && (r.attempts||0)>=stuck)
+    .sort((a,b)=>String(b.last_attempt_at||'').localeCompare(String(a.last_attempt_at||'')));
   _failClose();
-  if(!items.length){ return; }   // nothing to show
-  const multi=items.length>1;
-  const header=multi ? 'Some updates didn’t apply' : _failTitle(items[0]);   // single → that item's own title
-  const list=items.map(a=>'<div class="fs-item">'+_failItem(a, multi)+'</div>').join('');
+  if(!failedItems.length && !waitItems.length){ return; }   // nothing to show
+  const multi=(failedItems.length+waitItems.length)>1;
+  const header = failedItems.length
+    ? (waitItems.length ? 'Some updates need attention' : (multi ? 'Some updates didn’t apply' : _failTitle(failedItems[0])))
+    : 'Still saving';
+  const list=failedItems.map(a=>'<div class="fs-item">'+_failItem(a, multi)+'</div>').join('')
+    + waitItems.map(a=>'<div class="fs-item fs-item-wait">'+_failStillItem(a, multi)+'</div>').join('');
   document.body.insertAdjacentHTML('beforeend',
     '<div id="fs-overlay" class="bp-overlay"><div class="bp-modal">'
     +'<div class="bp-head"><div class="bp-title">'+_fsEsc(header)+'</div><button class="bp-x" onclick="_failClose()">✕</button></div>'
