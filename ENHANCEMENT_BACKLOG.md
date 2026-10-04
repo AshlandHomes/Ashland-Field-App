@@ -5,11 +5,21 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
-## ⏭️ NEXT — queue failure-classification fixes (2026-10-03, from the failed-items audit)
+## ✅ SHIPPED 2026-10-04 — queue failure-classification fixes (GAP 1+2)
 
-**Priority: build IMMEDIATELY after the failed-items sheet wording hotfix ships. NOT backlog.
-Lot-structure push 5c/5d stays ON HOLD until both are live.** Found during the audit of every
-permanent queue-failure path (SESSION_NOTES 2026-10-03). Both violate the never-silent-drop rule.
+**RESOLVED — merged to live `ec6ccda` (hotfix/queue-integrity).** GAP 2: every write handler
+now surfaces r.error (dbFail) instead of 200+null; single-record PATCH/DELETE treat a 0-row
+match as a permanent "not found". GAP 1: ONE transient/permanent classification for all queued
+actions (permanent = 400/409/422 + date-guard + not-found + unknown-action, tagged by the server
+or by sbCallRaw from the HTTP status when untagged; everything else transient → retries). Per-lot
+ordering barrier so a retry can't overwrite a newer same-lot edit; a transient action stuck
+≥3 attempts shows "Still saving — can't reach the server. It'll keep trying." See SESSION_NOTES
+2026-10-04. **Deferred Dev tests (still to run later, NOT blocking):** (a) online transient →
+retry → "Still saving" surfacing + self-clear on reconnect; (b) per-lot ordering barrier (a stuck
+transient holds a newer same-lot edit until it lands, in order). Lot-structure push 5b/5c/5d
+resumes next now that GAPs are live.
+
+The original audit, kept for the record:
 
 - **GAP 2 (SILENT DATA LOSS — LIVE TODAY, do first).** Six write handlers return
   `{statusCode:200, body: JSON.stringify(r.data)}` **without checking `r.error`**, so a real

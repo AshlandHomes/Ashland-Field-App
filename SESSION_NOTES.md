@@ -28,6 +28,36 @@ LandIQ table.**
 
 ---
 
+## 2026-10-04 — SHIPPED to live: GAP 1+2 queue integrity (server never lies)
+
+**Merged to main `ec6ccda` (--no-ff, hotfix/queue-integrity); client + function only, no DB
+change; offline-queue.js ?v=3; TABLE_PREFIX empty on live.**
+
+- **GAP 2 (silent data loss, was live):** every write handler in `supabase.js` now surfaces
+  `r.error` via a new `dbFail(r)` instead of returning 200+null on a DB/RLS/constraint
+  rejection; single-record PATCH/DELETE treat a 0-row match as a PERMANENT "not found"
+  (`notFound`/`_zeroRows`). DELETEs stay idempotent but surface real errors. Admin multi-step
+  builders guard their primary writes; secondary child writes + bookkeeping touches stay
+  best-effort by design (deeper transactional rollback = separate future item).
+- **GAP 1 (classification):** `drainQueue` uses ONE branch for all kinds. permanent = 400/409/422
+  + date-guard + not-found + unknown-action, tagged by the server OR by `sbCallRaw` from the HTTP
+  status when the server didn't tag it (so untagged/missing-field 400s are permanent, never a
+  retry loop). Everything else (5xx/auth/404/network) is transient → stays pending, retries.
+  **Per-lot ordering barrier:** once an action on a lot is left pending this pass, all later
+  actions on that lot are held (before any attempt — they don't accrue their own attempts), so a
+  retry can never land after and overwrite a newer same-lot edit. A transient action stuck ≥3
+  attempts surfaces "Still saving — can't reach the server. It'll keep trying." (blue, no button,
+  self-clears on sync).
+- Verified on Dev: non-existent task_id → HTTP 409 permanent "not found" (no silent null);
+  normal finish + normal whole-lot push → clean success, no false sheet.
+- **Deferred Dev tests (on the backlog, not blocking):** online transient→"Still saving" path;
+  the per-lot ordering/no-overwrite barrier.
+
+**Next:** resume lot-structure push — 5b re-test, then 5c (confirm/apply + schedule-copy summary)
+and 5d (undo button + preview + apply).
+
+---
+
 ## 2026-10-04 — SHIPPED to live: failed-items sheet + PIN-leak fix
 
 Two hotfixes merged to main (--no-ff) and confirmed Published on
