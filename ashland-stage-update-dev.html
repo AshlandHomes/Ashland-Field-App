@@ -189,6 +189,7 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-card[open]>summary::after{content:'▾'}
 .bp-card-lot{font-weight:700;font-size:14px;color:#1f2937}
 .bp-card-sum{font-size:12px;color:#6b7280;line-height:1.3}
+.bp-card[open] .bp-sum-when{display:none}   /* completion date shows in the header only when collapsed (it's on the line below when open) */
 .bp-card-blk{border-color:#f5b7b1;background:#fdecea}
 .bp-card-off{opacity:.7;background:#f7f7f7}
 .bp-card-body{padding:2px 12px 12px;border-top:1px solid #f0f0f0}
@@ -1409,7 +1410,7 @@ async function updateSyncStatus(){
 function _fsEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
 // Per-item TITLE by action kind (the sheet header uses this for a single item; a multi-item
 // sheet gets "Some updates didn’t apply" and each item keeps its own title).
-function _failTitle(a){ return (a && a.kind==='push_lot') ? 'Push didn’t fully apply' : 'Update didn’t save'; }
+function _failTitle(a){ return (a && a.kind==='push_lot') ? 'Push didn’t fully apply' : (a && a.kind==='structure_copy') ? 'Schedule copy didn’t apply' : 'Update didn’t save'; }
 // Map a server/engine error string to a reason CATEGORY (drives grouping + the plain "Why:").
 function _failReasonCat(err){
   const s=String(err||'');
@@ -1487,6 +1488,16 @@ function _failLegacyCounts(reason, total){
 }
 // Render ONE failed item's body (subject → counts → per-reason groups → time → Got it).
 function _failItem(a, showTitle){
+  // 5c: a one-shot structure-copy failure — the stored reason is the short human message.
+  if(a && a.kind==='structure_copy'){
+    let h='';
+    if(showTitle) h+='<div class="fs-what">Schedule copy didn’t apply</div>';
+    h+='<div class="fs-sub">'+_fsEsc((a.target&&a.target.lot_number)||'Lot')+'</div>';
+    h+='<div class="fs-why">'+_fsEsc(a.failed_reason||'Schedule copy didn’t apply. Contact the office.')+'</div>';
+    const w=_failWhen(a&&a.failed_at); if(w) h+='<div class="fs-time">'+_fsEsc(w)+'</div>';
+    h+='<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Got it</button>';
+    return h;
+  }
   const isPush = !!(a && a.kind==='push_lot');
   const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
   const subject = isPush ? ((src||'?')+' → '+(tgt||'?')) : (tgt||'?');   // lot_number already includes "Lot"
@@ -2501,7 +2512,7 @@ function _bpToPreview(skipStruct){
     +'<div class="bp-pv">'+what+'</div>'
     +'<div class="bp-section-label">To '+chosen.length+' lot'+(chosen.length===1?'':'s')+':</div>'
     +'<div class="bp-pv-lots">'+lotList+'</div>'
-    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button><button class="bp-apply" onclick="_bpApply()">Apply to '+chosen.length+' lot'+(chosen.length===1?'':'s')+'</button></div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button><button class="bp-apply" onclick="_bpApply()">'+((_bpStructure && _bpMode==='lot') ? 'Copy schedule &amp; push' : ('Apply to '+chosen.length+' lot'+(chosen.length===1?'':'s')))+'</button></div>'
     +'</div></div>';
   _bpClose();
   document.body.insertAdjacentHTML('beforeend',html);
@@ -2561,7 +2572,7 @@ function _bpStructCard(entry){
   const compChanged = cb.projected!==ca.projected;
   const sum = entry.status==='blocked'
     ? '⛔ would break'
-    : (diff.length? diff.length+' change'+(diff.length===1?'':'s')+(compChanged?' · completes '+_bpFmtD(ca.projected):'') : 'no changes');
+    : (diff.length? diff.length+' change'+(diff.length===1?'':'s')+(compChanged?'<span class="bp-sum-when"> · completes '+_bpFmtD(ca.projected)+'</span>':'') : 'no changes');
   let body='';
   if(compChanged) body+='<div class="bp-comp">Completion '+_bpFmtD(cb.projected)+' → <b>'+_bpFmtD(ca.projected)+'</b></div>';
   if(diff.length){
@@ -2597,11 +2608,11 @@ function _bpRenderStructurePreview(chosen){
 }
 
 // ---- step 3: apply ----
-function _bpProgressScreen(total){
+function _bpProgressScreen(total, title){
   _bpClose();
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
-    +'<div class="bp-head"><div class="bp-title" id="bp-prog-title">Applying push…</div></div>'
+    +'<div class="bp-head"><div class="bp-title" id="bp-prog-title">'+(title||'Applying push…')+'</div></div>'
     +'<div class="bp-subtitle" id="bp-prog-label">Starting…</div>'
     +'<div class="bp-progbar"><div class="bp-progfill" id="bp-progfill" style="width:0%"></div></div>'
     +'<div class="bp-prog-detail" id="bp-prog-detail"></div>'
@@ -2711,6 +2722,37 @@ async function _bpBuildIntents(chosen){
   }));
 }
 
+// 5c: pull a short human reason out of a PostgREST/handler error body.
+function _bpShortReason(err){
+  const s=String(err||'');
+  try{ const j=JSON.parse(s); return String(j.message||j.hint||j.details||s).slice(0,90); }catch(_){ return s.slice(0,90); }
+}
+// 5c: structure copy FIRST, per target, ONLINE + atomic (applyLotStructurePush). Only 'ok'
+// targets (ready, no blockers in the preview) are attempted; 'blocked'/'unavailable'/'error'
+// targets are skipped and still get their status push below (D-3). A per-target failure never
+// blocks or hides the others. Returns { [lotId]: { lot_number, copied, reason?, permanentFail? } }.
+async function _bpRunStructureCopy(chosen){
+  const out={};
+  for(const t of chosen){
+    const entry=_bpStructPreviews[t.id];
+    if(!entry || entry.status!=='ok'){
+      const reason = !entry ? 'not previewed'
+                   : (entry.status==='blocked' ? 'would break the schedule' : (entry.reason || 'unavailable'));
+      out[t.id]={lot_number:t.lot_number, copied:false, reason:reason};   // not attempted
+      continue;
+    }
+    let d;
+    try{ d=await sbCallRaw('applyLotStructurePush', {source_lot_id:curLot.id, target_lot_id:t.id, actor:currentBuilder}); }
+    catch(e){ out[t.id]={lot_number:t.lot_number, copied:false, reason:'couldn’t reach the server'}; continue; }   // transient → not copied, try again
+    if(d && d.error){
+      const reason = (d.blockers && d.blockers.length) ? 'would break the schedule' : _bpShortReason(d.error);
+      out[t.id]={lot_number:t.lot_number, copied:false, reason:reason, permanentFail: !!d.permanent};
+    } else {
+      out[t.id]={lot_number:t.lot_number, copied:true};
+    }
+  }
+  return out;
+}
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length) return;
@@ -2743,6 +2785,13 @@ async function _bpApply(){
   // result for SYNCED items, so a permanent failure returns null and would otherwise be
   // miscounted as success with no message (the bug: an online push that failed 3 tasks
   // showed "Done"). Capture each push's report entry right after its drain.
+  // 5c: STRUCTURE COPY FIRST (online, atomic) when "Copy schedule" is on — per target, before any
+  // status push. A structure failure on one target never blocks the others or its own status push.
+  let _structResults=null;
+  if(_bpStructure && _bpMode==='lot'){
+    _bpProgressScreen(total, 'Copying schedule…');
+    _structResults=await _bpRunStructureCopy(chosen);
+  }
   _bpProgressScreen(total);
   _pushDrainReport = [];
   const outcomes=[]; let completed=0;
@@ -2768,19 +2817,42 @@ async function _bpApply(){
     else doneLots.push(o.lot);
   });
 
+  // 5c: a PERMANENT structure-copy failure is surfaced through the SAME auto-opening sheet —
+  // record it as a retained 'failed' row (never replayed; the copy is a one-shot atomic apply).
+  let structPermFails=0;
+  if(_structResults){
+    for(const t of chosen){
+      const sr=_structResults[t.id];
+      if(sr && sr.permanentFail){
+        structPermFails++;
+        try{
+          const act=await OfflineQueue.enqueue({ kind:'structure_copy', apiAction:'__structure_copy', type:'structure',
+            target:{lot_number:sr.lot_number}, source_lot_number:curLot.lot_number, builder:currentBuilder });
+          await OfflineQueue.markFailed(act.id, 'Schedule copy to '+sr.lot_number+' didn’t apply — '+(sr.reason||'rejected'), {});
+        }catch(e){}
+      }
+    }
+  }
+
   await new Promise(r=>setTimeout(r, 700));
   _bpClose();
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
-  if(failedCount>0){
-    // ONE clear window for failures — the auto-sheet lists exactly what didn't apply (task
-    // names). Replaces the failure alert; done/queued lots are visible in the schedule.
+  if(failedCount>0 || structPermFails>0){
+    // ONE clear window for ANY permanent failure (status or structure) — the auto-sheet lists
+    // exactly what didn't apply. Replaces the failure alert; done/queued lots show in the schedule.
     await updateSyncStatus();
     _failSheetOpen();
     return;
   }
-  // No failures → brief confirmation (today's behavior).
+  // No permanent failures → brief confirmation (today's behavior) + a short per-target
+  // "Schedule copy" line when the copy ran (5c).
   let msg = doneLots.length+' of '+total+' lots updated.';
   if(doneLots.length)  msg+='\n\n✓ Done: '+doneLots.join(', ');
+  if(_structResults){
+    const copyLines=chosen.map(t=>{ const sr=_structResults[t.id]; if(!sr) return null;
+      return sr.copied ? (sr.lot_number+': schedule copied') : (sr.lot_number+': schedule not copied — '+sr.reason); }).filter(Boolean);
+    if(copyLines.length) msg+='\n\nSchedule copy:\n'+copyLines.map(l=>'• '+l).join('\n');
+  }
   if(retryLots.length) msg+='\n\n⏳ Still queued (will retry): '+retryLots.join(', ');
   if(queuedMid>0)      msg+='\n\n⏳ '+queuedMid+' queued (went offline mid-push) — will sync when back online.';
   alert(msg);
