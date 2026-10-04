@@ -851,7 +851,9 @@ async function openLot(id, skipUndoCheck){
 async function _checkUndoAffordance(id){
   try{
     const r=await sbCallRaw('hasLotStructureUndo',{target_lot_id:id});
-    if(r && r.exists && curLot && curLot.id===id){ _undoForLot=id; renderSchedule(); }
+    if(!curLot || curLot.id!==id) return;
+    const next = (r && r.exists) ? id : null;   // sets when undoable, CLEARS when a structure edit / newer copy / undo killed it
+    if(_undoForLot!==next){ _undoForLot=next; renderSchedule(); }
   }catch(e){}
 }
 // 5d: tap "Undo schedule copy" → preview (same trimmed style as the push), confirm → apply.
@@ -866,7 +868,8 @@ async function openUndoSchedule(){
     +'<div class="bp-subtitle">Reading the last schedule copy for '+_bpEsc(lotNum)+'…</div></div></div>');
   let p; try{ p=await sbCallRaw('previewLotStructureUndo',{target_lot_id:lotId}); }
   catch(e){ _bpClose(); _toast('Couldn’t reach the server.'); return; }
-  if(!p || p.error){ _bpClose(); _toast('Couldn’t preview the undo.'); return; }
+  if(p && p.not_undoable){ _bpClose(); _undoForLot=null; renderSchedule(); _toast(p.error); return; }   // changed since (stale button)
+  if(!p || p.error){ _bpClose(); _toast(p && p.error ? p.error : 'Couldn’t preview the undo.'); return; }
   if(p.can_apply===false || (p.refusals&&p.refusals.length)){ _bpClose(); _undoForLot=null; renderSchedule(); _toast('Nothing to undo on this lot.'); return; }
   _undoRenderPreview(p, lotId, lotNum);
 }
@@ -903,8 +906,15 @@ async function _undoApply(lotId){
   let d; try{ d=await sbCallRaw('applyLotStructureUndo',{target_lot_id:lotId, actor:currentBuilder}); }
   catch(e){ _bpClose(); _toast('Couldn’t reach the server — not undone.'); return; }
   _bpClose();
+  if(d && d.not_undoable){   // changed since (stale button on this phone) — refusal, not a lost write
+    _undoForLot=null;
+    if(typeof loadMyLots==='function'){ await loadMyLots(); }
+    await openLot(lotId, true);
+    _toast(d.error);
+    return;
+  }
   if(d && d.error){
-    // permanent failure → the existing "didn't apply" sheet convention (a retained failed row)
+    // real restore failure → the existing "didn't apply" sheet convention (a retained failed row)
     try{ const act=await OfflineQueue.enqueue({kind:'structure_copy', apiAction:'__structure_undo', type:'structure',
           target:{lot_number:lotNum}, source_lot_number:lotNum, builder:currentBuilder});
       await OfflineQueue.markFailed(act.id, 'Undo schedule copy on '+lotNum+' didn’t apply — '+((d.blockers&&d.blockers.length)?'would break the schedule':_bpShortReason(d.error)), {}); }catch(e){}
@@ -2239,6 +2249,9 @@ async function saveEditTask(){
   btn.textContent='Save Changes';btn.disabled=false;
   closeEditTask();
   renderSchedule(); // recompute + re-render with updated task
+  // 5d lock-in: a structure edit just changed this lot — re-check so the Undo button disappears
+  // immediately (online; the server fingerprint no longer matches after the edit drains).
+  if(_isOnline && curLot) _checkUndoAffordance(curLot.id);
 }
 
 // ============ NOTES ============

@@ -217,6 +217,43 @@ async function _latestPushSnapshot(targetId) {
   return (r.data || [])[0] || null;
 }
 
+// ── 5d: UNDO lock-in — a canonical "after-copy" structure fingerprint ──
+// Undo is offered/allowed ONLY while the lot's CURRENT structure still equals what the copy
+// produced. ANY structure edit (duration/predecessor/lag/phase/order, through any path) changes
+// the fingerprint → Undo gone. Statuses/dates/notes are NOT in STRUCT_COLS, so they never affect it.
+async function _structFingerprint(lotId) {
+  const lot = await _loadStructureLot(lotId);
+  if (lot.error) return null;
+  const rows = (lot.rows || []).slice().sort(function (a, b) { return (a.bt_num || 0) - (b.bt_num || 0); });
+  return JSON.stringify(rows.map(function (r) {
+    return [r.bt_num,
+            (Array.isArray(r.predecessors) ? r.predecessors.slice() : []).sort(function (a, b) { return a - b; }),
+            r.lag, r.duration, r.phase_name, r.phase_order, r.task_order];
+  }));
+}
+// Latest snapshot of ANY kind (push or undo) for a lot, newest first.
+async function _latestSnapshotAny(lotId) {
+  const r = await supabaseRequest('GET', `field_ops_lot_structure_snapshots?target_lot_id=eq.${lotId}&select=id,kind,created_at&order=created_at.desc&limit=1`);
+  return (r.data || [])[0] || null;
+}
+// The stored after-copy fingerprint for a snapshot (null if none — legacy row or insert failed).
+async function _fingerprintForSnapshot(snapId) {
+  const r = await supabaseRequest('GET', `field_ops_lot_structure_fingerprints?snapshot_id=eq.${snapId}&select=after_fingerprint&limit=1`);
+  const row = (r.data || [])[0];
+  return row ? row.after_fingerprint : null;
+}
+// Can this lot's latest copy be undone? ONLY if (a) the latest snapshot is a push, (b) it has a
+// stored fingerprint, and (c) the lot's CURRENT structure still equals it. Any structure edit
+// since the copy, an undo, a newer copy, or a missing fingerprint → false (safe).
+async function _canUndo(lotId) {
+  const snap = await _latestSnapshotAny(lotId);
+  if (!snap || snap.kind !== 'push') return { canUndo: false, snap: null };
+  const fp = await _fingerprintForSnapshot(snap.id);
+  if (!fp) return { canUndo: false, snap: snap };                 // legacy / insert failed → no undo
+  const cur = await _structFingerprint(lotId);
+  return { canUndo: (cur !== null && cur === fp), snap: snap };
+}
+
 // Build the preview body (diff + blockers + labeled warnings + before/after completion) for
 // a proposed structure on a target lot.
 //   PUSH (srcRowsForLabel = the source graph): a proposed warning also present on the SOURCE
@@ -1454,13 +1491,27 @@ exports.handler = async function(event) {
           let msg = r.error; try { const j = JSON.parse(r.error); msg = j.message || j.hint || j.details || r.error; } catch (_) {}
           return { statusCode: r.status || 400, body: JSON.stringify({ error: msg }) };
         }
-        return { statusCode: 200, body: JSON.stringify(r.data || {}) };   // { snapshot_id, applied }
+        const out = r.data || {};
+        // 5d: record the after-copy structure fingerprint (INSERT-ONLY companion) so Undo can be
+        // offered only while the lot's structure still equals this. Best-effort — a failure just
+        // means Undo won't be available (safe); the copy itself already applied atomically.
+        try {
+          if (out && out.snapshot_id) {
+            const fp = await _structFingerprint(target_lot_id);
+            if (fp != null) await supabaseRequest('POST', 'field_ops_lot_structure_fingerprints', { snapshot_id: out.snapshot_id, after_fingerprint: fp });
+          }
+        } catch (e) { /* non-fatal: Undo simply won't show */ }
+        return { statusCode: 200, body: JSON.stringify(out) };   // { snapshot_id, applied }
       }
 
       // ── lot-structure UNDO: PREVIEW (restore the latest push snapshot) ──
       case 'previewLotStructureUndo': {
         const { target_lot_id } = payload;
         if (!target_lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'target_lot_id is required' }) };
+        // 5d SERVER GUARD: a stale Undo button on another phone must never undo after the schedule
+        // changed. Only undoable while the latest snapshot is a push AND current structure == its fingerprint.
+        const g = await _canUndo(target_lot_id);
+        if (!g.canUndo) return { statusCode: 400, body: JSON.stringify({ error: "This copy can't be undone — the schedule has changed since.", permanent: true, not_undoable: true }) };
         const snap = await _latestPushSnapshot(target_lot_id);
         if (!snap) return { statusCode: 200, body: JSON.stringify({ can_apply: false, refusals: ['no push to undo for this lot'], blockers: [], warnings: [], diff: [], completion: null }) };
         const tgt = await _loadStructureLot(target_lot_id);
@@ -1478,6 +1529,9 @@ exports.handler = async function(event) {
       case 'applyLotStructureUndo': {
         const { target_lot_id, actor } = payload;
         if (!target_lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'target_lot_id is required' }) };
+        // 5d SERVER GUARD (same as preview): never undo after the schedule changed since the copy.
+        const g = await _canUndo(target_lot_id);
+        if (!g.canUndo) return { statusCode: 400, body: JSON.stringify({ error: "This copy can't be undone — the schedule has changed since.", permanent: true, not_undoable: true }) };
         const snap = await _latestPushSnapshot(target_lot_id);
         if (!snap) return { statusCode: 400, body: JSON.stringify({ error: 'no push to undo for this lot' }) };
         const tgt = await _loadStructureLot(target_lot_id);
@@ -1496,13 +1550,14 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(r.data || {} ) };  // { snapshot_id, applied }
       }
 
-      // 5d: cheap existence check — does this lot have a push snapshot to undo? (one limit-1 row,
-      // no preview built). The field app calls this in the background after a lot renders.
+      // 5d: cheap existence check for the UNDO button — latest snapshot is a push AND the lot's
+      // current structure still equals its after-copy fingerprint (no structure edit / newer copy /
+      // undo since). No preview built. The field app calls this in the background after a lot renders.
       case 'hasLotStructureUndo': {
         const { target_lot_id } = payload;
         if (!target_lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'target_lot_id is required' }) };
-        const snap = await _latestPushSnapshot(target_lot_id);
-        return { statusCode: 200, body: JSON.stringify({ exists: !!snap, snapshot_at: snap ? snap.created_at : null }) };
+        const u = await _canUndo(target_lot_id);
+        return { statusCode: 200, body: JSON.stringify({ exists: u.canUndo, snapshot_at: u.snap ? u.snap.created_at : null }) };
       }
 
       case 'getTemplateStageMap': {
