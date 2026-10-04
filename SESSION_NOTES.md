@@ -28,6 +28,31 @@ LandIQ table.**
 
 ---
 
+## 2026-10-04 — SHIPPED to live: failed-items sheet + PIN-leak fix
+
+Two hotfixes merged to main (--no-ff) and confirmed Published on
+**ashland-field-ops.netlify.app** (live is ashland-field-ops, NOT myvera-app;
+Vera/tandem-health untouched):
+
+- **Failed-items sheet** — merge **`56284d9`** (hotfix/failed-badge-sheet). The
+  ⚠-badge is gone; the "Didn't apply" sheet auto-opens after a partially-failed
+  push and on app open, names the failed tasks, groups them by reason with plain
+  "Why:" lines, shows real "N of M" counts, uses lot_number verbatim (no double
+  "Lot"), handles legacy push rows (counts + "names not recorded"), and offers
+  "Got it"/"Remind me later". Client-side only (IndexedDB); no DB change.
+- **PIN-leak fix** — merge **`9ed6f10`** (hotfix/pin-leak). The server never
+  returns a PIN: getBuilders strips pin_hash/temp_pin → has_pin/has_temp_pin
+  booleans; updateBuilderPin + upsertBuilderRecord return {success:true} instead
+  of echoing the row; admin badge reads the booleans. Verified live read-only:
+  getBuilders returns no pin_hash/temp_pin; login + badges work. Response-shaping
+  only; no DB/schema change; every field_ops_builders handler audited clean.
+
+NEXT (planned, not built): GAPS 1–2 (silent data loss on DB rejection + non-push
+transient misclassification). 5c/5d of lot-structure push remain ON HOLD until
+GAPs 1–2 ship.
+
+---
+
 ## 2026-10-03 — Failed-items sheet: redesign + reason-grouped wording (hotfix, on Dev)
 
 **Hotfix `hotfix/failed-badge-sheet` + Dev mirror — tested on Dev, NOT yet merged to main.**

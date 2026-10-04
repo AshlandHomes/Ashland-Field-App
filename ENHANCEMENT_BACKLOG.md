@@ -44,7 +44,12 @@ Recorded during the live anon-exposure work.
   revoked anon/authenticated + enabled RLS on all 23 live field-app tables
   (`sql/2026-09-27_live_anon_lockdown.sql`). Verified 4/4 PASS + live smoke test; rollback
   (STEP 0 output) held by Collin. See SESSION_NOTES 2026-09-27.
-- 🔜 **getBuilders PIN-leak fix (code)** — staged on Dev (`963739c`), promote pending.
+- ✅ **RESOLVED 2026-10-04 — PIN-leak fix SHIPPED to live** (merge `9ed6f10`,
+  hotfix/pin-leak). getBuilders strips pin_hash/temp_pin → has_pin/has_temp_pin booleans;
+  updateBuilderPin + upsertBuilderRecord return {success:true} (no row echo); admin badge
+  reads booleans. Every field_ops_builders handler audited clean (verifyPin compares
+  server-side only). Verified live read-only (no pin fields in getBuilders). See
+  SESSION_NOTES 2026-10-04. (The failed-items sheet also shipped same day, merge `56284d9`.)
 - **Minimize client-facing columns (principle).** `getBuilders` no longer leaks
   `pin_hash`/`temp_pin`, but still returns fields the login screen doesn't use
   (`user_id`, `failed_attempts`, `biometric_credential_id`, `created_at`, `updated_at`).
