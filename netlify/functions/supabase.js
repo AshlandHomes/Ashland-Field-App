@@ -86,6 +86,19 @@ function checkDateEntry(u, ctx, today) {
   return ScheduleEngine.validateDateEntry(setting);
 }
 
+// ── GAP 1/2: write-handler failure classification (the server never lies about success) ──
+// PERMANENT = a data problem no retry can fix: 400 (validation), 409 (conflict/unique), 422
+// (invalid). Everything else is TRANSIENT and must retry, never mass-fail a builder's queue:
+// 401/403 (auth/RLS/key misconfig), 404 (incl. PostgREST schema-cache miss after a migration),
+// 408, 429, all 5xx, and network throws (handled client-side). An error carrying no `permanent`
+// field defaults to TRANSIENT on the client — a missed tag retries, it never silently drops.
+function _dbPermanent(status) { return status === 400 || status === 409 || status === 422; }
+function dbFail(r) { return { statusCode: r.status || 500, body: JSON.stringify({ error: r.error, permanent: _dbPermanent(r.status) }) }; }
+// A single-record PATCH/DELETE that matched 0 rows returns 200 + [] — still a silent loss. Treat
+// it as a PERMANENT "not found". statusCode 409 so even a status-based reader can't call it transient.
+function notFound(msg) { return { statusCode: 409, body: JSON.stringify({ error: msg || 'This record no longer exists. Contact the office.', permanent: true, not_found: true }) }; }
+function _zeroRows(r) { return Array.isArray(r.data) && r.data.length === 0; }
+
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -121,11 +134,13 @@ exports.handler = async function(event) {
           ...payload,
           updated_at: new Date().toISOString()
         });
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
       case 'upsertLots': {
         const r = await supabaseRequest('POST', 'field_ops_lots?on_conflict=id', payload);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -136,16 +151,20 @@ exports.handler = async function(event) {
           `field_ops_lots?id=eq.${id}`,
           { ...updates, updated_at: new Date().toISOString() }
         );
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This lot no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
       case 'deleteLot': {
-        await supabaseRequest('DELETE', `field_ops_lots?id=eq.${payload.id}`);
+        const r = await supabaseRequest('DELETE', `field_ops_lots?id=eq.${payload.id}`);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       case 'addSubmission': {
         const r = await supabaseRequest('POST', 'field_ops_submissions', payload);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -156,6 +175,7 @@ exports.handler = async function(event) {
 
       case 'addWalkNote': {
         const r = await supabaseRequest('POST', 'field_ops_walk_notes', payload);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -165,7 +185,8 @@ exports.handler = async function(event) {
       }
 
       case 'deleteWalkNote': {
-        await supabaseRequest('DELETE', `field_ops_walk_notes?id=eq.${payload.id}`);
+        const r = await supabaseRequest('DELETE', `field_ops_walk_notes?id=eq.${payload.id}`);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -190,7 +211,8 @@ exports.handler = async function(event) {
         const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, updates);
         // SECURITY: PATCH return=representation echoes the row (incl. pin_hash/temp_pin).
         // The caller ignores the body — return only success, never the credentials.
-        if (r.error) return { statusCode: r.status || 400, body: JSON.stringify({ error: r.error }) };
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This builder no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -225,6 +247,7 @@ exports.handler = async function(event) {
 
       case 'addOverride': {
         const r = await supabaseRequest('POST', 'field_ops_overrides', payload);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -234,10 +257,11 @@ exports.handler = async function(event) {
       }
 
       case 'resetWeek': {
-        await supabaseRequest('PATCH', 'field_ops_lots?updated_this_week=eq.true', {
+        const r = await supabaseRequest('PATCH', 'field_ops_lots?updated_this_week=eq.true', {
           updated_this_week: false,
           updated_at: new Date().toISOString()
         });
+        if (r.error) return dbFail(r);   // bulk filter update — 0 rows is legitimate (nothing to reset)
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -255,7 +279,8 @@ exports.handler = async function(event) {
       }
 
       case 'deleteBuilder': {
-        await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
+        const r = await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -274,6 +299,7 @@ exports.handler = async function(event) {
 
       case 'addDelay': {
         const r = await supabaseRequest('POST', 'field_ops_delays', payload);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -300,6 +326,7 @@ exports.handler = async function(event) {
           total_days: total_days != null ? total_days : null,
           status: 'active'
         });
+        if (r.error) return dbFail(r);
         const row = Array.isArray(r.data) ? r.data[0] : r.data;
         return { statusCode: 200, body: JSON.stringify(row || null) };
       }
@@ -308,6 +335,8 @@ exports.handler = async function(event) {
         const { id, ...updates } = payload;
         if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
         const r = await supabaseRequest('PATCH', `sched_templates?id=eq.${id}`, updates);
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This template no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -329,7 +358,8 @@ exports.handler = async function(event) {
         await supabaseRequest('DELETE', `sched_template_gates?template_id=eq.${id}`);
         await supabaseRequest('DELETE', `sched_template_tasks?template_id=eq.${id}`);
         await supabaseRequest('DELETE', `sched_template_phases?template_id=eq.${id}`);
-        await supabaseRequest('DELETE', `sched_templates?id=eq.${id}`);
+        const delT = await supabaseRequest('DELETE', `sched_templates?id=eq.${id}`);
+        if (delT.error) return dbFail(delT);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -363,6 +393,7 @@ exports.handler = async function(event) {
         if (phases.length) {
           const rows = phases.map(p => ({ template_id: newId, name: p.name, phase_order: p.phase_order }));
           const ins = await supabaseRequest('POST', 'sched_template_phases', rows);
+          if (ins.error) return dbFail(ins);
           const made = ins.data || [];
           // match by phase_order (unique within a template)
           phases.forEach(p => {
@@ -385,6 +416,7 @@ exports.handler = async function(event) {
             task_type: t.task_type || 'work', task_order: t.task_order
           }));
           const ins = await supabaseRequest('POST', 'sched_template_tasks', rows);
+          if (ins.error) return dbFail(ins);
           const made = ins.data || [];
           tasks.forEach(t => {
             const hit = made.find(m => m.bt_num === t.bt_num);
@@ -472,7 +504,8 @@ exports.handler = async function(event) {
         const { updates, criticalCount, projectEnd } = ScheduleEngine.computeTemplateCritical(tasks);
 
         for (const u of updates) {
-          await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${u.id}`, { is_critical: u.is_critical });
+          const pr = await supabaseRequest('PATCH', `sched_template_tasks?id=eq.${u.id}`, { is_critical: u.is_critical });
+          if (pr.error) return dbFail(pr);
         }
 
         return { statusCode: 200, body: JSON.stringify({
@@ -603,6 +636,8 @@ exports.handler = async function(event) {
             template_id, name, phase_order: phase_order != null ? phase_order : 0
           });
         }
+        if (r.error) return dbFail(r);
+        if (id && _zeroRows(r)) return notFound('This phase no longer exists. Contact the office.');
         const row = Array.isArray(r.data) ? r.data[0] : r.data;
         return { statusCode: 200, body: JSON.stringify(row || null) };
       }
@@ -614,7 +649,8 @@ exports.handler = async function(event) {
         if ((t.data || []).length) {
           return { statusCode: 200, body: JSON.stringify({ error: 'This phase still has tasks. Move or delete them first.' }) };
         }
-        await supabaseRequest('DELETE', `sched_template_phases?id=eq.${id}`);
+        const delP = await supabaseRequest('DELETE', `sched_template_phases?id=eq.${id}`);
+        if (delP.error) return dbFail(delP);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -647,6 +683,8 @@ exports.handler = async function(event) {
           if (f.task_type === undefined) f.task_type = 'work';
           r = await supabaseRequest('POST', 'sched_template_tasks', f);
         }
+        if (r.error) return dbFail(r);
+        if (id && _zeroRows(r)) return notFound('This task no longer exists on the template. Contact the office.');
         const row = Array.isArray(r.data) ? r.data[0] : r.data;
         return { statusCode: 200, body: JSON.stringify(row || null) };
       }
@@ -656,7 +694,8 @@ exports.handler = async function(event) {
         if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
         // clear any stage-map trigger referencing this task
         await supabaseRequest('DELETE', `sched_stage_map_tasks?task_id=eq.${id}`);
-        await supabaseRequest('DELETE', `sched_template_tasks?id=eq.${id}`);
+        const delTk = await supabaseRequest('DELETE', `sched_template_tasks?id=eq.${id}`);
+        if (delTk.error) return dbFail(delTk);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -765,7 +804,8 @@ exports.handler = async function(event) {
       }
 
       case 'deleteScheduleLot': {
-        await supabaseRequest('DELETE', `sched_lots?id=eq.${payload.id}`);
+        const r = await supabaseRequest('DELETE', `sched_lots?id=eq.${payload.id}`);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -853,9 +893,8 @@ exports.handler = async function(event) {
         }
         updates.updated_at = new Date().toISOString();
         const r = await supabaseRequest('PATCH', `sched_lots?id=eq.${id}`, updates);
-        if (r.error) {
-          return { statusCode: 200, body: JSON.stringify({ error: 'DB(' + r.status + '): ' + r.error }) };
-        }
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This lot no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -949,6 +988,8 @@ exports.handler = async function(event) {
             label, sort_order: sort_order != null ? sort_order : 50, is_archived: false
           });
         }
+        if (r.error) return dbFail(r);
+        if (id && _zeroRows(r)) return notFound('This delay reason no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -970,6 +1011,7 @@ exports.handler = async function(event) {
           expected_done: expected_done || null, actual_finish: actual_finish || null,
           source_lot_id: source_lot_id || null, author: author || null
         });
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1164,7 +1206,7 @@ exports.handler = async function(event) {
         if (actual_start !== undefined || actual_finish !== undefined || est_start_date !== undefined) {
           const gctx = await loadDateGuardCtx([task_id]);
           const gv = checkDateEntry({ task_id, actual_start, actual_finish, est_start_date }, gctx, new Date().toISOString().slice(0, 10));
-          if (!gv.ok) return { statusCode: 400, body: JSON.stringify({ error: gv.message, field: gv.field, reason: gv.reason }) };
+          if (!gv.ok) return { statusCode: 400, body: JSON.stringify({ error: gv.message, field: gv.field, reason: gv.reason, permanent: true }) };
         }
         const updates = { updated_at: new Date().toISOString() };
         if (status !== undefined) updates.status = status;
@@ -1173,6 +1215,8 @@ exports.handler = async function(event) {
         if (vendor_confirmed !== undefined) updates.vendor_confirmed = vendor_confirmed;
         if (est_start_date !== undefined) updates.est_start_date = est_start_date;
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This task no longer exists on the lot. Contact the office.');
         if (lot_id) {
           await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: new Date().toISOString() });
         }
@@ -1191,6 +1235,8 @@ exports.handler = async function(event) {
           completion_health_delta: completion_health_delta != null ? completion_health_delta : null,
           updated_at: new Date().toISOString()
         });
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This lot no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1207,6 +1253,8 @@ exports.handler = async function(event) {
         if (phase_name !== undefined) updates.phase_name = phase_name;
         if (phase_order !== undefined) updates.phase_order = phase_order;
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This task no longer exists on the lot. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1243,6 +1291,8 @@ exports.handler = async function(event) {
         }
         const updates = { confirmed: !!confirmed, confirmed_at: confirmed ? new Date().toISOString() : null };
         const r = await supabaseRequest('PATCH', `sched_lot_gate_state?id=eq.${gate_id}`, updates);
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This gate no longer exists on the lot. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1255,6 +1305,8 @@ exports.handler = async function(event) {
         if (note !== undefined) updates.note = note;
         if (flag !== undefined) updates.flag = flag;
         const r = await supabaseRequest('PATCH', `sched_lot_tasks?id=eq.${task_id}`, updates);
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This task no longer exists on the lot. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1267,7 +1319,8 @@ exports.handler = async function(event) {
           lot_task_id, lot_id: lot_id || null, bt_num: (bt_num != null ? bt_num : null),
           note, flag: flag || 'none', author: author || null
         });
-        return { statusCode: 200, body: JSON.stringify(r.data) };
+        if (r.error) return dbFail(r);
+        return { statusCode: 200, body: JSON.stringify(r.data) };   // success row is load-bearing (drain remapNoteId)
       }
 
       case 'getTaskNotes': {
@@ -1288,6 +1341,8 @@ exports.handler = async function(event) {
         if (note !== undefined) updates.note = note;
         if (flag !== undefined) updates.flag = flag;
         const r = await supabaseRequest('PATCH', `sched_lot_task_notes?id=eq.${id}`, updates);
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This note no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1295,7 +1350,8 @@ exports.handler = async function(event) {
         if (!payload.id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
         }
-        await supabaseRequest('DELETE', `sched_lot_task_notes?id=eq.${payload.id}`);
+        const r = await supabaseRequest('DELETE', `sched_lot_task_notes?id=eq.${payload.id}`);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -1385,13 +1441,15 @@ exports.handler = async function(event) {
         const { name } = payload;
         if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
         const r = await supabaseRequest('POST', 'sched_companies', { name, created_at: new Date().toISOString() });
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
       case 'deleteCompany': {
         const { id } = payload;
         if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
-        await supabaseRequest('DELETE', `sched_companies?id=eq.${id}`);
+        const r = await supabaseRequest('DELETE', `sched_companies?id=eq.${id}`);
+        if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -1416,6 +1474,8 @@ exports.handler = async function(event) {
           fields.created_at = new Date().toISOString();
           r = await supabaseRequest('POST', 'sched_subdivisions', fields);
         }
+        if (r.error) return dbFail(r);
+        if (id && _zeroRows(r)) return notFound('This subdivision no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
 
@@ -1431,7 +1491,8 @@ exports.handler = async function(event) {
         if (!subdivision_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'subdivision_id required' }) };
         }
-        await supabaseRequest('DELETE', `sched_subdivision_lots?subdivision_id=eq.${subdivision_id}`);
+        const delSL = await supabaseRequest('DELETE', `sched_subdivision_lots?subdivision_id=eq.${subdivision_id}`);
+        if (delSL.error) return dbFail(delSL);
         if (rows && rows.length) {
           const toInsert = rows
             .filter(r => r.lot_number || r.address)
@@ -1446,7 +1507,8 @@ exports.handler = async function(event) {
               updated_at: new Date().toISOString()
             }));
           if (toInsert.length) {
-            await supabaseRequest('POST', 'sched_subdivision_lots', toInsert);
+            const insSL = await supabaseRequest('POST', 'sched_subdivision_lots', toInsert);
+            if (insSL.error) return dbFail(insSL);
           }
         }
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
@@ -1466,10 +1528,12 @@ exports.handler = async function(event) {
         if (!subdivision_id) {
           return { statusCode: 400, body: JSON.stringify({ error: 'subdivision_id required' }) };
         }
-        await supabaseRequest('DELETE', `sched_subdivision_templates?subdivision_id=eq.${subdivision_id}`);
+        const delST = await supabaseRequest('DELETE', `sched_subdivision_templates?subdivision_id=eq.${subdivision_id}`);
+        if (delST.error) return dbFail(delST);
         if (template_ids && template_ids.length) {
           const rows = template_ids.map(tid => ({ subdivision_id, template_id: tid }));
-          await supabaseRequest('POST', 'sched_subdivision_templates', rows);
+          const insST = await supabaseRequest('POST', 'sched_subdivision_templates', rows);
+          if (insST.error) return dbFail(insST);
         }
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
@@ -1479,18 +1543,22 @@ exports.handler = async function(event) {
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
         }
-        await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
+        const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
           pin_hash: pin, temp_pin: null, failed_attempts: 0, is_locked: false, updated_at: new Date().toISOString()
         });
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This builder no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       case 'unlockBuilder': {
         const { name } = payload;
         if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
-        await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
+        const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
           is_locked: false, failed_attempts: 0, updated_at: new Date().toISOString()
         });
+        if (r.error) return dbFail(r);
+        if (_zeroRows(r)) return notFound('This builder no longer exists. Contact the office.');
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -1584,11 +1652,13 @@ exports.handler = async function(event) {
       }
 
       default:
-        return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}` }) };
+        return { statusCode: 400, body: JSON.stringify({ error: `Unknown action: ${action}`, permanent: true }) };
     }
 
   } catch(err) {
     console.error('Handler error:', err);
+    // Unhandled server error = TRANSIENT (no `permanent` flag): a queued action keeps
+    // retrying rather than being dropped on a transient crash/blip.
     return { statusCode: 500, body: JSON.stringify({ error: err.toString() }) };
   }
 };
