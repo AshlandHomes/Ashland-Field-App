@@ -868,7 +868,7 @@ async function openUndoSchedule(){
     +'<div class="bp-subtitle">Reading the last schedule copy for '+_bpEsc(lotNum)+'…</div></div></div>');
   let p; try{ p=await sbCallRaw('previewLotStructureUndo',{target_lot_id:lotId}); }
   catch(e){ _bpClose(); _toast('Couldn’t reach the server.'); return; }
-  if(p && p.not_undoable){ _bpClose(); _undoForLot=null; renderSchedule(); _toast(p.error); return; }   // changed since (stale button)
+  if(p && p.not_undoable){ _bpClose(); _undoForLot=null; renderSchedule(); await _undoRefused(lotNum); return; }   // changed since (stale button) — must-tap modal
   if(!p || p.error){ _bpClose(); _toast(p && p.error ? p.error : 'Couldn’t preview the undo.'); return; }
   if(p.can_apply===false || (p.refusals&&p.refusals.length)){ _bpClose(); _undoForLot=null; renderSchedule(); _toast('Nothing to undo on this lot.'); return; }
   _undoRenderPreview(p, lotId, lotNum);
@@ -910,7 +910,7 @@ async function _undoApply(lotId){
     _undoForLot=null;
     if(typeof loadMyLots==='function'){ await loadMyLots(); }
     await openLot(lotId, true);
-    _toast(d.error);
+    await _undoRefused(lotNum);   // must-tap modal (not a fading toast)
     return;
   }
   if(d && d.error){
@@ -925,7 +925,12 @@ async function _undoApply(lotId){
   await openLot(lotId, true);   // reload + skip the undo re-check so the button stays gone after a successful undo
   _toast('Schedule restored.');
 }
-function _toast(msg){
+// 5d: a refusal is NOT a fading toast — it's a centered modal the user must acknowledge.
+function _undoRefused(lotNum){
+  return appModal({ title:'Can’t undo', sub:(lotNum||'This lot')+'’s schedule was changed after the copy.',
+    buttons:[{label:'OK',value:null,kind:'primary'}] });
+}
+function _toast(msg){   // quick auto-fading banner — successes only ("Schedule restored.")
   try{ const t=document.createElement('div'); t.className='vtoast'; t.textContent=msg; document.body.appendChild(t);
     requestAnimationFrame(()=>t.classList.add('show'));
     setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>{ try{t.remove();}catch(_){}}, 260); }, 2200); }catch(e){}
@@ -1631,6 +1636,9 @@ function _failStillItem(a, showTitle){
 }
 function _failClose(){ const o=document.getElementById('fs-overlay'); if(o) o.remove(); }
 function _fsStuck(){ return (typeof OfflineQueue!=='undefined' && OfflineQueue.STUCK_ATTEMPTS) || 3; }
+// Show only the LOGGED-IN builder's queued items. Legacy rows with no builder tag are shown to
+// everyone (never hide a failure); when no one is logged in, show all (can't scope).
+function _fsMine(r){ return !r || !r.builder || !currentBuilder || r.builder===currentBuilder; }
 // Auto-open only at natural points (app open, after a push). Never while a modal/form is in use.
 async function _maybeAutoFailSheet(){
   if(document.getElementById('fs-overlay') || document.getElementById('bp-overlay')) return;  // something's already up
@@ -1638,14 +1646,14 @@ async function _maybeAutoFailSheet(){
   if(sc==='screen-pin'||sc==='screen-builders'||sc==='screen-setpin') return;                 // not during login/PIN
   let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ return; }
   const stuck=_fsStuck();
-  if((rows||[]).some(r=>(r.status==='failed' && !r.acknowledged_at) || (r.status==='pending' && (r.attempts||0)>=stuck))) _failSheetOpen();
+  if((rows||[]).some(r=>_fsMine(r) && ((r.status==='failed' && !r.acknowledged_at) || (r.status==='pending' && (r.attempts||0)>=stuck)))) _failSheetOpen();
 }
 async function _failSheetOpen(){
   let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ rows=[]; }
   const stuck=_fsStuck();
-  const failedItems=(rows||[]).filter(r=>r.status==='failed' && !r.acknowledged_at)
+  const failedItems=(rows||[]).filter(r=>_fsMine(r) && r.status==='failed' && !r.acknowledged_at)
     .sort((a,b)=>String(b.failed_at||'').localeCompare(String(a.failed_at||'')));
-  const waitItems=(rows||[]).filter(r=>r.status==='pending' && (r.attempts||0)>=stuck)
+  const waitItems=(rows||[]).filter(r=>_fsMine(r) && r.status==='pending' && (r.attempts||0)>=stuck)
     .sort((a,b)=>String(b.last_attempt_at||'').localeCompare(String(a.last_attempt_at||'')));
   _failClose();
   if(!failedItems.length && !waitItems.length){ return; }   // nothing to show
