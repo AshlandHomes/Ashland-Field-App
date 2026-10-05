@@ -859,7 +859,7 @@ async function _checkUndoAffordance(id){
 // 5d: tap "Undo schedule copy" → preview (same trimmed style as the push), confirm → apply.
 async function openUndoSchedule(){
   if(!curLot) return;
-  if(!_isOnline){ _toast('Undo needs a connection.'); return; }
+  if(!_isOnline){ await _okModal('Undo needs a connection', 'Try again when you’re back online.'); return; }
   const lotId=curLot.id, lotNum=curLot.lot_number;
   _bpClose();
   document.body.insertAdjacentHTML('beforeend',
@@ -867,10 +867,10 @@ async function openUndoSchedule(){
     +'<div class="bp-head"><div class="bp-title">Checking…</div></div>'
     +'<div class="bp-subtitle">Reading the last schedule copy for '+_bpEsc(lotNum)+'…</div></div></div>');
   let p; try{ p=await sbCallRaw('previewLotStructureUndo',{target_lot_id:lotId}); }
-  catch(e){ _bpClose(); _toast('Couldn’t reach the server.'); return; }
+  catch(e){ _bpClose(); await _okModal('Couldn’t reach the server', 'Try the undo again in a moment.'); return; }
   if(p && p.not_undoable){ _bpClose(); _undoForLot=null; renderSchedule(); await _undoRefused(lotNum); return; }   // changed since (stale button) — must-tap modal
-  if(!p || p.error){ _bpClose(); _toast(p && p.error ? p.error : 'Couldn’t preview the undo.'); return; }
-  if(p.can_apply===false || (p.refusals&&p.refusals.length)){ _bpClose(); _undoForLot=null; renderSchedule(); _toast('Nothing to undo on this lot.'); return; }
+  if(!p || p.error){ _bpClose(); await _okModal('Couldn’t preview the undo', 'Please try again, or contact the office.'); return; }
+  if(p.can_apply===false || (p.refusals&&p.refusals.length)){ _bpClose(); _undoForLot=null; renderSchedule(); await _okModal('Nothing to undo', 'This lot has no schedule copy to undo.'); return; }
   _undoRenderPreview(p, lotId, lotNum);
 }
 function _undoRenderPreview(p, lotId, lotNum){
@@ -904,7 +904,7 @@ async function _undoApply(lotId){
   const lotNum=(curLot&&curLot.id===lotId)?curLot.lot_number:lotId;
   const btn=document.querySelector('#bp-overlay .bp-apply'); if(btn){ btn.disabled=true; btn.textContent='Undoing…'; }
   let d; try{ d=await sbCallRaw('applyLotStructureUndo',{target_lot_id:lotId, actor:currentBuilder}); }
-  catch(e){ _bpClose(); _toast('Couldn’t reach the server — not undone.'); return; }
+  catch(e){ _bpClose(); await _okModal('Couldn’t reach the server', 'Nothing was undone — try again.'); return; }
   _bpClose();
   if(d && d.not_undoable){   // changed since (stale button on this phone) — refusal, not a lost write
     _undoForLot=null;
@@ -925,11 +925,9 @@ async function _undoApply(lotId){
   await openLot(lotId, true);   // reload + skip the undo re-check so the button stays gone after a successful undo
   _toast('Schedule restored.');
 }
-// 5d: a refusal is NOT a fading toast — it's a centered modal the user must acknowledge.
-function _undoRefused(lotNum){
-  return appModal({ title:'Can’t undo', sub:(lotNum||'This lot')+'’s schedule was changed after the copy.',
-    buttons:[{label:'OK',value:null,kind:'primary'}] });
-}
+// 5d: a refusal/problem is NOT a fading toast — it's a centered modal the user must acknowledge.
+function _okModal(title, sub){ return appModal({ title:title, sub:sub||'', buttons:[{label:'OK',value:null,kind:'primary'}] }); }
+function _undoRefused(lotNum){ return _okModal('Can’t undo', (lotNum||'This lot')+'’s schedule was changed after the copy.'); }
 function _toast(msg){   // quick auto-fading banner — successes only ("Schedule restored.")
   try{ const t=document.createElement('div'); t.className='vtoast'; t.textContent=msg; document.body.appendChild(t);
     requestAnimationFrame(()=>t.classList.add('show'));
