@@ -28,6 +28,24 @@ LandIQ table.**
 
 ---
 
+## 2026-10-05 — Schedule-push LIVE migrations applied (code promote next)
+
+Both LIVE SQL migrations for the schedule-push feature are applied + verified on the live
+Supabase project (field_ops_* / no dev_ prefix):
+- **`field_ops_lot_structure_snapshots` + `_snapshot_tasks` + `field_ops_apply_lot_structure(...)`**
+  (`sql/2026-10-02_lot_structure_push.sql` LIVE section) — 9/9 PASS. RLS deny-all; service_role
+  SELECT+INSERT only on the immutable snapshot tables; EXECUTE service_role-only on the RPC.
+- **`field_ops_lot_structure_fingerprints`** (`sql/2026-10-04_lot_structure_fingerprint.sql`
+  LIVE section) — 5/5 PASS. INSERT-ONLY companion, UNIQUE(snapshot_id), FK ON DELETE CASCADE,
+  RLS deny-all, service_role SELECT+INSERT only.
+
+SQL runs BEFORE the code (so the RPC + tables exist the moment the code goes live). NEXT: the
+4-file code promote via `hotfix/schedule-push-promote` (regenerated field-app HTML incl. engine
+?v=4, surgical supabase.js keeping main's upsertBuilderRecord, whole schedule-engine.js delta,
+one-line admin.html engine ?v bump) — permission-foundation work stays OUT.
+
+---
+
 ## 2026-10-04 — SHIPPED to live: GAP 1+2 queue integrity (server never lies)
 
 **Merged to main `ec6ccda` (--no-ff, hotfix/queue-integrity); client + function only, no DB

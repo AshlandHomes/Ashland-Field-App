@@ -114,9 +114,10 @@ NOTIFY pgrst, 'reload schema';
 
 
 -- ============================================================================
--- LIVE SECTION (run ONLY at promotion — same object, no dev_ prefix). Mirrors the
--- DEV block exactly: pre-flight, CREATE, UNIQUE(snapshot_id), FK ON DELETE CASCADE,
--- index, RLS ON, service_role SELECT+INSERT only, no anon/authenticated, NOTIFY.
+-- LIVE SECTION — APPLIED & VERIFIED on live 2026-10-05 (5/5 PASS). Same object, no dev_
+-- prefix; mirrors the DEV block exactly: pre-flight, CREATE, UNIQUE(snapshot_id), FK ON
+-- DELETE CASCADE, index, RLS ON, service_role SELECT+INSERT only, no anon/authenticated, NOTIFY.
+-- (Run after the lot_structure_push LIVE section — FK target must exist first.)
 -- ============================================================================
 /*
 BEGIN;
