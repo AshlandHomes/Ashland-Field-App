@@ -331,42 +331,120 @@
     };
   }
 
-  // ── integrity rules (BUILD_SPEC §3) — used by template builder + runtime ──
-  // Returns [{ num, rule, message }]. Does not throw; the UI decides how to
-  // surface / block on these.
+  // ── integrity rules (BUILD_SPEC §3) — used by template builder + runtime, and by
+  //    the lot-structure push preview/apply (what the copy would make broken vs. debt
+  //    that already exists). Returns { blockers:[...], warnings:[...] }, each item
+  //    { rule, num?, ... , message }. Does NOT throw; the caller decides how to surface.
+  //
+  //    BLOCKERS (the copy would MAKE the schedule broken — refuse the apply):
+  //      - dangling_predecessor : a task depends on a bt that isn't present on the lot
+  //      - cycle                : a circular predecessor chain
+  //    WARNINGS (template debt; show, don't block — e.g. the 39 floating Slab tasks):
+  //      - orphan_no_predecessor / multiple_sources : task(s) with no predecessor
+  //      - neg_lag_no_pred       : negative lag but nothing to lead off
+  //      - unreachable_terminal  : a dead-end branch that never reaches the final task
+  //    opts.startTaskNum (the designated project start) and opts.terminalTaskNum (the
+  //    designated final task) refine the source/dead-end checks; both optional.
   function validateSchedule(rawTasks, opts) {
     opts = opts || {};
     var startTaskNum = (opts.startTaskNum != null) ? opts.startTaskNum : null;
+    var terminalTaskNum = (opts.terminalTaskNum != null) ? opts.terminalTaskNum : null;
     var TASKS = (rawTasks || []).map(normalizeTask);
     var present = {}; TASKS.forEach(function (t) { present[t.num] = true; });
-    var violations = [];
+    var byNum = {}; TASKS.forEach(function (t) { byNum[t.num] = t; });
+    var blockers = [];
+    var warnings = [];
 
+    // presentPreds(t) → the task's predecessors that actually exist on the lot
+    function presentPreds(t) {
+      return (t.predecessors || []).filter(function (p) { return present[p]; });
+    }
+
+    // ---- BLOCKER: dangling predecessors (pred bt not present on the lot) ----
     TASKS.forEach(function (t) {
-      var preds = t.predecessors || [];
-
-      // Rule 1: every task must have >= 1 predecessor, except the single designated start task.
-      if (preds.length === 0 && t.num !== startTaskNum) {
-        violations.push({ num: t.num, rule: 'needs_predecessor',
-          message: 'Task ' + t.num + ' (' + (t.name || '') + ') has no predecessor. Every task except the project-start task must be chained.' });
-      }
-
-      // Rule 3: negative lag (lead time) requires its driving predecessor to already exist.
-      if (t.lag < 0) {
-        if (preds.length === 0) {
-          violations.push({ num: t.num, rule: 'neg_lag_no_pred',
-            message: 'Task ' + t.num + ' has negative lag (lead time) but no predecessor to lead off of.' });
-        } else {
-          preds.forEach(function (p) {
-            if (!present[p]) {
-              violations.push({ num: t.num, rule: 'neg_lag_missing_driver',
-                message: 'Task ' + t.num + ' leads off predecessor ' + p + ' which does not exist. Build the driver task first.' });
-            }
-          });
+      (t.predecessors || []).forEach(function (p) {
+        if (!present[p]) {
+          blockers.push({ rule: 'dangling_predecessor', num: t.num, pred: p,
+            message: 'Task ' + t.num + ' (' + (t.name || '') + ') depends on task ' + p + ', which is not on this lot.' });
         }
+      });
+    });
+
+    // ---- BLOCKER: cycles (DFS over predecessor edges among present tasks) ----
+    var color = {}; TASKS.forEach(function (t) { color[t.num] = 0; });   // 0=unvisited 1=in-stack 2=done
+    var seenCycle = {};
+    function dfs(n, stack) {
+      color[n] = 1; stack.push(n);
+      var t = byNum[n];
+      var preds = t ? presentPreds(t) : [];
+      for (var i = 0; i < preds.length; i++) {
+        var p = preds[i];
+        if (color[p] === 1) {
+          var members = stack.slice(stack.indexOf(p)).concat([p]);
+          var key = members.slice().sort(function (a, b) { return a - b; }).join('>');
+          if (!seenCycle[key]) {
+            seenCycle[key] = true;
+            blockers.push({ rule: 'cycle', num: n, members: members,
+              message: 'Circular dependency: ' + members.join(' → ') + '.' });
+          }
+        } else if (color[p] === 0) {
+          dfs(p, stack);
+        }
+      }
+      stack.pop(); color[n] = 2;
+    }
+    TASKS.forEach(function (t) { if (color[t.num] === 0) dfs(t.num, []); });
+
+    // ---- WARNING: sources (tasks with no present predecessor) ----
+    var sources = TASKS.filter(function (t) { return presentPreds(t).length === 0; })
+                       .map(function (t) { return t.num; });
+    if (startTaskNum != null) {
+      sources.forEach(function (n) {
+        if (n === startTaskNum) return;
+        warnings.push({ rule: 'orphan_no_predecessor', num: n,
+          message: 'Task ' + n + ' (' + ((byNum[n] && byNum[n].name) || '') + ') has no predecessor (not the project start).' });
+      });
+    } else if (sources.length > 1) {
+      warnings.push({ rule: 'multiple_sources', nums: sources,
+        message: 'Schedule has ' + sources.length + ' start points (tasks with no predecessor): ' + sources.join(', ') + '.' });
+    }
+
+    // ---- WARNING: negative lag with no predecessor to lead off ----
+    TASKS.forEach(function (t) {
+      if (t.lag < 0 && presentPreds(t).length === 0) {
+        warnings.push({ rule: 'neg_lag_no_pred', num: t.num,
+          message: 'Task ' + t.num + ' has negative lag (lead time) but no predecessor to lead off of.' });
       }
     });
 
-    return violations;
+    // ---- WARNING: unreachable terminal (dead-end branch) ----
+    // terminal(s) = the designated final task, else every sink (task with no successors).
+    // A task "reaches terminal" if, following successor edges, it can arrive at a terminal.
+    // Compute by fixpoint over successors; nodes that can't reach any terminal are dead ends.
+    var succ = computeSuccessors(TASKS);
+    var sinks = TASKS.filter(function (t) { return !(succ[t.num] && succ[t.num].length); })
+                     .map(function (t) { return t.num; });
+    var terminals = (terminalTaskNum != null) ? [terminalTaskNum] : sinks;
+    var reaches = {}; terminals.forEach(function (n) { reaches[n] = true; });
+    var changed = true;
+    while (changed) {
+      changed = false;
+      TASKS.forEach(function (t) {
+        if (reaches[t.num]) return;
+        var ss = succ[t.num] || [];
+        for (var i = 0; i < ss.length; i++) {
+          if (reaches[ss[i].num]) { reaches[t.num] = true; changed = true; break; }
+        }
+      });
+    }
+    TASKS.forEach(function (t) {
+      if (!reaches[t.num]) {
+        warnings.push({ rule: 'unreachable_terminal', num: t.num,
+          message: 'Task ' + t.num + ' (' + (t.name || '') + ') does not lead to the final task — dead-end branch.' });
+      }
+    });
+
+    return { blockers: blockers, warnings: warnings };
   }
 
   // ── dependents / reverse map (BUILD_SPEC §3) ─────────────────────────────
