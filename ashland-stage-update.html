@@ -178,6 +178,28 @@ body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--i
 .bp-lotstage{margin-left:auto;font-size:12px;color:#95a5a6}
 .bp-note-wrap{margin-top:14px;border-top:1px solid #eee;padding-top:12px}
 .bp-note-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:#34495e;cursor:pointer}
+.bp-struct-wrap{margin-top:14px;border-top:1px solid #eee;padding-top:12px}
+.bp-struct-hint{font-size:11px;color:#7f8c8d;margin-top:5px;line-height:1.35}
+.bp-note-toggle.bp-disabled{color:#b2bec3;cursor:not-allowed}
+.bp-cards{max-height:52vh;overflow-y:auto;margin:6px 0}
+.bp-card{border:1px solid #e5e7eb;border-radius:9px;margin-bottom:8px;background:#fff}
+.bp-card>summary{list-style:none;cursor:pointer;padding:10px 30px 10px 12px;display:flex;flex-direction:column;gap:2px;position:relative}
+.bp-card>summary::-webkit-details-marker{display:none}
+.bp-card>summary::after{content:'▸';position:absolute;right:12px;top:10px;color:#9ca3af;font-size:13px}
+.bp-card[open]>summary::after{content:'▾'}
+.bp-card-lot{font-weight:700;font-size:14px;color:#1f2937}
+.bp-card-sum{font-size:12px;color:#6b7280;line-height:1.3}
+.bp-card[open] .bp-sum-when{display:none}   /* completion date shows in the header only when collapsed (it's on the line below when open) */
+.bp-card-blk{border-color:#f5b7b1;background:#fdecea}
+.bp-card-off{opacity:.7;background:#f7f7f7}
+.bp-card-body{padding:2px 12px 12px;border-top:1px solid #f0f0f0}
+.bp-comp{font-size:13px;color:#1f2937;margin:8px 0}
+.bp-comp-bl{font-size:11px;color:#9ca3af}
+.bp-sect-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#6b7280;margin:10px 0 4px}
+.bp-h-blk{color:#c0392b}.bp-h-cause{color:#b9770e}.bp-h-ok{color:#1E8449}
+.bp-chg{font-size:13px;color:#334155;padding:2px 0 2px 4px;line-height:1.35}
+.bp-w{font-size:12px;color:#5b6168;padding:2px 0 2px 4px;line-height:1.35}
+.bp-w-blk{color:#c0392b}.bp-w-ok{color:#5a8a6b}
 .bp-note-toggle input{width:16px;height:16px}
 #bp-note-fields textarea{width:100%;margin-top:8px;min-height:64px;border:1px solid #dfe4e7;border-radius:8px;padding:8px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
 .bp-flags{display:flex;gap:6px;margin-top:8px}
@@ -202,6 +224,9 @@ html,body{overscroll-behavior-y:contain}
 .ab.push{background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5}
 /* whole-lot push button in schedule header */
 .bp-lotbtn{display:inline-block;margin-left:8px;background:#eaf4fb;color:#2980b9;border:1px solid #d3e6f5;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:middle}
+.sched-undobtn{display:inline-block;background:#fef3e8;color:#b9770e;border:1px solid #f3d9b5;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer}
+.vtoast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:100001;background:#1f2937;color:#fff;font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px;box-shadow:0 2px 10px rgba(0,0,0,.25);opacity:0;transition:opacity .2s}
+.vtoast.show{opacity:1}
 /* progress */
 .bp-progbar{height:12px;background:#ecf0f1;border-radius:7px;overflow:hidden;margin:6px 0}
 .bp-progfill{height:100%;background:#27ae60;border-radius:7px;transition:width .25s ease}
@@ -397,7 +422,7 @@ html,body{overscroll-behavior-y:contain}
   </div>
 </div>
 
-<script src="schedule-engine.js?v=3"></script>
+<script src="schedule-engine.js?v=4"></script>
 <script src="note-resolution.js?v=1"></script>
 <script src="offline-queue.js?v=3"></script>
 <script src="offline-data.js?v=1"></script>
@@ -686,6 +711,7 @@ function backToLots(){refreshCurLotInList();showScreen('screen-lots');renderLots
 let TASKS=[],bn={},act={},startDate=null;
 let collapsedPhases={},userToggledPhases=false;
 let curLot=null,stageMap=[],lotGates=[],curManual=null;
+let _undoForLot=null;   // 5d: lot id that currently has a push snapshot to undo (set by the cheap background check)
 
 // Working-day helpers now live in the single shared engine (schedule-engine.js).
 // Thin hoisted wrappers preserve the existing call convention (startDate is a module global here).
@@ -797,9 +823,10 @@ function openDatePicker(title,defaultDate){
   });
 }
 
-async function openLot(id){
+async function openLot(id, skipUndoCheck){
   curLot=myLots.find(l=>l.id===id);
   if(!curLot)return;
+  _undoForLot=null;   // 5d: reset; re-checked in the background after render
   showScreen('screen-schedule');
   document.getElementById('sched-view').innerHTML='<div class="loading">Loading schedule…</div>';
   const data=await sbRead('getScheduleLotTasks',{lot_id:id});
@@ -815,6 +842,95 @@ async function openLot(id){
   lotNotes=await sbRead('getTaskNotes',{lot_id:id})||[];
   userToggledPhases=false;collapsedPhases={};
   renderSchedule();
+  if(_isOnline && !skipUndoCheck) _checkUndoAffordance(id);   // 5d: cheap background check — never blocks the render, skipped offline
+}
+
+// 5d: one limit-1 existence query (no preview). If this lot has a push snapshot, reveal the
+// "Undo schedule copy" button. Background + silent — a failure just leaves the button hidden.
+async function _checkUndoAffordance(id){
+  try{
+    const r=await sbCallRaw('hasLotStructureUndo',{target_lot_id:id});
+    if(!curLot || curLot.id!==id) return;
+    const next = (r && r.exists) ? id : null;   // sets when undoable, CLEARS when a structure edit / newer copy / undo killed it
+    if(_undoForLot!==next){ _undoForLot=next; renderSchedule(); }
+  }catch(e){}
+}
+// 5d: tap "Undo schedule copy" → preview (same trimmed style as the push), confirm → apply.
+async function openUndoSchedule(){
+  if(!curLot) return;
+  if(!_isOnline){ await _okModal('Undo needs a connection', 'Try again when you’re back online.'); return; }
+  const lotId=curLot.id, lotNum=curLot.lot_number;
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Checking…</div></div>'
+    +'<div class="bp-subtitle">Reading the last schedule copy for '+_bpEsc(lotNum)+'…</div></div></div>');
+  let p; try{ p=await sbCallRaw('previewLotStructureUndo',{target_lot_id:lotId}); }
+  catch(e){ _bpClose(); await _okModal('Couldn’t reach the server', 'Try the undo again in a moment.'); return; }
+  if(p && p.not_undoable){ _bpClose(); _undoForLot=null; renderSchedule(); await _undoRefused(lotNum); return; }   // changed since (stale button) — must-tap modal
+  if(!p || p.error){ _bpClose(); await _okModal('Couldn’t preview the undo', 'Please try again, or contact the office.'); return; }
+  if(p.can_apply===false || (p.refusals&&p.refusals.length)){ _bpClose(); _undoForLot=null; renderSchedule(); await _okModal('Nothing to undo', 'This lot has no schedule copy to undo.'); return; }
+  _undoRenderPreview(p, lotId, lotNum);
+}
+function _undoRenderPreview(p, lotId, lotNum){
+  const diff=p.diff||[], blk=p.blockers||[];
+  const caused=(p.warnings||[]).filter(w=>w.rule==='finished_before_predecessor');   // only copy/undo-caused; pre-existing hidden
+  const cb=(p.completion&&p.completion.before)||{}, ca=(p.completion&&p.completion.after)||{};
+  const compChanged=cb.projected!==ca.projected;
+  let body='';
+  if(compChanged) body+='<div class="bp-comp">Completion '+_bpFmtD(cb.projected)+' → <b>'+_bpFmtD(ca.projected)+'</b></div>';
+  if(diff.length){
+    body+=diff.map(d=>{ const parts=Object.keys(d.changes).map(c=>_bpHumanChange(c,d.changes[c])).join('; ');
+      return '<div class="bp-chg">'+_bpEsc(d.name)+' (#'+d.bt_num+'): '+parts+'</div>'; }).join('');
+  } else body+='<div class="bp-chg">No schedule changes to restore.</div>';
+  if(blk.length)    body+='<div class="bp-sect-h bp-h-blk">⛔ Would break the schedule</div>'+blk.map(w=>'<div class="bp-w bp-w-blk">'+_bpEsc(w.message)+'</div>').join('');
+  if(caused.length) body+='<div class="bp-sect-h bp-h-cause">⚠ Caused by this undo</div>'+caused.map(w=>'<div class="bp-w">'+_bpEsc(w.message)+'</div>').join('');
+  const blocked=blk.length>0;
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Undo schedule copy</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-subtitle">Restoring '+_bpEsc(lotNum)+' · nothing changes until you confirm</div>'
+    +'<div class="bp-cards"><div class="bp-card'+(blocked?' bp-card-blk':'')+'"><div class="bp-card-body">'+body+'</div></div></div>'
+    +'<div class="bp-struct-hint">Also reverts any schedule edits made on this lot since the copy.</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">← Back</button>'
+    +(blocked?'<button class="bp-apply" disabled style="opacity:.5">Can’t undo</button>'
+             :'<button class="bp-apply" onclick="_undoApply(\''+lotId+'\')">Undo schedule copy</button>')+'</div>'
+    +'</div></div>';
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function _undoApply(lotId){
+  const lotNum=(curLot&&curLot.id===lotId)?curLot.lot_number:lotId;
+  const btn=document.querySelector('#bp-overlay .bp-apply'); if(btn){ btn.disabled=true; btn.textContent='Undoing…'; }
+  let d; try{ d=await sbCallRaw('applyLotStructureUndo',{target_lot_id:lotId, actor:currentBuilder}); }
+  catch(e){ _bpClose(); await _okModal('Couldn’t reach the server', 'Nothing was undone — try again.'); return; }
+  _bpClose();
+  if(d && d.not_undoable){   // changed since (stale button on this phone) — refusal, not a lost write
+    _undoForLot=null;
+    if(typeof loadMyLots==='function'){ await loadMyLots(); }
+    await openLot(lotId, true);
+    await _undoRefused(lotNum);   // must-tap modal (not a fading toast)
+    return;
+  }
+  if(d && d.error){
+    // real restore failure → the existing "didn't apply" sheet convention (a retained failed row)
+    try{ const act=await OfflineQueue.enqueue({kind:'structure_copy', apiAction:'__structure_undo', type:'structure',
+          target:{lot_number:lotNum}, source_lot_number:lotNum, builder:currentBuilder});
+      await OfflineQueue.markFailed(act.id, 'Undo schedule copy on '+lotNum+' didn’t apply — '+((d.blockers&&d.blockers.length)?'would break the schedule':_bpShortReason(d.error)), {}); }catch(e){}
+    await updateSyncStatus(); _failSheetOpen(); return;
+  }
+  _undoForLot=null;
+  if(typeof loadMyLots==='function'){ await loadMyLots(); }
+  await openLot(lotId, true);   // reload + skip the undo re-check so the button stays gone after a successful undo
+  _toast('Schedule restored.');
+}
+// 5d: a refusal/problem is NOT a fading toast — it's a centered modal the user must acknowledge.
+function _okModal(title, sub){ return appModal({ title:title, sub:sub||'', buttons:[{label:'OK',value:null,kind:'primary'}] }); }
+function _undoRefused(lotNum){ return _okModal('Can’t undo', (lotNum||'This lot')+'’s schedule was changed after the copy.'); }
+function _toast(msg){   // quick auto-fading banner — successes only ("Schedule restored.")
+  try{ const t=document.createElement('div'); t.className='vtoast'; t.textContent=msg; document.body.appendChild(t);
+    requestAnimationFrame(()=>t.classList.add('show'));
+    setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>{ try{t.remove();}catch(_){}}, 260); }, 2200); }catch(e){}
 }
 
 function renderSchedule(){
@@ -837,7 +953,9 @@ function renderSchedule(){
     +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
     +'</div>'+(noStages?'':'<div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div>')+'</div>'
     +'<div class="sub">'+(noStages?'No stages defined for this template':(st.held?'⚡ Held at '+st.reportedCode+(st.blockingName?' ('+st.blockingName+')':'')+' — actually '+st.trueCode:st.reportedLabel))+' · finish '+fmt(projEndDate)+'</div></div>';
-  h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button></div>';
+  h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button>'
+    +((_undoForLot===curLot.id) ? '<button class="sched-undobtn" style="margin-left:8px" onclick="openUndoSchedule()">⟲ Undo schedule copy</button>' : '')
+    +'</div>';
 
   // ── Stat cards (Items 5+6) ──
   const hdCls=healthDelta>0?'ahead':(healthDelta<0?'behind':'');
@@ -1387,7 +1505,7 @@ async function updateSyncStatus(){
 function _fsEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
 // Per-item TITLE by action kind (the sheet header uses this for a single item; a multi-item
 // sheet gets "Some updates didn’t apply" and each item keeps its own title).
-function _failTitle(a){ return (a && a.kind==='push_lot') ? 'Push didn’t fully apply' : 'Update didn’t save'; }
+function _failTitle(a){ return (a && a.kind==='push_lot') ? 'Push didn’t fully apply' : (a && a.kind==='structure_copy') ? 'Schedule copy didn’t apply' : 'Update didn’t save'; }
 // Map a server/engine error string to a reason CATEGORY (drives grouping + the plain "Why:").
 function _failReasonCat(err){
   const s=String(err||'');
@@ -1465,6 +1583,16 @@ function _failLegacyCounts(reason, total){
 }
 // Render ONE failed item's body (subject → counts → per-reason groups → time → Got it).
 function _failItem(a, showTitle){
+  // 5c: a one-shot structure-copy failure — the stored reason is the short human message.
+  if(a && a.kind==='structure_copy'){
+    let h='';
+    if(showTitle) h+='<div class="fs-what">Schedule copy didn’t apply</div>';
+    h+='<div class="fs-sub">'+_fsEsc((a.target&&a.target.lot_number)||'Lot')+'</div>';
+    h+='<div class="fs-why">'+_fsEsc(a.failed_reason||'Schedule copy didn’t apply. Contact the office.')+'</div>';
+    const w=_failWhen(a&&a.failed_at); if(w) h+='<div class="fs-time">'+_fsEsc(w)+'</div>';
+    h+='<button class="fs-dismiss" data-id="'+_fsEsc(a.id)+'">Got it</button>';
+    return h;
+  }
   const isPush = !!(a && a.kind==='push_lot');
   const src=(a&&a.source_lot_number)||null, tgt=(a&&a.target&&a.target.lot_number)||null;
   const subject = isPush ? ((src||'?')+' → '+(tgt||'?')) : (tgt||'?');   // lot_number already includes "Lot"
@@ -1505,6 +1633,9 @@ function _failStillItem(a, showTitle){
 }
 function _failClose(){ const o=document.getElementById('fs-overlay'); if(o) o.remove(); }
 function _fsStuck(){ return (typeof OfflineQueue!=='undefined' && OfflineQueue.STUCK_ATTEMPTS) || 3; }
+// Show only the LOGGED-IN builder's queued items. Legacy rows with no builder tag are shown to
+// everyone (never hide a failure); when no one is logged in, show all (can't scope).
+function _fsMine(r){ return !r || !r.builder || !currentBuilder || r.builder===currentBuilder; }
 // Auto-open only at natural points (app open, after a push). Never while a modal/form is in use.
 async function _maybeAutoFailSheet(){
   if(document.getElementById('fs-overlay') || document.getElementById('bp-overlay')) return;  // something's already up
@@ -1512,14 +1643,14 @@ async function _maybeAutoFailSheet(){
   if(sc==='screen-pin'||sc==='screen-builders'||sc==='screen-setpin') return;                 // not during login/PIN
   let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ return; }
   const stuck=_fsStuck();
-  if((rows||[]).some(r=>(r.status==='failed' && !r.acknowledged_at) || (r.status==='pending' && (r.attempts||0)>=stuck))) _failSheetOpen();
+  if((rows||[]).some(r=>_fsMine(r) && ((r.status==='failed' && !r.acknowledged_at) || (r.status==='pending' && (r.attempts||0)>=stuck)))) _failSheetOpen();
 }
 async function _failSheetOpen(){
   let rows; try{ rows=await OfflineQueue.getAll(); }catch(e){ rows=[]; }
   const stuck=_fsStuck();
-  const failedItems=(rows||[]).filter(r=>r.status==='failed' && !r.acknowledged_at)
+  const failedItems=(rows||[]).filter(r=>_fsMine(r) && r.status==='failed' && !r.acknowledged_at)
     .sort((a,b)=>String(b.failed_at||'').localeCompare(String(a.failed_at||'')));
-  const waitItems=(rows||[]).filter(r=>r.status==='pending' && (r.attempts||0)>=stuck)
+  const waitItems=(rows||[]).filter(r=>_fsMine(r) && r.status==='pending' && (r.attempts||0)>=stuck)
     .sort((a,b)=>String(b.last_attempt_at||'').localeCompare(String(a.last_attempt_at||'')));
   _failClose();
   if(!failedItems.length && !waitItems.length){ return; }   // nothing to show
@@ -2123,6 +2254,9 @@ async function saveEditTask(){
   btn.textContent='Save Changes';btn.disabled=false;
   closeEditTask();
   renderSchedule(); // recompute + re-render with updated task
+  // 5d lock-in: a structure edit just changed this lot — re-check so the Undo button disappears
+  // immediately (online; the server fingerprint no longer matches after the edit drains).
+  if(_isOnline && curLot) _checkUndoAffordance(curLot.id);
 }
 
 // ============ NOTES ============
@@ -2328,6 +2462,8 @@ let _bpSelected = {};      // {lotId: true}
 let _bpIncludeNote = false;
 let _bpNoteText = '';
 let _bpNoteFlag = 'none';
+let _bpStructure = false;   // "Also copy schedule changes" — lot mode only, OFF by default, online-only
+let _bpStructPreviews = {}; // {lotId: {lot, status:'ok'|'blocked'|'unavailable'|'error', preview?, reason?}} — reused by apply (5c)
 
 // candidate lots: same subdivision as curLot, active (not closed), not curLot
 function _bpCandidateLots(){
@@ -2346,7 +2482,7 @@ function openBulkPushTask(btNum){
   const cand=_bpCandidateLots();
   if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
   _bpMode='task'; _bpBtNum=btNum; _bpTargets=cand; _bpSelected={};
-  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none';
+  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none'; _bpStructure=false;
   _bpRenderPicker();
 }
 function openBulkPushLot(){
@@ -2354,7 +2490,7 @@ function openBulkPushLot(){
   const cand=_bpCandidateLots();
   if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
   _bpMode='lot'; _bpBtNum=null; _bpTargets=cand; _bpSelected={};
-  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none';
+  _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none'; _bpStructure=false;
   _bpRenderPicker();
 }
 
@@ -2394,6 +2530,22 @@ function _bpRenderPicker(){
     +'</div></div></div>'
   ) : '';
 
+  // STRUCTURE copy — lot mode only; OFF by default; ONLINE-only (preview validates +
+  // atomic apply need the network). Offline → disabled with a one-line reason. Force OFF
+  // when not applicable so a stale checked state can't carry through.
+  if(_bpMode!=='lot' || !_isOnline) _bpStructure = false;
+  const structBlock = _bpMode==='lot' ? (
+    '<div class="bp-struct-wrap">'
+    +'<label class="bp-note-toggle'+(_isOnline?'':' bp-disabled')+'">'
+    +'<input type="checkbox" id="bp-struct-on" '+(_bpStructure?'checked':'')+(_isOnline?'':' disabled')+'> Also copy schedule changes'
+    +'</label>'
+    +'<div class="bp-struct-hint">'
+    +(_isOnline
+        ? 'Copies this lot’s task sequence (predecessors, durations, phases) to the targets. You’ll preview every change before it applies.'
+        : '⚠ Needs a connection — schedule copy is validated and applied online. The status push below still works offline.')
+    +'</div></div>'
+  ) : '';
+
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
     +'<div class="bp-head"><div class="bp-title">'+title+'</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
@@ -2402,6 +2554,7 @@ function _bpRenderPicker(){
     +'<div class="bp-select-row"><button type="button" class="bp-selall" onclick="_bpSelectAll(true)">Select all</button><button type="button" class="bp-selall" onclick="_bpSelectAll(false)">Clear</button></div>'
     +'<div class="bp-lots">'+rows+'</div>'
     +noteBlock
+    +structBlock
     +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpClose()">Cancel</button><button class="bp-next" onclick="_bpToPreview()">Preview →</button></div>'
     +'</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
@@ -2416,6 +2569,8 @@ function _bpRenderPicker(){
   }
   const nt=document.getElementById('bp-note-text');
   if(nt){ nt.oninput=()=>{_bpNoteText=nt.value;}; }
+  const structOn=document.getElementById('bp-struct-on');
+  if(structOn){ structOn.onchange=()=>{ _bpStructure=structOn.checked; }; }
   document.querySelectorAll('#bp-overlay .bp-flag').forEach(b=>{
     b.onclick=()=>{ _bpNoteFlag=b.dataset.flag; document.querySelectorAll('#bp-overlay .bp-flag').forEach(x=>x.classList.remove('on')); b.classList.add('on'); };
   });
@@ -2427,10 +2582,13 @@ function _bpSelectAll(v){
 }
 
 // ---- step 2: preview ----
-function _bpToPreview(){
+function _bpToPreview(skipStruct){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length){alert('Select at least one lot.');return;}
   if(_bpIncludeNote && _bpMode==='task' && !(_bpNoteText||'').trim()){alert('You turned on note push but the note is empty.');return;}
+  // STRUCTURE copy ON (lot mode): show the per-target schedule-change preview first;
+  // "Continue" there re-enters here with skipStruct=true to reach the status confirm.
+  if(!skipStruct && _bpMode==='lot' && _bpStructure){ return _bpToStructurePreview(chosen); }
 
   let what;
   if(_bpMode==='task'){
@@ -2455,18 +2613,107 @@ function _bpToPreview(){
     +'<div class="bp-pv">'+what+'</div>'
     +'<div class="bp-section-label">To '+chosen.length+' lot'+(chosen.length===1?'':'s')+':</div>'
     +'<div class="bp-pv-lots">'+lotList+'</div>'
-    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button><button class="bp-apply" onclick="_bpApply()">Apply to '+chosen.length+' lot'+(chosen.length===1?'':'s')+'</button></div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button><button class="bp-apply" onclick="_bpApply()">'+((_bpStructure && _bpMode==='lot') ? 'Copy schedule &amp; push' : ('Apply to '+chosen.length+' lot'+(chosen.length===1?'':'s')))+'</button></div>'
+    +'</div></div>';
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+// ---- step 2-STRUCT: per-target schedule-change preview (read-only; no writes) ----
+function _bpFmtD(d){ return d ? fmt(new Date(d+'T00:00:00')) : '—'; }
+function _bpEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
+function _bpHumanChange(col, c){
+  const nm = p => (bn[p] && bn[p].name) ? (_bpEsc(bn[p].name)+' (#'+p+')') : ('#'+p);
+  if(col==='duration')    return c.old+' → '+c.new+' days';
+  if(col==='lag')         return 'lag '+c.old+' → '+c.new+' days';
+  if(col==='phase_name')  return 'phase “'+_bpEsc(c.old||'—')+'” → “'+_bpEsc(c.new||'—')+'”';
+  if(col==='phase_order') return 'phase order '+c.old+' → '+c.new;
+  if(col==='task_order')  return 'list order '+c.old+' → '+c.new;
+  if(col==='predecessors') return 'depends on '+((c.old||[]).map(nm).join(', ')||'nothing')+' → '+((c.new||[]).map(nm).join(', ')||'nothing');
+  return _bpEsc(col)+': '+_bpEsc(JSON.stringify(c.old))+' → '+_bpEsc(JSON.stringify(c.new));
+}
+function _bpWarnIsExisting(w){
+  return w.already_on_target===true || w.pre_existing_in_source===true || w.rule==='finished_before_predecessor_existing';
+}
+// Fetch a preview per target (parallel), classify, then render. curLot = source.
+async function _bpToStructurePreview(chosen){
+  _bpClose();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Checking schedule changes…</div></div>'
+    +'<div class="bp-subtitle">Previewing '+chosen.length+' lot'+(chosen.length===1?'':'s')+' — nothing changed yet.</div>'
+    +'</div></div>');
+  _bpStructPreviews={};
+  await Promise.all(chosen.map(async l=>{
+    if(String(l.template_id)!==String(curLot.template_id)){
+      _bpStructPreviews[l.id]={lot:l,status:'unavailable',reason:'different template'}; return;
+    }
+    try{
+      const r=await sbCallRaw('previewLotStructurePush',{source_lot_id:curLot.id,target_lot_id:l.id});
+      if(!r || r.error){ _bpStructPreviews[l.id]={lot:l,status:'error',reason:(r&&r.error)||'preview failed'}; return; }
+      if(r.refusals && r.refusals.length){ _bpStructPreviews[l.id]={lot:l,status:'unavailable',reason:r.refusals.join('; ')}; return; }
+      _bpStructPreviews[l.id]={lot:l,status:((r.blockers&&r.blockers.length)?'blocked':'ok'),preview:r};
+    }catch(e){ _bpStructPreviews[l.id]={lot:l,status:'error',reason:(e&&e.message)||'preview error'}; }
+  }));
+  _bpRenderStructurePreview(chosen);
+}
+function _bpStructCard(entry){
+  const l=entry.lot, lot=_bpEsc(l.lot_number);
+  if(entry.status==='unavailable'||entry.status==='error'){
+    const why=entry.status==='error'?'can’t preview':'can’t copy ('+_bpEsc(entry.reason)+')';
+    return '<details open class="bp-card bp-card-off"><summary><span class="bp-card-lot">'+lot+'</span>'
+      +'<span class="bp-card-sum">'+why+' — status still pushed</span></summary></details>';
+  }
+  const p=entry.preview, diff=p.diff||[], blk=p.blockers||[];
+  // Builder view: ONLY copy-caused out-of-sequence (finished_before_predecessor). Template
+  // debt (multiple_sources / unreachable / neg-lag / orphan) and "already true" items are in
+  // the API response but intentionally NOT shown here.
+  const caused=(p.warnings||[]).filter(w=>w.rule==='finished_before_predecessor');
+  const cb=(p.completion&&p.completion.before)||{}, ca=(p.completion&&p.completion.after)||{};
+  const compChanged = cb.projected!==ca.projected;
+  const sum = entry.status==='blocked'
+    ? '⛔ would break'
+    : (diff.length? diff.length+' change'+(diff.length===1?'':'s')+(compChanged?'<span class="bp-sum-when"> · completes '+_bpFmtD(ca.projected)+'</span>':'') : 'no changes');
+  let body='';
+  if(compChanged) body+='<div class="bp-comp">Completion '+_bpFmtD(cb.projected)+' → <b>'+_bpFmtD(ca.projected)+'</b></div>';
+  if(diff.length){
+    body+=diff.map(d=>{
+      const parts=Object.keys(d.changes).map(c=>_bpHumanChange(c,d.changes[c])).join('; ');
+      return '<div class="bp-chg">'+_bpEsc(d.name)+' (#'+d.bt_num+'): '+parts+'</div>';
+    }).join('');
+  } else body+='<div class="bp-chg">No schedule changes.</div>';
+  if(blk.length)    body+='<div class="bp-sect-h bp-h-blk">⛔ Would break the schedule</div>'+blk.map(w=>'<div class="bp-w bp-w-blk">'+_bpEsc(w.message)+'</div>').join('');
+  if(caused.length) body+='<div class="bp-sect-h bp-h-cause">⚠ Caused by this copy</div>'+caused.map(w=>'<div class="bp-w">'+_bpEsc(w.message)+'</div>').join('');
+  const cls=entry.status==='blocked'?'bp-card bp-card-blk':'bp-card';
+  return '<details open class="'+cls+'"><summary><span class="bp-card-lot">'+lot+'</span><span class="bp-card-sum">'+sum+'</span></summary><div class="bp-card-body">'+body+'</div></details>';
+}
+function _bpRenderStructurePreview(chosen){
+  // order: blocked first, then ok, then unavailable/error (blockers bubble to top)
+  const rank={blocked:0,ok:1,unavailable:2,error:2};
+  const entries=chosen.map(l=>_bpStructPreviews[l.id]).filter(Boolean)
+    .sort((a,b)=>(rank[a.status]-rank[b.status]));
+  const nOk=entries.filter(e=>e.status==='ok').length;
+  const nBlk=entries.filter(e=>e.status==='blocked').length;
+  const nOff=entries.filter(e=>e.status==='unavailable'||e.status==='error').length;
+  const bits=[]; if(nOk) bits.push(nOk+' ready'); if(nBlk) bits.push(nBlk+' would break'); if(nOff) bits.push(nOff+' unavailable');
+  const html=''
+    +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
+    +'<div class="bp-head"><div class="bp-title">Schedule changes</div><button class="bp-x" onclick="_bpClose()">✕</button></div>'
+    +'<div class="bp-subtitle">From '+_bpEsc(curLot.lot_number)+' · '+bits.join(' · ')+' · nothing changes until you confirm</div>'
+    +'<div class="bp-cards">'+entries.map(_bpStructCard).join('')+'</div>'
+    +'<div class="bp-foot"><button class="bp-cancel" onclick="_bpRenderPicker()">← Back</button>'
+    +'<button class="bp-next" onclick="_bpToPreview(true)">Continue to push →</button></div>'
     +'</div></div>';
   _bpClose();
   document.body.insertAdjacentHTML('beforeend',html);
 }
 
 // ---- step 3: apply ----
-function _bpProgressScreen(total){
+function _bpProgressScreen(total, title){
   _bpClose();
   const html=''
     +'<div id="bp-overlay" class="bp-overlay"><div class="bp-modal">'
-    +'<div class="bp-head"><div class="bp-title" id="bp-prog-title">Applying push…</div></div>'
+    +'<div class="bp-head"><div class="bp-title" id="bp-prog-title">'+(title||'Applying push…')+'</div></div>'
     +'<div class="bp-subtitle" id="bp-prog-label">Starting…</div>'
     +'<div class="bp-progbar"><div class="bp-progfill" id="bp-progfill" style="width:0%"></div></div>'
     +'<div class="bp-prog-detail" id="bp-prog-detail"></div>'
@@ -2576,6 +2823,37 @@ async function _bpBuildIntents(chosen){
   }));
 }
 
+// 5c: pull a short human reason out of a PostgREST/handler error body.
+function _bpShortReason(err){
+  const s=String(err||'');
+  try{ const j=JSON.parse(s); return String(j.message||j.hint||j.details||s).slice(0,90); }catch(_){ return s.slice(0,90); }
+}
+// 5c: structure copy FIRST, per target, ONLINE + atomic (applyLotStructurePush). Only 'ok'
+// targets (ready, no blockers in the preview) are attempted; 'blocked'/'unavailable'/'error'
+// targets are skipped and still get their status push below (D-3). A per-target failure never
+// blocks or hides the others. Returns { [lotId]: { lot_number, copied, reason?, permanentFail? } }.
+async function _bpRunStructureCopy(chosen){
+  const out={};
+  for(const t of chosen){
+    const entry=_bpStructPreviews[t.id];
+    if(!entry || entry.status!=='ok'){
+      const reason = !entry ? 'not previewed'
+                   : (entry.status==='blocked' ? 'would break the schedule' : (entry.reason || 'unavailable'));
+      out[t.id]={lot_number:t.lot_number, copied:false, reason:reason};   // not attempted
+      continue;
+    }
+    let d;
+    try{ d=await sbCallRaw('applyLotStructurePush', {source_lot_id:curLot.id, target_lot_id:t.id, actor:currentBuilder}); }
+    catch(e){ out[t.id]={lot_number:t.lot_number, copied:false, reason:'couldn’t reach the server'}; continue; }   // transient → not copied, try again
+    if(d && d.error){
+      const reason = (d.blockers && d.blockers.length) ? 'would break the schedule' : _bpShortReason(d.error);
+      out[t.id]={lot_number:t.lot_number, copied:false, reason:reason, permanentFail: !!d.permanent};
+    } else {
+      out[t.id]={lot_number:t.lot_number, copied:true};
+    }
+  }
+  return out;
+}
 async function _bpApply(){
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length) return;
@@ -2608,6 +2886,13 @@ async function _bpApply(){
   // result for SYNCED items, so a permanent failure returns null and would otherwise be
   // miscounted as success with no message (the bug: an online push that failed 3 tasks
   // showed "Done"). Capture each push's report entry right after its drain.
+  // 5c: STRUCTURE COPY FIRST (online, atomic) when "Copy schedule" is on — per target, before any
+  // status push. A structure failure on one target never blocks the others or its own status push.
+  let _structResults=null;
+  if(_bpStructure && _bpMode==='lot'){
+    _bpProgressScreen(total, 'Copying schedule…');
+    _structResults=await _bpRunStructureCopy(chosen);
+  }
   _bpProgressScreen(total);
   _pushDrainReport = [];
   const outcomes=[]; let completed=0;
@@ -2633,17 +2918,47 @@ async function _bpApply(){
     else doneLots.push(o.lot);
   });
 
+  // 5c: a PERMANENT structure-copy failure is surfaced through the SAME auto-opening sheet —
+  // record it as a retained 'failed' row (never replayed; the copy is a one-shot atomic apply).
+  let structPermFails=0;
+  if(_structResults){
+    for(const t of chosen){
+      const sr=_structResults[t.id];
+      if(sr && sr.permanentFail){
+        structPermFails++;
+        try{
+          const act=await OfflineQueue.enqueue({ kind:'structure_copy', apiAction:'__structure_copy', type:'structure',
+            target:{lot_number:sr.lot_number}, source_lot_number:curLot.lot_number, builder:currentBuilder });
+          await OfflineQueue.markFailed(act.id, 'Schedule copy to '+sr.lot_number+' didn’t apply — '+(sr.reason||'rejected'), {});
+        }catch(e){}
+      }
+    }
+  }
+
   await new Promise(r=>setTimeout(r, 700));
   _bpClose();
   if(typeof loadMyLots==='function'){ await loadMyLots(); }
-  if(failedCount>0){
-    // ONE clear window for failures — the auto-sheet lists exactly what didn't apply (task
-    // names). Replaces the failure alert; done/queued lots are visible in the schedule.
+  if(failedCount>0 || structPermFails>0){
+    // ONE clear window for ANY permanent failure (status or structure) — the auto-sheet lists
+    // exactly what didn't apply. Replaces the failure alert; done/queued lots show in the schedule.
     await updateSyncStatus();
     _failSheetOpen();
     return;
   }
-  // No failures → brief confirmation (today's behavior).
+  // No permanent failures → brief confirmation.
+  if(_structResults){
+    // 5c (copy on): ONE trimmed line per target — "Lot 32: updated · schedule copied" /
+    // "... · schedule not copied — <reason>". Header only when more than one target.
+    const statusOf=(lotNum)=>{ const o=outcomes.find(x=>x.lot===lotNum); if(!o) return 'updated';
+      if(o.queued) return 'queued (offline)'; const e=o.entry; if(e && e.error && e.retrying) return 'queued (will retry)'; return 'updated'; };
+    const lines=chosen.map(t=>{ const sr=_structResults[t.id];
+      const sched = sr ? (sr.copied ? ' · schedule copied' : ' · schedule not copied — '+sr.reason) : '';
+      return t.lot_number+': '+statusOf(t.lot_number)+sched; });
+    const msg=(chosen.length>1 ? chosen.length+' lots updated.\n\n' : '') + lines.join('\n');
+    alert(msg);
+    return;
+  }
+  // Status-only push (copy off): today's wording, unchanged.
   let msg = doneLots.length+' of '+total+' lots updated.';
   if(doneLots.length)  msg+='\n\n✓ Done: '+doneLots.join(', ');
   if(retryLots.length) msg+='\n\n⏳ Still queued (will retry): '+retryLots.join(', ');
