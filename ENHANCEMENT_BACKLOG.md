@@ -5,6 +5,28 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🔭 2026-10-06 — single-source follow-ups (noted during the stage display-only fix)
+
+Recorded while fixing the stage dual-calculation bug (stage is now server-only; the phone
+displays `reported_stage`/`true_stage`). Two related items left for later — do NOT build yet:
+
+- **Completion / projected date is still computed in two places.** The field app projects the
+  finish date CLIENT-side (`renderSchedule` → `recompute()` → `offToDate(projEnd)`; the frozen
+  `completion_health_delta`/`completion_wd_elapsed` are client-computed at stamp time), while the
+  admin/server has its own projection (`getAllLotPhases` → `computeProjected`, the "OLD-C" copy
+  the parity harness flagged for negative-lag / floor-at-1 differences). Same class as the stage
+  bug — unify onto one calculator (server-authoritative, phone displays) so field-app and admin
+  dates can't diverge. Not acute (no single stored "completion" column a list displays, so no
+  list↔screen flip), hence deferred.
+
+- **Hold gates are read from two sources.** The server stage path reads gates from the TEMPLATE
+  (`sched_template_gates` + per-lot `sched_lot_gate_state` confirmations); the old client path read
+  them from the LOT's gate rows (`getScheduleLotTasks` data.gates). Moot now that only the server
+  computes stage, but recorded: if a future feature needs gate state client-side, reconcile the
+  two sources (template `hold_task_bt_nums` vs lot gate rows) rather than trusting either alone.
+
+---
+
 ## ✅ SHIPPED 2026-10-04 — queue failure-classification fixes (GAP 1+2)
 
 **RESOLVED — merged to live `ec6ccda` (hotfix/queue-integrity).** GAP 2: every write handler

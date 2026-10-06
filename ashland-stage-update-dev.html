@@ -689,30 +689,18 @@ function renderLots(){
       +'</div>';
   }).join('');
 }
-// Leaving a lot: reflect the edits just made (task / gate changes) in the LIST badge
-// immediately, so the builder never has to pull-to-refresh to see their OWN changes.
-// The stage is COMPUTED from the in-memory state with the same engine the in-lot badge
-// uses (single source), and patched onto this lot's myLots row — works offline, no
-// round-trip, and matches exactly what getScheduleLots would compute on the next load.
-function refreshCurLotInList(){
-  try{
-    if(typeof curLot==='undefined'||!curLot) return;
-    if(typeof myLots==='undefined'||!Array.isArray(myLots)) return;
-    const row=myLots.find(l=>l&&l.id===curLot.id);
-    if(!row) return;
-    const st=computeStage();
-    row.reported_stage=(st.reportedCode==='—')?null:st.reportedCode;
-    row.true_stage=st.trueCode||null;
-    row.stage_unavailable=false;                       // we have a fresh computed value
-  }catch(e){}
-}
-function backToLots(){refreshCurLotInList();showScreen('screen-lots');renderLots();}
+// Leaving a lot: the list badge reads the SERVER stage already on this lot's myLots row
+// (curLot IS that row — same object). The server value is kept current by _refreshLotStageBadge
+// after each online sync, so we NEVER compute stage on the phone here. (Removed the old
+// client computeStage() write that could disagree with the server and "stick" a wrong badge.)
+function backToLots(){showScreen('screen-lots');renderLots();}
 
 // ============ SCHEDULE ENGINE ============
 let TASKS=[],bn={},act={},startDate=null;
 let collapsedPhases={},userToggledPhases=false;
 let curLot=null,stageMap=[],lotGates=[],curManual=null;
 let _undoForLot=null;   // 5d: lot id that currently has a push snapshot to undo (set by the cheap background check)
+let _curLotPending=false;   // current lot has an unsynced queued action → show "pending sync" by the server stage
 
 // Working-day helpers now live in the single shared engine (schedule-engine.js).
 // Thin hoisted wrappers preserve the existing call convention (startDate is a module global here).
@@ -733,18 +721,8 @@ function runEngine(mode){
 }
 function recompute(){const p=runEngine('planned');const pr=runEngine('projected');return{planEnd:p,projEnd:pr};}
 
-function computeStage(){
-  // Thin adapter over the shared engine (same pattern as runEngine). Build the
-  // finished-task map + per-gate release state, then let ScheduleEngine apply the
-  // generalized hold-gate block/release/snap rule (per-gate threshold, no hardcode).
-  const finished={}; Object.keys(act).forEach(bt=>{ if(act[bt]&&act[bt].finished) finished[bt]=true; });
-  const gates=(lotGates||[]).map(g=>{
-    const bts=(g.hold_task_bt_nums||[]).map(Number).filter(n=>!isNaN(n));
-    const released = bts.length ? bts.every(bt=>finished[bt]) : !!g.confirmed;  // TASK vs MANUAL release
-    return { threshold:g.hold_stage_code, released, name:g.gate_name, statusMessage:g.status_message };
-  });
-  return ScheduleEngine.computeStage(stageMap, finished, { gates, manualCode:curManual });
-}
+// (removed) computeStage() — stage is computed on the SERVER only (getScheduleLots) and the
+// phone merely displays reported_stage/true_stage. See renderSchedule + _refreshLotStageBadge.
 
 // ── STAGE LEGEND (read-only reference: which tasks drive each stage) ──
 // Pure display of the template stage-map already loaded into `stageMap`.
@@ -936,8 +914,16 @@ function _toast(msg){   // quick auto-fading banner — successes only ("Schedul
 
 function renderSchedule(){
   const {planEnd,projEnd}=recompute();
-  const st=computeStage();
   const projEndDate=offToDate(projEnd);
+  // STAGE IS SERVER-COMPUTED ONLY — the phone never calculates it. Display the values
+  // getScheduleLots put on this lot (reported_stage/true_stage/hold_*). On an unsynced change we
+  // keep the last server value with a "pending sync" mark until the sync re-fetch updates it.
+  const _rep=curLot.reported_stage||null, _tru=curLot.true_stage||null;
+  const _held=!!(_rep && _tru && _rep!==_tru && parseFloat(_rep)<parseFloat(_tru));
+  const _repCode=_rep||'—';
+  const _repLabel=((stageMap||[]).find(s=>s.code===_rep)||{}).label || _rep || '';
+  const _holdName=curLot.hold_gate_name||null;
+  const _stagePending=(!_isOnline || _curLotPending);
   const today=new Date();today.setHours(0,0,0,0);
   const todayOff=wdBetween(startDate,today)+1;
   const wdLeft=Math.max(0,projEnd-todayOff);
@@ -946,14 +932,14 @@ function renderSchedule(){
   const isStamped=!!curLot.completion_stamped_at;
   // Health delta: positive = ahead, negative = behind. Freeze at stamp if all done.
   const healthDelta=isStamped?(curLot.completion_health_delta||0):(planEnd-projEnd);
-  const stageNum=parseFloat(st.reportedCode)||0;
+  const stageNum=parseFloat(_rep)||0;
   const noStages=!!curLot.no_stages;   // template defines no stage milestones -> "N/A" (matches admin table + export)
 
   // ── Header bar ──
   let h='<div class="sbar"><div class="r"><div class="num">'+curLot.lot_number
     +(isClosed?' <span style="font-size:11px;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:5px;margin-left:6px;letter-spacing:.07em">CLOSED</span>':'')
-    +'</div>'+(noStages?'':'<div class="stg'+(st.held?' held':'')+'">'+st.reportedCode+'</div>')+'</div>'
-    +'<div class="sub">'+(noStages?'No stages defined for this template':(st.held?'⚡ Held at '+st.reportedCode+(st.blockingName?' ('+st.blockingName+')':'')+' — actually '+st.trueCode:st.reportedLabel))+' · finish '+fmt(projEndDate)+'</div></div>';
+    +'</div>'+(noStages?'':'<div class="stg'+(_held?' held':'')+'">'+_repCode+'</div>')+'</div>'
+    +'<div class="sub">'+(noStages?'No stages defined for this template':(_held?'⚡ Held at '+_repCode+(_holdName?' ('+_holdName+')':'')+' — actually '+_tru:_repLabel))+(_stagePending?' · ⏳ pending sync':'')+' · finish '+fmt(projEndDate)+'</div></div>';
   h+='<div style="padding:0 2px 10px"><button class="bp-lotbtn" onclick="openBulkPushLot()">⧉ Push entire lot status →</button>'
     +((_undoForLot===curLot.id) ? '<button class="sched-undobtn" style="margin-left:8px" onclick="openUndoSchedule()">⟲ Undo schedule copy</button>' : '')
     +'</div>';
@@ -1437,7 +1423,28 @@ async function recomputeDerivedAfterSync(results){
   let all; try { all = await OfflineQueue.getAll(); } catch(e){ return; }
   const curLotTaskSynced = all.some(a => results[a.id] && a.target && a.target.lot_id === curLot.id
     && (a.apiAction === 'updateScheduleLotTask' || a.apiAction === 'updateScheduleLotGate'));
-  if (curLotTaskSynced) { try { await checkCompletionStamp(); } catch(e){} }
+  if (curLotTaskSynced) { try { await checkCompletionStamp(); } catch(e){} try { await _refreshLotStageBadge(); } catch(e){} }
+}
+
+// Pull the SERVER stage for the current lot and patch it onto curLot (which IS the myLots row,
+// so the list badge updates too), then re-render — so the badge + list reflect server truth
+// after a sync without a manual pull-to-refresh. Also recomputes the "pending sync" flag.
+// The phone never computes stage; this only reads reported_stage/true_stage/hold_* off the server.
+async function _refreshLotStageBadge(){
+  if (typeof curLot === 'undefined' || !curLot) return;
+  const lotId = curLot.id;
+  try { const all = await OfflineQueue.getAll(); _curLotPending = all.some(a => a && a.target && a.target.lot_id===lotId && a.status==='pending'); }
+  catch(e){ _curLotPending = false; }
+  if (_isOnline){
+    try {
+      const lots = await sbCallRaw('getScheduleLots', {});
+      const fresh = Array.isArray(lots) && lots.find(l => l && l.id===lotId);
+      if (fresh && curLot && curLot.id===lotId){
+        ['reported_stage','true_stage','no_stages','stage_unavailable','hold_gate_name','hold_message'].forEach(k => { curLot[k] = fresh[k]; });
+      }
+    } catch(e){}
+  }
+  if (((document.querySelector('.screen.active')||{}).id)==='screen-schedule' && curLot && curLot.id===lotId) renderSchedule();
 }
 
 // Reconcile a note created OFFLINE (local id = queue action id) to its real

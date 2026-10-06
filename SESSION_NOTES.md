@@ -28,6 +28,31 @@ LandIQ table.**
 
 ---
 
+## 2026-10-06 — Stage is server-only on the phone (display-only fix; hotfix)
+
+**Live bug:** CW Lot 25 flipped 4.9 (list) ↔ 5.0 (lot screen) — the phone computed stage
+client-side from not-yet-synced local state, and `refreshCurLotInList` wrote that client value
+into the lot-list row on back-out. Read-only blast-radius snippet on live = **0 mismatches of 41
+lots** (server stage is correct, Lot 25 included) → no server/gate-data bug; purely the phone's
+second calculation.
+
+**Fix (field app, display-only — stage calculated in ONE place, the server):**
+- `renderSchedule` renders the badge from the server fields on the lot (`reported_stage`,
+  `true_stage`, `hold_gate_name`, `no_stages`) — no `computeStage()`.
+- `refreshCurLotInList` removed (it computed + wrote the client value); `backToLots` just renders
+  the list, which reads the server value off the myLots row.
+- `_refreshLotStageBadge()` after each online sync re-fetches the server stage onto `curLot` (=
+  the myLots row) and re-renders, so badge + list update without a manual pull-to-refresh.
+- Unsynced change → keep the last server value with a small "⏳ pending sync" mark (offline, or a
+  queued-pending action for the lot). `computeStage()` removed entirely; stage legend untouched.
+- Admin already server-only (displays `reported_stage`); no change.
+
+Ship: hotfix off `origin/main` + Dev mirror + in-step proof; engine untouched (no `?v` bump),
+field-app HTML only. Backlog (not built): completion/projected date is still dual-computed
+(field app vs admin `computeProjected`); hold gates read from two sources — see ENHANCEMENT_BACKLOG.
+
+---
+
 ## 2026-10-05 — Schedule-push LIVE migrations applied (code promote next)
 
 Both LIVE SQL migrations for the schedule-push feature are applied + verified on the live
