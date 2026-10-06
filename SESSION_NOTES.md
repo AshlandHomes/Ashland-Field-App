@@ -28,7 +28,7 @@ LandIQ table.**
 
 ---
 
-## 2026-10-06 — Stage is server-only on the phone (display-only fix; hotfix)
+## 2026-10-06 — Stage is server-only on the phone — SHIPPED to live (merge `1b160d5`)
 
 **Live bug:** CW Lot 25 flipped 4.9 (list) ↔ 5.0 (lot screen) — the phone computed stage
 client-side from not-yet-synced local state, and `refreshCurLotInList` wrote that client value
