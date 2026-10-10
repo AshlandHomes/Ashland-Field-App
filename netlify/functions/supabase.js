@@ -111,9 +111,11 @@ function notFound(msg) { return { statusCode: 409, body: JSON.stringify({ error:
 function _zeroRows(r) { return Array.isArray(r.data) && r.data.length === 0; }
 
 // ── lot-structure push helpers (feature: whole-lot push carries schedule structure) ──
-// The structural columns a structure push mirrors (D-1). est_start_date is NOT here —
-// it stays lot-specific. All downstream math/validation goes through the shared engine.
-const STRUCT_COLS = ['predecessors', 'lag', 'duration', 'phase_name', 'phase_order', 'task_order'];
+// The structural columns a structure push mirrors (D-1). est_start_date rides along as an
+// ABSOLUTE date (source -> target by bt_num); a copied est that fails the TARGET's floors is
+// skipped per task (see _estSkips) and that task keeps its own est. All downstream
+// math/validation goes through the shared engine.
+const STRUCT_COLS = ['predecessors', 'lag', 'duration', 'phase_name', 'phase_order', 'task_order', 'est_start_date'];
 
 function _structClone(rows) { return (rows || []).map(function (r) { return Object.assign({}, r); }); }
 function _warnKey(w) { return w.rule + ':' + (w.num != null ? w.num : (w.nums || []).join(',')); }
@@ -182,6 +184,56 @@ function _structDiff(targetRows, structByBt) {
   return out;
 }
 
+// est_start_date in the copy: a copied est is an ABSOLUTE date. The apply RPC bypasses
+// checkDateEntry, so the handler validates each copied est against the TARGET's own rules —
+// the same two the field app enforces on manual est entry:
+//   (a) construction-start floor: est must be on/after the target lot's construction start;
+//   (b) predecessor-earliest floor: est can't be earlier than the task's earliest start in
+//       the proposed graph (earliestStart, predecessor-driven, ignores the task's own est).
+// A failing task is SKIPPED (keeps its own est) and reported as a short line; the rest of the
+// copy still applies. Only a CHANGED est (differs from target's current) is a copy action.
+// Returns { skipBts:[bt_num], lines:[{bt_num,name,reason,est}] }.
+function _estSkips(tgt, structByBt) {
+  const sd = tgt.start ? new Date(tgt.start + 'T00:00:00') : null;
+  const proposed = _proposeRows(tgt.rows, structByBt);
+  const propByBt = {}; proposed.forEach(function (r) { propByBt[r.bt_num] = r; });
+  const computed = (sd ? ScheduleEngine.computeSchedule(proposed, { startDate: sd, mode: 'projected' }).byNum : {}) || {};
+  const skipBts = [], lines = [];
+  tgt.rows.forEach(function (t) {
+    const s = structByBt[t.bt_num]; if (!s) return;
+    const srcEst = s.est_start_date;
+    if (!srcEst) return;                                                     // nothing to copy (null/cleared) — no floor to fail
+    if (JSON.stringify(srcEst) === JSON.stringify(t.est_start_date || null)) return;  // unchanged — not a copy action
+    let reason = null;
+    if (tgt.start && srcEst < tgt.start) {
+      reason = 'before this lot’s construction start';
+    } else if (sd) {
+      const es = ScheduleEngine.earliestStart(propByBt[t.bt_num], computed);
+      const wantOff = ScheduleEngine.actOffset(srcEst, sd);
+      if (es && wantOff != null && wantOff < es.offset) reason = 'earlier than its predecessors allow';
+    }
+    if (reason) { skipBts.push(t.bt_num); lines.push({ bt_num: t.bt_num, name: t.name || '', reason: reason, est: srcEst }); }
+  });
+  return { skipBts: skipBts, lines: lines };
+}
+// Return a structByBt where skipped bt_nums keep the TARGET's OWN est (so the JS proposed/diff
+// exactly match what the RPC writes — the server never shows a change it won't make).
+function _applyEstSkips(tgt, structByBt, skipBts) {
+  if (!skipBts || !skipBts.length) return structByBt;
+  const skip = new Set(skipBts.map(Number));
+  const tByBt = {}; tgt.rows.forEach(function (r) { tByBt[r.bt_num] = r; });
+  const out = {};
+  Object.keys(structByBt).forEach(function (bt) {
+    const s = structByBt[bt];
+    out[bt] = skip.has(Number(bt))
+      ? Object.assign({}, s, { est_start_date: (tByBt[bt] ? tByBt[bt].est_start_date : s.est_start_date) })
+      : s;
+  });
+  return out;
+}
+exports._estSkips = _estSkips;            // test hook
+exports._applyEstSkips = _applyEstSkips;  // test hook
+
 // D-3: a FINISHED task whose predecessor (same lot, by bt) is not finished. WARNING, never
 // a blocker. Split by whether the copy CAUSES it: an edge the copy ADDS/changes (pred not in
 // the target's CURRENT predecessors for that task) is reported as caused by the copy; an edge
@@ -228,7 +280,7 @@ async function _structFingerprint(lotId) {
   return JSON.stringify(rows.map(function (r) {
     return [r.bt_num,
             (Array.isArray(r.predecessors) ? r.predecessors.slice() : []).sort(function (a, b) { return a - b; }),
-            r.lag, r.duration, r.phase_name, r.phase_order, r.task_order];
+            r.lag, r.duration, r.phase_name, r.phase_order, r.task_order, r.est_start_date || null];
   }));
 }
 // Latest snapshot of ANY kind (push or undo) for a lot, newest first.
@@ -1456,10 +1508,14 @@ exports.handler = async function(event) {
         const { source_lot_id, target_lot_id } = payload;
         const pre = await _structurePushPrecheck(source_lot_id, target_lot_id);
         if (pre.refusals.length) {
-          return { statusCode: 200, body: JSON.stringify({ can_apply: false, refusals: pre.refusals, blockers: [], warnings: [], diff: [], completion: null }) };
+          return { statusCode: 200, body: JSON.stringify({ can_apply: false, refusals: pre.refusals, blockers: [], warnings: [], diff: [], completion: null, est_skips: [] }) };
         }
+        // est: skip any copied est that fails the target's floors, so preview == apply
+        const est = _estSkips(pre.tgt, pre.src.byBt);
+        const structByBt = _applyEstSkips(pre.tgt, pre.src.byBt, est.skipBts);
         // proposed = target mirrors source's structure; label warnings against the source graph
-        const preview = _buildStructurePreview(pre.tgt, pre.src.byBt, pre.src.rows);
+        const preview = _buildStructurePreview(pre.tgt, structByBt, pre.src.rows);
+        preview.est_skips = est.lines;
         return { statusCode: 200, body: JSON.stringify(preview) };
       }
 
@@ -1468,11 +1524,15 @@ exports.handler = async function(event) {
         const { source_lot_id, target_lot_id, actor } = payload;
         const pre = await _structurePushPrecheck(source_lot_id, target_lot_id);
         if (pre.refusals.length) return { statusCode: 400, body: JSON.stringify({ error: pre.refusals.join('; ') }) };
-        const proposed = _proposeRows(pre.tgt.rows, pre.src.byBt);
+        // est: same skip set as the preview — the RPC keeps the target's own est for these bts
+        const est = _estSkips(pre.tgt, pre.src.byBt);
+        const structByBt = _applyEstSkips(pre.tgt, pre.src.byBt, est.skipBts);
+        const proposed = _proposeRows(pre.tgt.rows, structByBt);
         const vp = ScheduleEngine.validateSchedule(proposed);
         if (vp.blockers.length) return { statusCode: 400, body: JSON.stringify({ error: 'blocked', blockers: vp.blockers }) };
         const r = await supabaseRequest('POST', 'rpc/field_ops_apply_lot_structure', {
-          p_target_lot_id: target_lot_id, p_source_lot_id: source_lot_id, p_actor: actor || null, p_kind: 'push'
+          p_target_lot_id: target_lot_id, p_source_lot_id: source_lot_id, p_actor: actor || null, p_kind: 'push',
+          p_skip_est_bts: est.skipBts
         });
         if (r.error) {
           let msg = r.error; try { const j = JSON.parse(r.error); msg = j.message || j.hint || j.details || r.error; } catch (_) {}

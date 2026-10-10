@@ -2636,6 +2636,7 @@ function _bpHumanChange(col, c){
   if(col==='phase_name')  return 'phase “'+_bpEsc(c.old||'—')+'” → “'+_bpEsc(c.new||'—')+'”';
   if(col==='phase_order') return 'phase order '+c.old+' → '+c.new;
   if(col==='task_order')  return 'list order '+c.old+' → '+c.new;
+  if(col==='est_start_date') return c.new ? ('est. start '+_bpFmtD(c.old)+' → '+_bpFmtD(c.new)) : 'est. start cleared';
   if(col==='predecessors') return 'depends on '+((c.old||[]).map(nm).join(', ')||'nothing')+' → '+((c.new||[]).map(nm).join(', ')||'nothing');
   return _bpEsc(col)+': '+_bpEsc(JSON.stringify(c.old))+' → '+_bpEsc(JSON.stringify(c.new));
 }
@@ -2671,7 +2672,7 @@ function _bpStructCard(entry){
     return '<details open class="bp-card bp-card-off"><summary><span class="bp-card-lot">'+lot+'</span>'
       +'<span class="bp-card-sum">'+why+' — status still pushed</span></summary></details>';
   }
-  const p=entry.preview, diff=p.diff||[], blk=p.blockers||[];
+  const p=entry.preview, diff=p.diff||[], blk=p.blockers||[], skips=p.est_skips||[];
   // Builder view: ONLY copy-caused out-of-sequence (finished_before_predecessor). Template
   // debt (multiple_sources / unreachable / neg-lag / orphan) and "already true" items are in
   // the API response but intentionally NOT shown here.
@@ -2691,6 +2692,7 @@ function _bpStructCard(entry){
   } else body+='<div class="bp-chg">No schedule changes.</div>';
   if(blk.length)    body+='<div class="bp-sect-h bp-h-blk">⛔ Would break the schedule</div>'+blk.map(w=>'<div class="bp-w bp-w-blk">'+_bpEsc(w.message)+'</div>').join('');
   if(caused.length) body+='<div class="bp-sect-h bp-h-cause">⚠ Caused by this copy</div>'+caused.map(w=>'<div class="bp-w">'+_bpEsc(w.message)+'</div>').join('');
+  if(skips.length)  body+='<div class="bp-sect-h">ⓘ Est. start kept (not copied)</div>'+skips.map(s=>'<div class="bp-w">'+_bpEsc(s.name)+' (#'+s.bt_num+'): '+_bpEsc(s.reason)+'</div>').join('');
   const cls=entry.status==='blocked'?'bp-card bp-card-blk':'bp-card';
   return '<details open class="'+cls+'"><summary><span class="bp-card-lot">'+lot+'</span><span class="bp-card-sum">'+sum+'</span></summary><div class="bp-card-body">'+body+'</div></details>';
 }
