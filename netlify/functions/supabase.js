@@ -4,10 +4,43 @@
 // Single source of truth for all schedule math (shared with the field app + admin).
 const ScheduleEngine = require('../../schedule-engine.js');
 const NoteResolution = require('../../note-resolution.js');
+const crypto = require('crypto');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
+
+// ── S1b session token (HMAC-SHA256) ─────────────────────────────────────────
+// A signed, expiring proof of {user_id, roles} returned on a successful login. Nothing
+// CONSUMES it yet — S2's manager endpoints will require + verify it server-side. It is
+// NOT a credential and carries NO PIN/hash. Secret: FIELD_OPS_TOKEN_SECRET (Dev site env).
+// Format: base64url(payloadJSON).base64url(hmac). Missing secret => no token minted (login
+// still works; token simply absent until the env var is set).
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;   // 7 days
+function _b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function _b64urlJson(obj) { return _b64url(JSON.stringify(obj)); }
+function _makeFieldToken(claims) {
+  const secret = process.env.FIELD_OPS_TOKEN_SECRET;
+  if (!secret) return null;
+  const payload = Object.assign({}, claims, { exp: Date.now() + TOKEN_TTL_MS });
+  const body = _b64urlJson(payload);
+  const sig = _b64url(crypto.createHmac('sha256', secret).update(body).digest());
+  return body + '.' + sig;
+}
+// Returns the payload if the signature is valid AND not expired, else null. (For S2.)
+function _verifyFieldToken(token) {
+  try {
+    const secret = process.env.FIELD_OPS_TOKEN_SECRET;
+    if (!secret || !token || token.indexOf('.') < 0) return null;
+    const [body, sig] = token.split('.');
+    const expect = _b64url(crypto.createHmac('sha256', secret).update(body).digest());
+    const a = Buffer.from(sig), b = Buffer.from(expect);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const payload = JSON.parse(Buffer.from(body.replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString('utf8'));
+    if (!payload.exp || Date.now() > payload.exp) return null;
+    return payload;
+  } catch (_) { return null; }
+}
 
 async function supabaseRequest(method, path, body) {
   // Prefix the leading identifier with TABLE_PREFIX (dev_ on Dev, '' on live) so the
@@ -437,27 +470,43 @@ exports.handler = async function(event) {
 
       case 'getBuilders': {
         const r = await supabaseRequest('GET', 'field_ops_builders?select=*&order=name');
+        // S1b: credential PRESENCE now comes from the PERSON (dev_field_ops_users) — the
+        // authoritative store after S1a. The builder's own pin columns are no longer read.
+        const _ub = await supabaseRequest('GET', 'field_ops_users?select=id,pin_hash,temp_pin_hash');
+        const _uByIdB = {}; (_ub.data || []).forEach(u => { _uByIdB[u.id] = u; });
         // SECURITY: never send credentials to the browser. Strip pin_hash/temp_pin and
         // expose only boolean PIN-status flags (admin shows "Temp PIN"/"PIN set"; the
         // field-app login list uses name/is_admin only).
         const rows = (r.data || []).map(b => {
-          const { pin_hash, temp_pin, ...safe } = b;
-          return { ...safe, has_pin: !!pin_hash, has_temp_pin: !!temp_pin };
+          const { pin_hash, temp_pin, ...safe } = b;   // scrub legacy cleartext — never to the browser
+          const u = b.user_id ? _uByIdB[b.user_id] : null;
+          return { ...safe, has_pin: !!(u && u.pin_hash), has_temp_pin: !!(u && u.temp_pin_hash) };
         });
         return { statusCode: 200, body: JSON.stringify(rows) };
       }
 
       case 'updateBuilderPin': {
+        // Admin "Set PIN" (+ the bulk subdivision save, which sends subdivisions only).
+        // Payload still uses the legacy key names (pin_hash/temp_pin hold CLEARTEXT from the
+        // UI). PIN now goes through the hashing RPC on the PERSON; subdivisions is not a
+        // credential, so it stays a plain builder update. (Keeps the exact admin contract.)
         const { name, pin_hash, temp_pin, subdivisions } = payload;
-        const updates = { updated_at: new Date().toISOString() };
-        if (pin_hash !== undefined) updates.pin_hash = pin_hash;
-        if (temp_pin !== undefined) updates.temp_pin = temp_pin;
-        if (subdivisions !== undefined) updates.subdivisions = subdivisions;
-        const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, updates);
-        // SECURITY: PATCH return=representation echoes the row (incl. pin_hash/temp_pin).
-        // The caller ignores the body — return only success, never the credentials.
-        if (r.error) return dbFail(r);
-        if (_zeroRows(r)) return notFound('This builder no longer exists. Contact the office.');
+        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
+        const bu = (br.data || [])[0];
+        if (!bu) return notFound('This builder no longer exists. Contact the office.');
+        if (subdivisions !== undefined) {
+          const sr = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { subdivisions, updated_at: new Date().toISOString() });
+          if (sr.error) return dbFail(sr);
+          if (_zeroRows(sr)) return notFound('This builder no longer exists. Contact the office.');
+        }
+        // Admin Set PIN does NOT reset the lock today -> p_reset_lock=false (faithful mirror).
+        const _pin = (pin_hash != null && pin_hash !== '') ? { v: pin_hash, temp: false }
+                   : (temp_pin != null && temp_pin !== '') ? { v: temp_pin, temp: true } : null;
+        if (_pin) {
+          if (!bu.user_id) return notFound('This builder has no linked user. Contact the office.');
+          const pr = await supabaseRequest('POST', 'rpc/field_ops_set_pin', { p_user_id: bu.user_id, p_pin: _pin.v, p_is_temp: _pin.temp, p_reset_lock: false });
+          if (pr.error) return dbFail(pr);
+        }
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
@@ -469,25 +518,27 @@ exports.handler = async function(event) {
       }
 
       case 'verifyPin': {
+        // SAME request/response contract the phone uses today ({valid,is_temp,locked,
+        // attemptsLeft,reason}) — now ADDITIVELY carrying {roles,token} on success. The
+        // compare, attempts and lockout all happen in the DB (verify_login RPC); no hash
+        // crosses the wire. Builder name -> user_id -> RPC. Old builder pin columns unread.
         const { name, pin } = payload;
-        const r = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=pin_hash,temp_pin,is_admin,failed_attempts,is_locked`);
-        if (!r.data || !r.data.length) {
+        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
+        const bu = (br.data || [])[0];
+        if (!bu || !bu.user_id) {
           return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'builder_not_found' }) };
         }
-        const b = r.data[0];
-        if (b.is_locked) {
+        const vr = await supabaseRequest('POST', 'rpc/field_ops_verify_login', { p_user_id: bu.user_id, p_pin: pin });
+        if (vr.error) return dbFail(vr);
+        const v = vr.data || {};
+        if (v.valid) {
+          const token = _makeFieldToken({ user_id: bu.user_id, roles: v.roles || [] });
+          return { statusCode: 200, body: JSON.stringify({ valid: true, is_temp: !!v.is_temp, roles: v.roles || [], token }) };
+        }
+        if (v.reason === 'locked') {
           return { statusCode: 200, body: JSON.stringify({ valid: false, locked: true, reason: 'locked' }) };
         }
-        const ok = (b.temp_pin && b.temp_pin === pin) || (b.pin_hash && b.pin_hash === pin);
-        if (ok) {
-          await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { failed_attempts: 0, updated_at: new Date().toISOString() });
-          const isTemp = !!(b.temp_pin && b.temp_pin === pin);
-          return { statusCode: 200, body: JSON.stringify({ valid: true, is_temp: isTemp }) };
-        }
-        const attempts = (b.failed_attempts || 0) + 1;
-        const lock = attempts >= 5;
-        await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { failed_attempts: attempts, is_locked: lock, updated_at: new Date().toISOString() });
-        return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'wrong_pin', locked: lock, attemptsLeft: Math.max(0, 5 - attempts) }) };
+        return { statusCode: 200, body: JSON.stringify({ valid: false, reason: v.reason || 'wrong_pin', locked: !!v.is_locked, attemptsLeft: (typeof v.attempts_left === 'number' ? v.attempts_left : undefined) }) };
       }
 
       case 'addOverride': {
@@ -530,14 +581,15 @@ exports.handler = async function(event) {
       }
 
       case 'upsertBuilderRecord': {
-        // ATOMIC create/update: one Postgres function upserts the builder AND ensures its
-        // field_ops_users row + role in a single transaction (no half-created builder).
-        // Prefix-aware: dev_field_ops_create_builder on Dev, field_ops_create_builder live.
+        // ATOMIC create: the RPC makes the builder + its field_ops_users row + role in one
+        // transaction. S1b: pass NO cleartext PIN to the RPC (p_pin_hash/p_temp_pin null) —
+        // the initial PIN is hashed onto the PERSON afterwards via set_pin, so no cleartext
+        // ever lands on the builder row. Prefix-aware: dev_* on Dev, * on live.
         const r = await supabaseRequest('POST', 'rpc/field_ops_create_builder', {
           p_name:         payload.name,
           p_subdivisions: payload.subdivisions || [],
-          p_pin_hash:     payload.pin_hash ?? null,
-          p_temp_pin:     payload.temp_pin ?? null,
+          p_pin_hash:     null,
+          p_temp_pin:     null,
           p_is_admin:     !!payload.is_admin
         });
         // Honest status: pass the DB error through (e.g. the D-6 suspended-name refusal)
@@ -548,9 +600,17 @@ exports.handler = async function(event) {
           try { const j = JSON.parse(r.error); msg = j.message || j.hint || j.details || r.error; } catch(_) {}
           return { statusCode: r.status || 400, body: JSON.stringify({ error: msg }) };
         }
-        // SECURITY: the RPC returns the full builder row — strip credentials before
-        // it reaches the browser (the caller only checks for truthiness / error).
         const b = r.data || {};
+        // Hash the initial PIN onto the person (temp PIN is the Add-Builder default; fall back
+        // to a permanent PIN if one was supplied). p_reset_lock=true (fresh user).
+        const _init = (payload.temp_pin != null && payload.temp_pin !== '') ? { v: payload.temp_pin, temp: true }
+                    : (payload.pin_hash != null && payload.pin_hash !== '') ? { v: payload.pin_hash, temp: false } : null;
+        if (_init && b.user_id) {
+          const pr = await supabaseRequest('POST', 'rpc/field_ops_set_pin', { p_user_id: b.user_id, p_pin: _init.v, p_is_temp: _init.temp, p_reset_lock: true });
+          if (pr.error) return dbFail(pr);
+        }
+        // SECURITY: the RPC returns the full builder row — strip anything credential-ish
+        // before it reaches the browser (the caller only checks for truthiness / error).
         const { pin_hash, temp_pin, ...safe } = b;
         return { statusCode: 200, body: JSON.stringify(safe) };
       }
@@ -1901,26 +1961,30 @@ exports.handler = async function(event) {
       }
 
       case 'setBuilderPin': {
+        // Builder's own forced first-login PIN set. Permanent PIN, resets attempts + unlock
+        // (mirrors the old flow) -> p_reset_lock=true. Hashed on the person via set_pin.
         const { name, pin } = payload;
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
         }
-        const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
-          pin_hash: pin, temp_pin: null, failed_attempts: 0, is_locked: false, updated_at: new Date().toISOString()
-        });
-        if (r.error) return dbFail(r);
-        if (_zeroRows(r)) return notFound('This builder no longer exists. Contact the office.');
+        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
+        const bu = (br.data || [])[0];
+        if (!bu) return notFound('This builder no longer exists. Contact the office.');
+        if (!bu.user_id) return notFound('This builder has no linked user. Contact the office.');
+        const pr = await supabaseRequest('POST', 'rpc/field_ops_set_pin', { p_user_id: bu.user_id, p_pin: pin, p_is_temp: false, p_reset_lock: true });
+        if (pr.error) return dbFail(pr);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       case 'unlockBuilder': {
         const { name } = payload;
         if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
-        const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
-          is_locked: false, failed_attempts: 0, updated_at: new Date().toISOString()
-        });
-        if (r.error) return dbFail(r);
-        if (_zeroRows(r)) return notFound('This builder no longer exists. Contact the office.');
+        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
+        const bu = (br.data || [])[0];
+        if (!bu) return notFound('This builder no longer exists. Contact the office.');
+        if (!bu.user_id) return notFound('This builder has no linked user. Contact the office.');
+        const ur = await supabaseRequest('POST', 'rpc/field_ops_unlock_user', { p_user_id: bu.user_id });
+        if (ur.error) return dbFail(ur);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
