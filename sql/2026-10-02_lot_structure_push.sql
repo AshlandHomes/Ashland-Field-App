@@ -723,7 +723,11 @@ NOTIFY pgrst, 'reload schema';
 
 
 -- ============================================================================
--- LIVE AMENDMENT — field_ops_* / sched_*, no dev_ prefix; EXACT mirror of the DEV
+-- LIVE AMENDMENT — APPLIED & VERIFIED on live 2026-10-10 (5/5 PASS: est column on detail,
+-- 6-arg exists, 5-arg gone, anon/authenticated no EXECUTE, service_role EXECUTE). Inventory
+-- pre-check confirmed the 5-arg state first (I1 0 rows, I2 t/f, I3 est date). Est code
+-- promote merged to main the same day (merge 75b0f34).
+-- field_ops_* / sched_*, no dev_ prefix; EXACT mirror of the DEV
 -- amendment above: inventory, ADD COLUMN, explicit DROP 5-arg, plain CREATE 6-arg with
 -- p_skip_est_bts, EXECUTE service_role-only, NOTIFY, 5-row verification.
 -- Run order on promote: AFTER the base LIVE sections (applied 2026-10-05), and BEFORE

@@ -28,6 +28,44 @@ LandIQ table.**
 
 ---
 
+## 2026-10-10 — est_start_date carried in the structure copy — SHIPPED to live (merge `75b0f34`)
+
+**What:** the whole-lot "Also copy schedule changes" now also copies `est_start_date`
+(Option B — absolute date, source→target by `bt_num`), alongside the existing structural
+columns. A copied est that would land before the target's **construction-start floor** OR before
+the task's **predecessor-earliest start** (engine `earliestStart`, predecessor-driven) is
+**skipped per task** — that task keeps its own est — and shown in the preview as
+"Est. start kept (not copied)". Everything else in the copy still applies. Undo restores est;
+est is now in the undo lock-in fingerprint (so any pre-deploy copy's Undo hides — acceptable).
+
+**Why skip-per-task (not block-the-whole-copy):** one misaligned absolute est must not void a
+valid structure copy of the whole lot. The handler validates each copied est server-side
+(the apply RPC bypasses `checkDateEntry`) and the skip set is passed to the RPC so
+**preview == what's written** — the server never shows a change it won't make.
+
+**Live SQL (applied & verified 2026-10-10, 5/5 PASS):** `ADD COLUMN est_start_date` on
+`field_ops_lot_structure_snapshot_tasks`; dropped the 5-arg `field_ops_apply_lot_structure`
+and created the 6-arg (adds `p_skip_est_bts integer[]`), EXECUTE service_role-only.
+**DROP-first** (never 6-arg alongside 5-arg): with one function present the pre-merge
+5-named-arg calls resolve to the 6-arg via the `p_skip_est_bts` default; both present would be
+an ambiguous overload (PostgreSQL "could not choose the best candidate" → PGRST203) and break
+every live copy/undo during the window. TABLE_PREFIX on live confirmed empty.
+
+**Code (promote off `main`, 2 live files):** `netlify/functions/supabase.js` — `STRUCT_COLS`
++`est_start_date`; `_structFingerprint` +est; new `_estSkips`/`_applyEstSkips`; preview/apply
+handlers compute the skip set (apply passes `p_skip_est_bts`). `ashland-stage-update.html`
+(regenerated from `-dev`) — `_bpHumanChange` est line + the skip section. `upsertBuilderRecord`
+kept as main's on_conflict handler — the create-builder RPC / permission-foundation work stays
+OUT of live. Engine / admin.html / offline-queue.js / sw.js untouched → **no cache `?v` bump**.
+In-step proof: `generate-live(Dev -dev)` byte-identical to the shipped live HTML;
+`diff(hotfix supabase.js, Dev)` == only the `upsertBuilderRecord` hunk.
+
+**Dev verified before promote (commit `083e82c`):** T1 preview showed the est copy line; T3
+apply wrote it; T4 undo cleared it; T5 edit-after-copy hid Undo (fingerprint incl. est). T2
+(skip path) covered by the server-side unit check.
+
+---
+
 ## 2026-10-06 — Stage is server-only on the phone — SHIPPED to live (merge `1b160d5`)
 
 **Live bug:** CW Lot 25 flipped 4.9 (list) ↔ 5.0 (lot screen) — the phone computed stage
