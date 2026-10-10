@@ -508,3 +508,224 @@ DROP TABLE IF EXISTS public.field_ops_lot_structure_snapshot_tasks;   -- detail 
 DROP TABLE IF EXISTS public.field_ops_lot_structure_snapshots;
 NOTIFY pgrst, 'reload schema';
 */
+
+
+-- ============================================================================
+-- AMENDMENT 2026-10-10 — est_start_date in the structure copy (Option B).
+--   The structure copy now also carries est_start_date (absolute date, source->target
+--   by bt_num). Per-task floors (construction-start, predecessor-earliest) are checked
+--   in the Netlify handler; tasks that fail are passed in p_skip_est_bts and keep their
+--   OWN est (est is NOT copied for them) — the rest of the structure copy still applies.
+--   Undo fully restores est from the snapshot. Snapshot detail gains est_start_date so
+--   undo can revert it; the apply function is dropped (5-arg) and re-created (6-arg,
+--   adding p_skip_est_bts). No CREATE OR REPLACE. Shared DB: dev_field_ops_* / dev_sched_*
+--   (OURS). ZERO LandIQ refs. ZERO sched_* schema changes (est_start_date already exists
+--   on sched_lot_tasks — we only read/write its value).
+-- ============================================================================
+
+
+-- ----  DEV AMENDMENT INVENTORY (read-only; run FIRST)  ----
+-- I1. Detail table must NOT yet have est_start_date (expect 0 rows).
+/*
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='dev_field_ops_lot_structure_snapshot_tasks'
+  AND column_name='est_start_date';
+*/
+-- I2. The current 5-arg dev RPC must EXIST and the 6-arg must NOT (expect t, f).
+/*
+SELECT
+  (to_regprocedure('public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text)')            IS NOT NULL) AS five_arg_exists,
+  (to_regprocedure('public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])') IS NOT NULL) AS six_arg_exists;
+*/
+-- I3. est_start_date exists on the source table we read/write (expect 1 row, type date).
+/*
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='dev_sched_lot_tasks' AND column_name='est_start_date';
+*/
+
+
+-- ----  DEV AMENDMENT BLOCK (run once, after inventory is clean)  ----
+BEGIN;
+
+-- Pre-flight: apply EXACTLY ONCE, onto the 5-arg state (RAISE if already amended).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='dev_field_ops_lot_structure_snapshot_tasks'
+                AND column_name='est_start_date') THEN
+    RAISE EXCEPTION 'ABORT: est_start_date already on dev snapshot_tasks — amendment already applied.';
+  END IF;
+  IF to_regprocedure('public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text)') IS NULL THEN
+    RAISE EXCEPTION 'ABORT: 5-arg dev RPC missing — run the base DEV section first.';
+  END IF;
+  IF to_regprocedure('public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])') IS NOT NULL THEN
+    RAISE EXCEPTION 'ABORT: 6-arg dev RPC already exists — amendment already applied.';
+  END IF;
+END $$;
+
+-- 1) est_start_date onto the snapshot detail (so undo can restore it). Pure ADD COLUMN
+--    (DDL) — does NOT touch the INSERT-only service_role grant model.
+ALTER TABLE public.dev_field_ops_lot_structure_snapshot_tasks ADD COLUMN est_start_date date;
+
+-- 2) explicit DROP of the 5-arg function, then plain CREATE of the 6-arg version.
+DROP FUNCTION public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text);
+
+CREATE FUNCTION public.dev_field_ops_apply_lot_structure(
+  p_target_lot_id       uuid,
+  p_source_lot_id       uuid DEFAULT NULL,    -- PUSH: mirror this source lot's structure
+  p_restore_snapshot_id uuid DEFAULT NULL,    -- UNDO: restore this prior snapshot's structure
+  p_actor               text DEFAULT NULL,
+  p_kind                text DEFAULT 'push',  -- 'push' | 'undo'
+  p_skip_est_bts        integer[] DEFAULT '{}'::integer[]  -- bt_nums whose est failed the target's floors: est NOT copied (push only)
+)
+RETURNS jsonb                                -- { snapshot_id, applied }
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_snap       uuid;
+  v_applied    integer;
+  v_src_n      integer;
+  v_mismatch   integer;
+  v_snap_tgt   uuid;
+  v_snap_kind  text;
+  v_detail_n   integer;
+BEGIN
+  IF p_target_lot_id IS NULL THEN RAISE EXCEPTION 'target lot id required'; END IF;
+  IF p_kind NOT IN ('push','undo') THEN RAISE EXCEPTION 'kind must be push or undo'; END IF;
+
+  IF p_kind = 'push' THEN
+    ---------------------------------------------------------------- PUSH guards
+    IF p_source_lot_id IS NULL THEN RAISE EXCEPTION 'push requires a source lot'; END IF;
+    IF p_source_lot_id = p_target_lot_id THEN RAISE EXCEPTION 'source and target are the same lot'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.dev_sched_lots WHERE id = p_target_lot_id) THEN
+      RAISE EXCEPTION 'target lot % not found', p_target_lot_id; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.dev_sched_lots WHERE id = p_source_lot_id) THEN
+      RAISE EXCEPTION 'source lot % not found', p_source_lot_id; END IF;
+    IF (SELECT template_id FROM public.dev_sched_lots WHERE id = p_source_lot_id)
+         IS DISTINCT FROM
+       (SELECT template_id FROM public.dev_sched_lots WHERE id = p_target_lot_id) THEN
+      RAISE EXCEPTION 'source and target are on different templates — structure copy refused';
+    END IF;
+    SELECT count(*) INTO v_src_n FROM public.dev_sched_lot_tasks WHERE lot_id = p_source_lot_id;
+    IF v_src_n = 0 THEN RAISE EXCEPTION 'source lot has no tasks'; END IF;
+    SELECT
+      (SELECT count(*) FROM (SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_source_lot_id
+                             EXCEPT SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_target_lot_id) a)
+    + (SELECT count(*) FROM (SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_target_lot_id
+                             EXCEPT SELECT bt_num FROM public.dev_sched_lot_tasks WHERE lot_id=p_source_lot_id) b)
+    INTO v_mismatch;
+    IF v_mismatch > 0 THEN
+      RAISE EXCEPTION 'source/target task sets differ by % bt_num(s) — not 1:1', v_mismatch;
+    END IF;
+  ELSE
+    ---------------------------------------------------------------- UNDO guards
+    IF p_restore_snapshot_id IS NULL THEN RAISE EXCEPTION 'undo requires a snapshot to restore'; END IF;
+    SELECT target_lot_id, kind INTO v_snap_tgt, v_snap_kind
+      FROM public.dev_field_ops_lot_structure_snapshots WHERE id = p_restore_snapshot_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'restore snapshot % not found', p_restore_snapshot_id; END IF;
+    IF v_snap_tgt <> p_target_lot_id THEN
+      RAISE EXCEPTION 'restore snapshot belongs to a different lot (% not %)', v_snap_tgt, p_target_lot_id; END IF;
+    IF v_snap_kind <> 'push' THEN
+      RAISE EXCEPTION 'restore snapshot is kind=% — only a push before-snapshot can be restored', v_snap_kind; END IF;
+    SELECT count(*) INTO v_detail_n
+      FROM public.dev_field_ops_lot_structure_snapshot_tasks WHERE snapshot_id = p_restore_snapshot_id;
+    IF v_detail_n = 0 THEN RAISE EXCEPTION 'restore snapshot has no detail rows'; END IF;
+  END IF;
+
+  -- SNAPSHOT the target's CURRENT structure (now incl est_start_date). Rolls back with
+  -- everything if the apply fails (no orphan snapshot).
+  INSERT INTO public.dev_field_ops_lot_structure_snapshots
+    (id, target_lot_id, source_lot_id, created_at, created_by, kind)
+  VALUES (gen_random_uuid(), p_target_lot_id, p_source_lot_id, now(), p_actor, p_kind)
+  RETURNING id INTO v_snap;
+
+  INSERT INTO public.dev_field_ops_lot_structure_snapshot_tasks
+    (snapshot_id, task_id, bt_num, predecessors, lag, duration, phase_name, phase_order, task_order, est_start_date)
+  SELECT v_snap, id, bt_num, predecessors, lag, duration, phase_name, phase_order, task_order, est_start_date
+  FROM public.dev_sched_lot_tasks
+  WHERE lot_id = p_target_lot_id;
+
+  -- APPLY — column -> column (types always match). Lot-guarded.
+  IF p_kind = 'push' THEN
+    UPDATE public.dev_sched_lot_tasks tgt
+       SET predecessors = src.predecessors, lag = src.lag, duration = src.duration,
+           phase_name = src.phase_name, phase_order = src.phase_order, task_order = src.task_order,
+           est_start_date = CASE WHEN tgt.bt_num = ANY(p_skip_est_bts)
+                                 THEN tgt.est_start_date ELSE src.est_start_date END,
+           updated_at = now()
+      FROM public.dev_sched_lot_tasks src
+     WHERE tgt.lot_id = p_target_lot_id AND src.lot_id = p_source_lot_id AND src.bt_num = tgt.bt_num;
+  ELSE
+    UPDATE public.dev_sched_lot_tasks tgt
+       SET predecessors = snp.predecessors, lag = snp.lag, duration = snp.duration,
+           phase_name = snp.phase_name, phase_order = snp.phase_order, task_order = snp.task_order,
+           est_start_date = snp.est_start_date,
+           updated_at = now()
+      FROM public.dev_field_ops_lot_structure_snapshot_tasks snp
+     WHERE snp.snapshot_id = p_restore_snapshot_id AND tgt.lot_id = p_target_lot_id AND tgt.id = snp.task_id;
+  END IF;
+
+  GET DIAGNOSTICS v_applied = ROW_COUNT;
+  IF v_applied = 0 THEN
+    RAISE EXCEPTION 'apply wrote 0 rows — nothing changed (no matching target tasks)';
+  END IF;
+
+  RETURN jsonb_build_object('snapshot_id', v_snap, 'applied', v_applied);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])
+  FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])
+  TO service_role;
+
+COMMIT;
+
+NOTIFY pgrst, 'reload schema';
+
+
+-- ----  DEV AMENDMENT VERIFICATION. Expect 5 rows, all PASS.  ----
+/*
+WITH checks AS (
+            SELECT 'est_column_on_detail' AS check_name,
+                   EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_schema='public' AND table_name='dev_field_ops_lot_structure_snapshot_tasks'
+                              AND column_name='est_start_date')::text AS actual, 'true' AS expected
+  UNION ALL SELECT 'six_arg_function_exists',
+                   (to_regprocedure('public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])') IS NOT NULL)::text, 'true'
+  UNION ALL SELECT 'five_arg_function_gone',
+                   (to_regprocedure('public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text)') IS NULL)::text, 'true'
+  UNION ALL SELECT 'anon_authenticated_no_execute',
+                   (has_function_privilege('anon','public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])','EXECUTE')
+                 OR has_function_privilege('authenticated','public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])','EXECUTE'))::text, 'false'
+  UNION ALL SELECT 'service_role_has_execute',
+                   has_function_privilege('service_role','public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[])','EXECUTE')::text, 'true'
+)
+SELECT check_name, actual, expected,
+       CASE WHEN actual = expected THEN 'PASS' ELSE 'FAIL' END AS status
+FROM checks ORDER BY check_name;
+*/
+
+
+-- ----  DEV AMENDMENT ROLLBACK (only if needed — reverts to the 5-arg state)  ----
+/*
+BEGIN;
+DROP FUNCTION IF EXISTS public.dev_field_ops_apply_lot_structure(uuid, uuid, uuid, text, text, integer[]);
+-- re-create the prior 5-arg function from the base DEV SECTION above (lines ~114-223), then:
+ALTER TABLE public.dev_field_ops_lot_structure_snapshot_tasks DROP COLUMN IF EXISTS est_start_date;
+COMMIT;
+NOTIFY pgrst, 'reload schema';
+*/
+
+
+-- ============================================================================
+-- LIVE AMENDMENT — authored & applied at PROMOTE time (field_ops_* / sched_*, no dev_
+-- prefix; exact mirror of this DEV amendment: inventory, ADD COLUMN, DROP 5-arg, CREATE
+-- 6-arg with p_skip_est_bts, EXECUTE service_role-only, NOTIFY, 5-row verification).
+-- Run order on promote: this amendment runs AFTER the base LIVE sections already applied
+-- 2026-10-05, and BEFORE the est code promote.
+-- ============================================================================
