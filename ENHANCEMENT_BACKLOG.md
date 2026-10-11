@@ -5,6 +5,35 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🔴 2026-10-11 — HIGH PRIORITY (must land BEFORE any manager/permission work goes LIVE) — offline login caches a PIN-derived secret on the device
+
+The field app's OFFLINE login caches a PIN-derived **SHA-256** in `localStorage` under
+`afo_creds_v1` (keyed per builder; **survives logout** by design — the session pointer
+`afo_session_v1` is cleared on logout, this credential store is not). The hash is
+`SHA-256('afo:' + builderName + ':' + pin)` (`_pinHash`, ashland-stage-update-dev.html:480),
+compared against the typed PIN in the offline branch of `tryPin` (:571) and on mid-login network
+failure (:556).
+
+**Why it matters:** for a **4-digit PIN** with a known builder name and a known static prefix,
+all 10,000 candidates can be hashed and matched in milliseconds by anyone who can read
+`localStorage` on the device — so it is effectively the PIN for a local attacker ("hashed, not
+plaintext" is technically true but gives ~no protection here). It also persists indefinitely.
+This predates S1b and S1b did not change it (the server never sends this — it's the client's own
+scheme), but it must be closed before managers/permissions rely on device auth.
+
+**Also record:** in a **non-secure context** (no `crypto.subtle`), `_pinHash` falls back to a weak
+32-bit **djb2** hash (`:485`) — even weaker than the SHA-256 path.
+
+**Fix (NOT built):** stop caching a PIN-derived secret. On online login the server now returns a
+**signed, expiring token** (S1b, HMAC-SHA256, 7-day exp). Cache **that token** (plus a "last
+builder" flag) for offline re-entry instead of a PIN hash — the device re-enters offline by
+presenting a token it cannot forge and that reveals no PIN, bounded by expiry. Remove `afo_creds_v1`
+/ the `_pinHash` credential path. (Weaker interim if a PIN hash must stay: a slow salted KDF —
+PBKDF2/scrypt via WebCrypto with a per-device random salt — which only slows, never closes, a
+10k-PIN enumeration.)
+
+---
+
 ## 🔭 2026-10-06 — single-source follow-ups (noted during the stage display-only fix)
 
 Recorded while fixing the stage dual-calculation bug (stage is now server-only; the phone
