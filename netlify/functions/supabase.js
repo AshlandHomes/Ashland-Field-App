@@ -93,6 +93,56 @@ async function supabaseRequest(method, path, body) {
   }
 }
 
+// ── S2: server permission gate for manager reads ────────────────────────────
+// Effective permission is resolved FROM THE DATABASE every call (never trusted from the
+// token): an explicit DENY override wins, then an explicit GRANT override, else the role
+// bundle (user_roles -> role_permissions). The token proves WHO; the DB decides WHAT.
+async function _effectiveHasPermission(userId, permKey) {
+  const pr = await supabaseRequest('GET', `field_ops_permissions?key=eq.${encodeURIComponent(permKey)}&select=id`);
+  const perm = (pr.data || [])[0];
+  if (!perm) return false;
+  const ov = await supabaseRequest('GET', `field_ops_user_permission_overrides?user_id=eq.${userId}&permission_id=eq.${perm.id}&select=effect`);
+  const effects = (ov.data || []).map(o => o.effect);
+  if (effects.indexOf('deny') !== -1) return false;     // deny wins
+  if (effects.indexOf('grant') !== -1) return true;     // explicit grant
+  const ur = await supabaseRequest('GET', `field_ops_user_roles?user_id=eq.${userId}&select=role_id`);
+  const roleIds = (ur.data || []).map(r => r.role_id);
+  if (!roleIds.length) return false;
+  const rp = await supabaseRequest('GET', `field_ops_role_permissions?permission_id=eq.${perm.id}&role_id=in.(${roleIds.join(',')})&select=role_id&limit=1`);
+  return !!(rp.data && rp.data.length);
+}
+// ONE login identity resolver, shared by verifyPin AND the set-PIN path so there is never a
+// second lookup that could disagree. A name resolves to a single person: a builder
+// (builder.name -> user_id) OR a user (display_name). A builder and its own user row share the
+// same user_id, so that collapses to one. Returns { uid } | { none:true } | { ambiguous:true }.
+async function _resolvePersonByName(name) {
+  const [br, nu] = await Promise.all([
+    supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`),
+    supabaseRequest('GET', `field_ops_users?display_name=eq.${encodeURIComponent(name)}&select=id`)
+  ]);
+  const uids = new Set();
+  const bUid = (br.data || [])[0] && (br.data || [])[0].user_id;
+  if (bUid) uids.add(bUid);
+  (nu.data || []).forEach(u => { if (u.id) uids.add(u.id); });
+  if (uids.size === 0) return { none: true };
+  if (uids.size > 1) return { ambiguous: true };
+  return { uid: [...uids][0] };
+}
+
+// Guard for manager endpoints. 401 = no/garbled/expired/tampered token; 403 = valid token,
+// no permission. Both PERMANENT (never a retry-storm) and the token is NEVER echoed back.
+// Returns { ok:true, user } or { ok:false, status, error }.
+async function _requireManager(token) {
+  const payload = _verifyFieldToken(token);
+  if (!payload || !payload.user_id) return { ok: false, status: 401, error: 'Not signed in (missing or expired session).' };
+  const ur = await supabaseRequest('GET', `field_ops_users?id=eq.${payload.user_id}&select=id,display_name,status`);
+  const u = (ur.data || [])[0];
+  if (!u || u.status !== 'active') return { ok: false, status: 401, error: 'Session no longer valid.' };
+  const allowed = await _effectiveHasPermission(u.id, 'manager_view.use');
+  if (!allowed) return { ok: false, status: 403, error: 'You do not have access to the manager view.' };
+  return { ok: true, user: u };
+}
+
 // ── actual-date entry guard ──────────────────────────────────────────────
 // Authoritative backstop for the rule ScheduleEngine.validateDateEntry enforces:
 // actual_start/actual_finish must fall in [construction_start, today] and finish
@@ -523,22 +573,31 @@ exports.handler = async function(event) {
         // compare, attempts and lockout all happen in the DB (verify_login RPC); no hash
         // crosses the wire. Builder name -> user_id -> RPC. Old builder pin columns unread.
         const { name, pin } = payload;
-        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
-        const bu = (br.data || [])[0];
-        if (!bu || !bu.user_id) {
-          return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'builder_not_found' }) };
-        }
-        const vr = await supabaseRequest('POST', 'rpc/field_ops_verify_login', { p_user_id: bu.user_id, p_pin: pin });
+        const who = await _resolvePersonByName(name);
+        if (who.none)      return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'builder_not_found' }) };
+        if (who.ambiguous) return { statusCode: 200, body: JSON.stringify({ valid: false, reason: 'ambiguous_name', permanent: true }) };
+        const vr = await supabaseRequest('POST', 'rpc/field_ops_verify_login', { p_user_id: who.uid, p_pin: pin });
         if (vr.error) return dbFail(vr);
         const v = vr.data || {};
         if (v.valid) {
-          const token = _makeFieldToken({ user_id: bu.user_id, roles: v.roles || [] });
-          return { statusCode: 200, body: JSON.stringify({ valid: true, is_temp: !!v.is_temp, roles: v.roles || [], token }) };
+          // A TEMP-PIN login may ONLY set a new PIN — NO 7-day token until a permanent PIN exists.
+          const body = { valid: true, is_temp: !!v.is_temp, roles: v.roles || [] };
+          if (!v.is_temp) body.token = _makeFieldToken({ user_id: who.uid, roles: v.roles || [] });
+          return { statusCode: 200, body: JSON.stringify(body) };
         }
         if (v.reason === 'locked') {
           return { statusCode: 200, body: JSON.stringify({ valid: false, locked: true, reason: 'locked' }) };
         }
         return { statusCode: 200, body: JSON.stringify({ valid: false, reason: v.reason || 'wrong_pin', locked: !!v.is_locked, attemptsLeft: (typeof v.attempts_left === 'number' ? v.attempts_left : undefined) }) };
+      }
+
+      // ── S2: manager-gated stub. Proves the server permission gate end to end. ──
+      // Requires a valid token whose user effectively holds manager_view.use (resolved from
+      // the DB). 401 = bad/expired/tampered/missing token; 403 = valid token, no permission.
+      case 'getManagerPing': {
+        const g = await _requireManager(payload && payload.token);
+        if (!g.ok) return { statusCode: g.status, body: JSON.stringify({ error: g.error, permanent: true }) };
+        return { statusCode: 200, body: JSON.stringify({ ok: true, user_id: g.user.id, display_name: g.user.display_name }) };
       }
 
       case 'addOverride': {
@@ -1961,17 +2020,17 @@ exports.handler = async function(event) {
       }
 
       case 'setBuilderPin': {
-        // Builder's own forced first-login PIN set. Permanent PIN, resets attempts + unlock
-        // (mirrors the old flow) -> p_reset_lock=true. Hashed on the person via set_pin.
+        // Forced first-login PIN set — for ANY person (builder OR manager/non-builder user).
+        // Resolves the person the SAME way verifyPin does (builder name, else display_name) so
+        // there is no second lookup. Permanent PIN, resets attempts + unlock (p_reset_lock=true).
         const { name, pin } = payload;
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
         }
-        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
-        const bu = (br.data || [])[0];
-        if (!bu) return notFound('This builder no longer exists. Contact the office.');
-        if (!bu.user_id) return notFound('This builder has no linked user. Contact the office.');
-        const pr = await supabaseRequest('POST', 'rpc/field_ops_set_pin', { p_user_id: bu.user_id, p_pin: pin, p_is_temp: false, p_reset_lock: true });
+        const who = await _resolvePersonByName(name);
+        if (who.none)      return notFound('This account no longer exists. Contact the office.');
+        if (who.ambiguous) return { statusCode: 409, body: JSON.stringify({ error: 'This name matches more than one person. Contact the office.', permanent: true }) };
+        const pr = await supabaseRequest('POST', 'rpc/field_ops_set_pin', { p_user_id: who.uid, p_pin: pin, p_is_temp: false, p_reset_lock: true });
         if (pr.error) return dbFail(pr);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
