@@ -555,7 +555,7 @@ async function tryPin(){
     try { res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry}); }
     catch(e){ _isOnline=false; try{startReconnectWatch();updateSyncStatus();}catch(_){} return tryPin(); }  // network died mid-login -> offline verify
     if(res&&res.valid){
-      if(res.is_temp){startSetPin();return;}
+      if(res.is_temp){_tempForSet=pinEntry;startSetPin();return;}   // remember the temp PIN to PROVE it when setting the new one
       await saveSession(currentBuilder,pinEntry);   // remember for offline re-launch
       enterApp();
     } else if(res&&res.locked){
@@ -573,7 +573,7 @@ async function tryPin(){
 }
 
 // ---- forced PIN change ----
-let setPinEntry='',setPinConfirm='',setPinStage='new';
+let setPinEntry='',setPinConfirm='',setPinStage='new',_tempForSet='';
 function startSetPin(){setPinEntry='';setPinConfirm='';setPinStage='new';showScreen('screen-setpin');renderSetPin();}
 function renderSetPin(){
   const entry=setPinStage==='new'?setPinEntry:setPinConfirm;
@@ -601,9 +601,9 @@ async function setPinKey(k){
     setPinConfirm+=k;renderSetPin();
     if(setPinConfirm.length===4){
       if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
-      const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
-      if(r&&r.success){await saveSession(currentBuilder,setPinEntry);enterApp();}
-      else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
+      const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry,temp_pin:_tempForSet});
+      if(r&&r.success){_tempForSet='';await saveSession(currentBuilder,setPinEntry);enterApp();}
+      else{err.textContent=(r&&r.reason==='same_as_temp')?'Choose a PIN different from your temporary one':'Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
     }
   }
 }

@@ -890,6 +890,7 @@ tr:hover td{background:#e5e7eb}
 const SUPABASE_FN = '/.netlify/functions/supabase';
 const SESSION_KEY = 'ah_admin_session';
 const SESSION_HOURS = 8;
+let ADMIN_TOKEN = null;   // signed admin token from verifyAdminPin; sent on every admin mutation
 let SUB_NAMES = {};
 const SUB_COLORS = {RC:'sub-RC',CO:'sub-CO',TB:'sub-TB',CT:'sub-CT',TE:'sub-TE',CW:'sub-CW'};
 
@@ -933,6 +934,36 @@ async function sbCall(action, payload) {
   }
 }
 
+// Admin MUTATIONS go through here: injects the signed admin token and, if the server says the
+// token is missing/expired/invalid (admin_reauth), forces a fresh admin-PIN entry instead of
+// failing silently. A session opened before this existed has no token -> straight to re-auth.
+async function sbAdmin(action, payload) {
+  if (!ADMIN_TOKEN) { forceAdminReauth('Enter your admin PIN to continue.'); return null; }
+  await loadSecret();
+  try {
+    const resp = await fetch(SUPABASE_FN, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Api-Secret':API_SECRET},
+      body: JSON.stringify({ action, payload: Object.assign({}, payload, { admin_token: ADMIN_TOKEN }) })
+    });
+    const data = await resp.json();
+    if (data && data.admin_reauth) { forceAdminReauth('Your admin session expired — enter your PIN again.'); return null; }
+    if (data && data.error) { alert('API Error (' + action + '): ' + data.error); return null; }
+    return data;
+  } catch(e) {
+    alert('Network error: ' + e.message);
+    return null;
+  }
+}
+function forceAdminReauth(msg) {
+  try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
+  ADMIN_TOKEN = null;
+  document.getElementById('app').classList.remove('open');
+  const lw = document.getElementById('login-wrap'); if (lw) lw.style.display = 'flex';
+  const pi = document.getElementById('pin-input'); if (pi) pi.value = '';
+  const le = document.getElementById('login-error'); if (le) le.textContent = msg || 'Enter your admin PIN.';
+}
+
 async function tryLogin() {
   const pin = document.getElementById('pin-input').value;
   const btn = document.querySelector('.login-btn');
@@ -940,7 +971,8 @@ async function tryLogin() {
   const res = await sbCall('verifyAdminPin', {pin});
   btn.textContent = 'Enter →'; btn.disabled = false;
   if (res && res.valid) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ts: Date.now()}));
+    ADMIN_TOKEN = res.admin_token || null;
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ts: Date.now(), t: ADMIN_TOKEN}));
     document.getElementById('login-wrap').style.display = 'none';
     document.getElementById('app').classList.add('open');
     loadAll();
@@ -964,6 +996,7 @@ function logout() {
   try {
     const s = JSON.parse(localStorage.getItem(SESSION_KEY));
     if (s && s.ts && (Date.now() - s.ts) < SESSION_HOURS * 3600000) {
+      ADMIN_TOKEN = s.t || null;   // restore the admin token so mutations work after a reload
       document.getElementById('login-wrap').style.display = 'none';
       document.getElementById('app').classList.add('open');
       loadAll();
@@ -2117,13 +2150,13 @@ async function submitSetPin() {
   const payload = {name};
   if (isTemp) { payload.temp_pin=pin; payload.pin_hash=null; }
   else        { payload.pin_hash=pin; payload.temp_pin=null; }
-  await sbCall('updateBuilderPin', payload);
+  await sbAdmin('updateBuilderPin', payload);
   closeModal('modal-set-pin');
   await loadBuilders(); renderBuildersTable();
 }
 
 async function unlockBuilder(name) {
-  await sbCall('unlockBuilder', {name});
+  await sbAdmin('unlockBuilder', {name});
   await loadBuilders(); renderBuildersTable();
 }
 
@@ -2143,7 +2176,7 @@ async function submitAddBuilder() {
   const subs = [...document.querySelectorAll('#builder-sub-checkboxes input:checked')].map(c=>c.value);
   if (!name) { alert('Name is required'); return; }
   if (!pin||pin.length!==4) { alert('4-digit PIN required'); return; }
-  const res = await sbCall('upsertBuilderRecord', {name, subdivisions:subs, pin_hash:null, temp_pin:pin, is_admin:false});
+  const res = await sbAdmin('upsertBuilderRecord', {name, subdivisions:subs, pin_hash:null, temp_pin:pin, is_admin:false});
   if (!res) return;   // sbCall already surfaced the error (e.g. the D-6 refusal); keep the modal open, don't report success
   closeModal('modal-add-builder');
   await loadBuilders(); renderBuildersTable();
@@ -2151,7 +2184,7 @@ async function submitAddBuilder() {
 
 async function deleteBuilder(name) {
   if (!confirm('Delete builder ' + name + '?')) return;
-  await sbCall('deleteBuilder', {name});
+  await sbAdmin('deleteBuilder', {name});
   await loadBuilders(); renderBuildersTable();
 }
 
@@ -2367,7 +2400,7 @@ async function submitSubDetail() {
       let newSubs = [...(b.subdivisions||[])];
       if (wantsSub) { if (!newSubs.includes(code)) newSubs.push(code); }
       else          { newSubs = newSubs.filter(s=>s!==code); }
-      saves.push(sbCall('updateBuilderPin', {name: b.name, subdivisions: newSubs}));
+      saves.push(sbAdmin('updateBuilderPin', {name: b.name, subdivisions: newSubs}));
     }
   });
 

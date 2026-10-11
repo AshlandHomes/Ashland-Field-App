@@ -16,13 +16,14 @@ const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
 // NOT a credential and carries NO PIN/hash. Secret: FIELD_OPS_TOKEN_SECRET (Dev site env).
 // Format: base64url(payloadJSON).base64url(hmac). Missing secret => no token minted (login
 // still works; token simply absent until the env var is set).
-const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;   // 7 days
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;    // 7 days — field (builder/manager) login
+const ADMIN_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;  // 12 hours — admin console (shorter on purpose)
 function _b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 function _b64urlJson(obj) { return _b64url(JSON.stringify(obj)); }
-function _makeFieldToken(claims) {
+function _makeFieldToken(claims, ttlMs) {
   const secret = process.env.FIELD_OPS_TOKEN_SECRET;
   if (!secret) return null;
-  const payload = Object.assign({}, claims, { exp: Date.now() + TOKEN_TTL_MS });
+  const payload = Object.assign({}, claims, { exp: Date.now() + (ttlMs || TOKEN_TTL_MS) });
   const body = _b64urlJson(payload);
   const sig = _b64url(crypto.createHmac('sha256', secret).update(body).digest());
   return body + '.' + sig;
@@ -141,6 +142,18 @@ async function _requireManager(token) {
   const allowed = await _effectiveHasPermission(u.id, 'manager_view.use');
   if (!allowed) return { ok: false, status: 403, error: 'You do not have access to the manager view.' };
   return { ok: true, user: u };
+}
+
+// Server-side admin gate for state-changing admin-console actions (set/reset PIN, unlock,
+// create/delete builder). The console proves the admin PIN ONCE (verifyAdminPin) and gets a
+// short signed admin token; every admin mutation must then carry a VALID admin token — the
+// server decides, it never trusts the client to self-assert admin. We verify a token minted
+// from a correct admin PIN rather than shipping the raw ADMIN_PIN on every request (which would
+// spray it across payloads/logs). 403 if absent/expired/tampered; permanent (no retry-storm).
+function _requireAdmin(payload) {
+  const p = _verifyFieldToken(payload && payload.admin_token);
+  if (!p || p.admin !== true) return { ok: false, status: 403, error: 'Admin verification required — sign in to the admin console again.', permanent: true, admin_reauth: true };
+  return { ok: true };
 }
 
 // ── actual-date entry guard ──────────────────────────────────────────────
@@ -540,6 +553,7 @@ exports.handler = async function(event) {
         // Payload still uses the legacy key names (pin_hash/temp_pin hold CLEARTEXT from the
         // UI). PIN now goes through the hashing RPC on the PERSON; subdivisions is not a
         // credential, so it stays a plain builder update. (Keeps the exact admin contract.)
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const { name, pin_hash, temp_pin, subdivisions } = payload;
         const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
         const bu = (br.data || [])[0];
@@ -564,7 +578,10 @@ exports.handler = async function(event) {
         const { pin } = payload;
         const envPin = (process.env.ADMIN_PIN || '').trim();
         const valid = !!pin && pin.trim() === envPin;
-        return { statusCode: 200, body: JSON.stringify({ valid }) };
+        if (!valid) return { statusCode: 200, body: JSON.stringify({ valid: false }) };
+        // Mint a short signed admin token the console carries on every admin mutation.
+        const admin_token = _makeFieldToken({ admin: true }, ADMIN_TOKEN_TTL_MS);   // 12h
+        return { statusCode: 200, body: JSON.stringify({ valid: true, admin_token }) };
       }
 
       case 'verifyPin': {
@@ -634,6 +651,7 @@ exports.handler = async function(event) {
       }
 
       case 'deleteBuilder': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const r = await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
         if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
@@ -644,6 +662,7 @@ exports.handler = async function(event) {
         // transaction. S1b: pass NO cleartext PIN to the RPC (p_pin_hash/p_temp_pin null) —
         // the initial PIN is hashed onto the PERSON afterwards via set_pin, so no cleartext
         // ever lands on the builder row. Prefix-aware: dev_* on Dev, * on live.
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const r = await supabaseRequest('POST', 'rpc/field_ops_create_builder', {
           p_name:         payload.name,
           p_subdivisions: payload.subdivisions || [],
@@ -2020,22 +2039,27 @@ exports.handler = async function(event) {
       }
 
       case 'setBuilderPin': {
-        // Forced first-login PIN set — for ANY person (builder OR manager/non-builder user).
-        // Resolves the person the SAME way verifyPin does (builder name, else display_name) so
-        // there is no second lookup. Permanent PIN, resets attempts + unlock (p_reset_lock=true).
-        const { name, pin } = payload;
+        // Self-service forced first-login PIN set — for ANY person (builder OR manager/non-builder).
+        // SECURITY: proves the current TEMP PIN in the SAME atomic DB call (claim_temp_pin). No
+        // admin token here — knowing the temp PIN the office issued IS the proof. Resolves the
+        // person the SAME way verifyPin does (one lookup). Rejects new==temp; wrong temp counts a try.
+        const { name, pin, temp_pin } = payload;
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
         }
+        if (!temp_pin) return { statusCode: 200, body: JSON.stringify({ success: false, reason: 'temp_pin_required' }) };
         const who = await _resolvePersonByName(name);
         if (who.none)      return notFound('This account no longer exists. Contact the office.');
         if (who.ambiguous) return { statusCode: 409, body: JSON.stringify({ error: 'This name matches more than one person. Contact the office.', permanent: true }) };
-        const pr = await supabaseRequest('POST', 'rpc/field_ops_set_pin', { p_user_id: who.uid, p_pin: pin, p_is_temp: false, p_reset_lock: true });
-        if (pr.error) return dbFail(pr);
-        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+        const cr = await supabaseRequest('POST', 'rpc/field_ops_claim_temp_pin', { p_user_id: who.uid, p_temp_pin: temp_pin, p_new_pin: pin });
+        if (cr.error) return dbFail(cr);
+        const c = cr.data || {};
+        if (c.ok) return { statusCode: 200, body: JSON.stringify({ success: true }) };
+        return { statusCode: 200, body: JSON.stringify({ success: false, reason: c.reason, attemptsLeft: c.attempts_left }) };
       }
 
       case 'unlockBuilder': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const { name } = payload;
         if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
         const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=user_id`);
