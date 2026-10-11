@@ -34,6 +34,17 @@ PBKDF2/scrypt via WebCrypto with a per-device random salt — which only slows, 
 
 ---
 
+## 🟢 2026-10-11 — LOW PRIORITY — forced "Create your PIN" accepts weak / unchanged PINs
+
+The forced first-login PIN change (field app `setPinKey` → `setBuilderPin`) accepts a new PIN
+IDENTICAL to the temp PIN — it should reject "same as your temporary PIN, pick a different one."
+(Surfaced in S1b step 2: the check only looked unchanged because the temp and new PIN were both
+`0000`.) Also reject obvious PINs: `0000`, `1234`, and single-digit repeats (`1111`…`9999`).
+Enforce on the client for UX and ALSO server-side in `dev_field_ops_set_pin` (or the handler) so
+it can't be bypassed. Not acute; no security regression beyond the existing 4-digit space.
+
+---
+
 ## 🔭 2026-10-06 — single-source follow-ups (noted during the stage display-only fix)
 
 Recorded while fixing the stage dual-calculation bug (stage is now server-only; the phone
