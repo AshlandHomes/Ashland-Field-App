@@ -524,7 +524,7 @@ async function loadBuilders(){
   el.innerHTML=list.map(b=>'<button class="bbtn" onclick="pickBuilder(\''+b.name.replace(/'/g,"\\'")+'\')">'+b.name+'</button>').join('');
 }
 function pickBuilder(name){currentBuilder=name;pinEntry='';document.getElementById('pin-name').textContent=name;document.getElementById('pinerr').textContent='';renderPin();showScreen('screen-pin');}
-function toBuilders(){currentBuilder=null;pinEntry='';showScreen('screen-builders');}
+function toBuilders(){currentBuilder=null;pinEntry='';_tempForSet='';showScreen('screen-builders');}
 
 const KEY_LETTERS={'2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ','0':'+'};
 function keyHtml(k){
@@ -554,7 +554,7 @@ async function tryPin(){
     try { res=await sbCall('verifyPin',{name:currentBuilder,pin:pinEntry}); }
     catch(e){ _isOnline=false; try{startReconnectWatch();updateSyncStatus();}catch(_){} return tryPin(); }  // network died mid-login -> offline verify
     if(res&&res.valid){
-      if(res.is_temp){startSetPin();return;}
+      if(res.is_temp){_tempForSet=pinEntry;startSetPin();return;}   // remember the temp PIN to PROVE it when setting the new one
       await saveSession(currentBuilder,pinEntry);   // remember for offline re-launch
       enterApp();
     } else if(res&&res.locked){
@@ -572,8 +572,15 @@ async function tryPin(){
 }
 
 // ---- forced PIN change ----
-let setPinEntry='',setPinConfirm='',setPinStage='new';
+let setPinEntry='',setPinConfirm='',setPinStage='new',_tempForSet='';
 function startSetPin(){setPinEntry='';setPinConfirm='';setPinStage='new';showScreen('screen-setpin');renderSetPin();}
+// Temp PIN is wrong/expired/locked — can't finish here. Drop the remembered temp and send them
+// back to the PIN screen to log in again, with a plain reason shown there.
+function _setPinBackToLogin(msg){
+  setPinEntry='';setPinConfirm='';setPinStage='new';_tempForSet='';pinEntry='';
+  showScreen('screen-pin');renderPin();
+  const pe=document.getElementById('pinerr'); if(pe) pe.textContent=msg||'';
+}
 function renderSetPin(){
   const entry=setPinStage==='new'?setPinEntry:setPinConfirm;
   document.getElementById('setpin-heading').textContent=setPinStage==='new'?'Create your PIN':'Confirm your PIN';
@@ -599,10 +606,29 @@ async function setPinKey(k){
     if(setPinConfirm.length>=4)return;
     setPinConfirm+=k;renderSetPin();
     if(setPinConfirm.length===4){
-      if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
-      const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry});
-      if(r&&r.success){await saveSession(currentBuilder,setPinEntry);enterApp();}
-      else{err.textContent='Could not save PIN — try again';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);}
+      if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match. Try again.';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
+      const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry,temp_pin:_tempForSet});
+      if(r&&r.success){_tempForSet='';await saveSession(currentBuilder,setPinEntry);enterApp();return;}
+      // Refusal — plain words per reason. _tempForSet is KEPT for on-screen retries (same_as_temp
+      // / bad_new_pin / network); it is cleared only when we send them back to log in (the temp is
+      // wrong, expired, or locked and can't be recovered on this screen) or on success.
+      const reason=(r&&r.reason)||'network';
+      const tries=(r&&typeof r.attemptsLeft==='number')?(' '+r.attemptsLeft+' tr'+(r.attemptsLeft===1?'y':'ies')+' left.'):'';
+      const MSG={
+        same_as_temp:'Choose a PIN different from your temporary PIN.',
+        bad_new_pin:'PIN must be 4 numbers.',
+        wrong_temp:'Your temporary PIN didn’t match. Log in again.'+tries,
+        locked:'Too many tries. Ask the office to unlock you.',
+        temp_pin_required:'Your temporary PIN expired. Log in again.',
+        no_temp:'Your temporary PIN expired. Log in again.',
+        user_not_found:'Your temporary PIN expired. Log in again.',
+        network:'Can’t reach the server. Try again.'
+      };
+      const msg=MSG[reason]||MSG.network;
+      if(reason==='wrong_temp'||reason==='locked'||reason==='temp_pin_required'||reason==='no_temp'||reason==='user_not_found'){
+        _setPinBackToLogin(msg); return;          // temp is bad/gone -> re-enter it at login
+      }
+      err.textContent=msg;setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);   // recoverable here, keep temp
     }
   }
 }
