@@ -8,6 +8,42 @@ const NoteResolution = require('../../note-resolution.js');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const TABLE_PREFIX = process.env.TABLE_PREFIX || '';
+const crypto = require('crypto');
+
+// ── Signed admin token (HMAC-SHA256) — admin console proves the admin PIN ONCE (verifyAdminPin)
+// and carries this short token on every admin mutation; the server verifies it instead of
+// trusting the client-held API secret. Signer: FIELD_OPS_TOKEN_SECRET (LIVE site env). NOT a
+// credential; carries no PIN. Missing secret => no token minted => admin mutations fail closed.
+const ADMIN_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;  // 12 hours
+function _b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function _makeAdminToken() {
+  const secret = process.env.FIELD_OPS_TOKEN_SECRET;
+  if (!secret) return null;
+  const body = _b64url(JSON.stringify({ admin: true, exp: Date.now() + ADMIN_TOKEN_TTL_MS }));
+  const sig = _b64url(crypto.createHmac('sha256', secret).update(body).digest());
+  return body + '.' + sig;
+}
+function _verifyAdminToken(token) {
+  try {
+    const secret = process.env.FIELD_OPS_TOKEN_SECRET;
+    if (!secret || !token || token.indexOf('.') < 0) return null;
+    const [body, sig] = token.split('.');
+    const expect = _b64url(crypto.createHmac('sha256', secret).update(body).digest());
+    const a = Buffer.from(sig), b = Buffer.from(expect);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const p = JSON.parse(Buffer.from(body.replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString('utf8'));
+    if (p.admin !== true || !p.exp || Date.now() > p.exp) return null;
+    return p;
+  } catch (_) { return null; }
+}
+// Gate for state-changing admin-console actions. 403 + admin_reauth if the token is absent/
+// expired/tampered (permanent — never a retry-storm); the token is never echoed back.
+function _requireAdmin(payload) {
+  if (!_verifyAdminToken(payload && payload.admin_token)) {
+    return { ok: false, status: 403, error: 'Admin verification required — sign in to the admin console again.', permanent: true, admin_reauth: true };
+  }
+  return { ok: true };
+}
 
 async function supabaseRequest(method, path, body) {
   // Prefix the leading identifier with TABLE_PREFIX (dev_ on Dev, '' on live) so the
@@ -448,6 +484,7 @@ exports.handler = async function(event) {
       }
 
       case 'updateBuilderPin': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const { name, pin_hash, temp_pin, subdivisions } = payload;
         const updates = { updated_at: new Date().toISOString() };
         if (pin_hash !== undefined) updates.pin_hash = pin_hash;
@@ -465,7 +502,8 @@ exports.handler = async function(event) {
         const { pin } = payload;
         const envPin = (process.env.ADMIN_PIN || '').trim();
         const valid = !!pin && pin.trim() === envPin;
-        return { statusCode: 200, body: JSON.stringify({ valid }) };
+        if (!valid) return { statusCode: 200, body: JSON.stringify({ valid: false }) };
+        return { statusCode: 200, body: JSON.stringify({ valid: true, admin_token: _makeAdminToken() }) };   // 12h signed token
       }
 
       case 'verifyPin': {
@@ -524,14 +562,17 @@ exports.handler = async function(event) {
       }
 
       case 'deleteBuilder': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const r = await supabaseRequest('DELETE', `field_ops_builders?name=eq.${encodeURIComponent(payload.name)}`);
         if (r.error) return dbFail(r);
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
       }
 
       case 'upsertBuilderRecord': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
+        const { admin_token, ...builderFields } = payload;   // never write the gate token into the builder row
         const r = await supabaseRequest('POST', 'field_ops_builders?on_conflict=name', {
-          ...payload,
+          ...builderFields,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
@@ -1888,9 +1929,26 @@ exports.handler = async function(event) {
       }
 
       case 'setBuilderPin': {
-        const { name, pin } = payload;
+        // Self-service forced first-login PIN set. SECURITY: must PROVE the current temp PIN
+        // (live still stores PINs cleartext on the builder row). No admin token — knowing the
+        // office-issued temp PIN is the proof. Checks the temp, counts wrong tries toward the
+        // existing lockout, refuses new==temp; then sets the permanent PIN and clears temp.
+        const { name, pin, temp_pin } = payload;
         if (!name || !pin || !/^\d{4}$/.test(pin)) {
           return { statusCode: 400, body: JSON.stringify({ error: 'name and 4-digit pin required' }) };
+        }
+        if (!temp_pin) return { statusCode: 200, body: JSON.stringify({ success: false, reason: 'temp_pin_required' }) };
+        const br = await supabaseRequest('GET', `field_ops_builders?name=eq.${encodeURIComponent(name)}&select=temp_pin,failed_attempts,is_locked`);
+        const b = (br.data || [])[0];
+        if (!b) return notFound('This builder no longer exists. Contact the office.');
+        if (b.is_locked) return { statusCode: 200, body: JSON.stringify({ success: false, reason: 'locked' }) };
+        if (!b.temp_pin) return { statusCode: 200, body: JSON.stringify({ success: false, reason: 'no_temp' }) };
+        if (pin === temp_pin) return { statusCode: 200, body: JSON.stringify({ success: false, reason: 'same_as_temp' }) };
+        if (temp_pin !== b.temp_pin) {                                   // wrong temp -> count a try
+          const attempts = (b.failed_attempts || 0) + 1;
+          const lock = attempts >= 5;
+          await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, { failed_attempts: attempts, is_locked: lock, updated_at: new Date().toISOString() });
+          return { statusCode: 200, body: JSON.stringify({ success: false, reason: 'wrong_temp', locked: lock, attemptsLeft: Math.max(0, 5 - attempts) }) };
         }
         const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
           pin_hash: pin, temp_pin: null, failed_attempts: 0, is_locked: false, updated_at: new Date().toISOString()
@@ -1901,6 +1959,7 @@ exports.handler = async function(event) {
       }
 
       case 'unlockBuilder': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
         const { name } = payload;
         if (!name) return { statusCode: 400, body: JSON.stringify({ error: 'name required' }) };
         const r = await supabaseRequest('PATCH', `field_ops_builders?name=eq.${encodeURIComponent(name)}`, {
