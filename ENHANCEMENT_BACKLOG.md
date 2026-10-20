@@ -5,6 +5,29 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🔴 2026-10-20 — HIGH — read actions aren't server-gated, and the API secret is handed to every client
+
+The Netlify function (`/.netlify/functions/supabase`) authorizes requests ONLY by a shared
+`X-Api-Secret`, and `/.netlify/functions/config` serves that secret to any client that loads the
+site. The 2026-10-20 hotfix closed the WRITE surface (admin token on mutations; temp-PIN proof on
+self-service set-PIN), but READ actions (getScheduleLots, getAllLotPhases, getBuilders, etc.) remain
+ungated — anyone with the secret can read all field-ops data, and the manager view's read endpoints
+on live would inherit that. The real fix is PER-USER server auth (the Dev token model: a signed
+login token required + permission checked on every read/write), which lands after the DB is
+separated from LandIQ. Until then, treat the shared secret as "any site visitor" for reads.
+
+## 🔴 2026-10-11 — HIGH (before any manager/permission work goes live) — offline PIN cache on the phone
+Already logged in full below (afo_creds_v1 SHA-256 of a 4-digit PIN; replace with caching the signed
+token). Re-affirmed 2026-10-20: this must be closed before managers rely on device auth on live.
+
+## 🟡 2026-10-20 — BEFORE LIVE — delete the Dev "Test Manager" account
+Dev seeded a `dev_field_ops_users` row display_name='Test Manager' (field_manager role, PIN set) for
+S2 testing. It exists ONLY on Dev and must NOT survive into any live/user-facing state — delete it
+(and its user_roles row) before the manager view goes live. (Live has no users table yet, so nothing
+to delete on live today; this is a Dev-cleanup gate for the promote.)
+
+---
+
 ## 🔴 2026-10-11 — HIGH PRIORITY (must land BEFORE any manager/permission work goes LIVE) — offline login caches a PIN-derived secret on the device
 
 The field app's OFFLINE login caches a PIN-derived **SHA-256** in `localStorage` under

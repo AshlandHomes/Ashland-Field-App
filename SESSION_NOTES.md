@@ -28,6 +28,38 @@ LandIQ table.**
 
 ---
 
+## 2026-10-20 — PIN/login security hardening — DEV chain built + LIVE hotfix SHIPPED (merge `389a75a`)
+
+**The hole:** the Netlify function trusted only the shared `X-Api-Secret`, which `/.netlify/functions/
+config` hands to any client — so anyone could call setBuilderPin/updateBuilderPin/unlockBuilder/
+upsertBuilderRecord/deleteBuilder by name with no proof. Post-S2 that let someone set any person's
+PIN and become a manager.
+
+**DEV chain (verified, not promoted except the hotfix below):**
+- S1a `2026-10-10_users_pin_login.sql` — PIN columns (pin_hash/temp_pin_hash/failed_attempts/
+  is_locked) on `dev_field_ops_users`, builder PINs migrated hashed (bcrypt via pgcrypto). 7/7 PASS.
+- S1b `2026-10-10_verify_login_fn.sql` — SECURITY DEFINER RPCs verify_login/set_pin/unlock_user;
+  login compares in-DB, returns roles + a 7-day HMAC field token (FIELD_OPS_TOKEN_SECRET), never a
+  hash. One login for everyone. Verified.
+- S2 `2026-10-11_manager_view_permission.sql` — manager_view.use gate (already seeded by the
+  foundation); server `_requireManager` resolves effective permission from the DB (token proves WHO,
+  DB decides WHAT); `getManagerPing` stub. Seeded a Test Manager. Verified (builder→403, none→401,
+  tampered→401).
+- Security fix `2026-10-11_claim_temp_pin_fn.sql` — self-service set-PIN proves the temp PIN
+  atomically; admin mutations require a signed 12h admin token (`_requireAdmin`); admin console
+  re-prompts on expiry. Verified end-to-end on Dev.
+
+**LIVE HOTFIX — SHIPPED (merge `389a75a`, 4 files, zero DB change):** adapted for live's cleartext
+builder columns — admin token (12h, FIELD_OPS_TOKEN_SECRET on the LIVE site) gates
+updateBuilderPin/unlockBuilder/upsertBuilderRecord/deleteBuilder; setBuilderPin requires + verifies
+the temp PIN (wrong tries count toward lockout, new==temp refused); admin.html/field-app
+regenerated from -dev (byte-identical to generate-live); sw.js v5→v6. NONE of the Dev users/
+permission/hashing/RPC work rode along. Live checks S1–S5 all PASS (create w/ token, forged
+unlock→403, temp→permanent, no-temp refused, delete w/ token). Pre-merge live state:
+builders_with_temp_pin=0, locked=0.
+
+---
+
 ## 2026-10-10 — est_start_date carried in the structure copy — SHIPPED to live (merge `75b0f34`)
 
 **What:** the whole-lot "Also copy schedule changes" now also copies `est_start_date`
