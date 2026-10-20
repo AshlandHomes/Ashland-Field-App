@@ -156,6 +156,44 @@ function _requireAdmin(payload) {
   return { ok: true };
 }
 
+// ── S3: frozen baseline completion date ─────────────────────────────────────
+// The baseline is the engine planEndDate (PLANNED CPM: structure + construction_start_date,
+// ignores actuals/est), frozen the FIRST time a lot shows construction has started (any task
+// with an actual_start). Stored insert-only in field_ops_lot_baseline; latest row per lot wins.
+// Server-side working-day gap, negative = behind (mirrors the field app's planEnd-projEnd sign).
+function _behindWd(baselineYmd, projYmd) {
+  if (!baselineYmd || !projYmd) return null;
+  return ScheduleEngine.wdBetween(new Date(projYmd + 'T00:00:00'), new Date(baselineYmd + 'T00:00:00'));
+}
+// Current (latest) baseline date for a lot, or null.
+async function _currentBaseline(lotId) {
+  const r = await supabaseRequest('GET', `field_ops_lot_baseline?lot_id=eq.${lotId}&select=baseline_date,created_at&order=created_at.desc&limit=1`);
+  const row = (r.data || [])[0];
+  return row ? row.baseline_date : null;
+}
+// planEndDate for a lot via the shared engine (planned CPM). Null if no start date / no rows.
+async function _computePlanEnd(lotId) {
+  const lr = await supabaseRequest('GET', `sched_lots?id=eq.${lotId}&select=construction_start_date`);
+  const start = ((lr.data || [])[0] || {}).construction_start_date || null;
+  if (!start) return null;
+  const tr = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lotId}&select=bt_num,duration,lag,predecessors&order=task_order`);
+  const s = ScheduleEngine.computeLotSchedule(tr.data || [], start);
+  return s.planEndDate || null;
+}
+// FREEZE at first construction start. Idempotent: no-op if a baseline already exists or the lot
+// hasn't started. Call from every write path that can set an actual_start. Returns true if it
+// captured now. `kind` is 'capture' (write-path freeze) or 'backfill' (one-time admin sweep).
+async function _captureBaselineIfStarted(lotId, kind) {
+  if (!lotId) return false;
+  if (await _currentBaseline(lotId) != null) return false;                       // already frozen
+  const st = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${lotId}&actual_start=not.is.null&select=id&limit=1`);
+  if (!(st.data || []).length) return false;                                     // not started -> store nothing
+  const base = await _computePlanEnd(lotId);
+  if (!base) return false;
+  await supabaseRequest('POST', 'field_ops_lot_baseline', { lot_id: lotId, baseline_date: base, kind: kind || 'capture', created_by: null });
+  return true;
+}
+
 // ── actual-date entry guard ──────────────────────────────────────────────
 // Authoritative backstop for the rule ScheduleEngine.validateDateEntry enforces:
 // actual_start/actual_finish must fall in [construction_start, today] and finish
@@ -1480,6 +1518,28 @@ exports.handler = async function(event) {
             endsByLot[lotId] = { planEndDate: s.planEndDate, projEndDate: s.projEndDate };
           });
 
+          // S3: current frozen baseline per lot + backstop freeze. A lot that has started (any
+          // actual_start) must never silently lack a baseline — if a write-path freeze was missed,
+          // capture it here (using the planEndDate just computed) and flag it in the response.
+          const idsB = Object.keys(byLot);
+          const baseByLot = {};          // lot_id -> frozen baseline_date (latest row)
+          const baseCapturedNow = {};    // lot_id -> true when captured during THIS read
+          if (idsB.length) {
+            const bl = await supabaseRequest('GET', `field_ops_lot_baseline?lot_id=in.(${idsB.join(',')})&select=lot_id,baseline_date,created_at&order=created_at.desc`);
+            (bl.data || []).forEach(r => { if (baseByLot[r.lot_id] === undefined) baseByLot[r.lot_id] = r.baseline_date; });  // ordered desc -> first seen = latest
+            for (const lotId of idsB) {
+              if (baseByLot[lotId] !== undefined) continue;
+              const started = (byLot[lotId] || []).some(t => t.actual_start);
+              const pe = (endsByLot[lotId] || {}).planEndDate;
+              if (started && pe) {
+                try {
+                  await supabaseRequest('POST', 'field_ops_lot_baseline', { lot_id: lotId, baseline_date: pe, kind: 'capture', created_by: null });
+                  baseByLot[lotId] = pe; baseCapturedNow[lotId] = true;
+                } catch (_) { /* best-effort backstop */ }
+              }
+            }
+          }
+
           Object.keys(byLot).forEach(lotId => {
             const ts = byLot[lotId];
             // ACTIVE PHASE = furthest phase_order among CRITICAL tasks that are started or finished
@@ -1507,11 +1567,64 @@ exports.handler = async function(event) {
               r.is_critical && r.status !== 'finished' && r.phase_order < activePhase
             ).map(r => ({ num: r.bt_num, name: r.name, status: r.status || 'not_started', phase_order: r.phase_order, phase_name: r.phase_name }));
             const ends = endsByLot[lotId] || {};
+            const baseDate = baseByLot[lotId] || null;
             out[lotId] = { activePhase, activePhaseName, phases, behind,
-              planEndDate: ends.planEndDate || null, projEndDate: ends.projEndDate || null };
+              planEndDate: ends.planEndDate || null, projEndDate: ends.projEndDate || null,
+              baseline_date: baseDate,                                             // frozen planned completion (null until construction starts)
+              behind_wd: baseDate ? _behindWd(baseDate, ends.projEndDate || null) : null,  // server-only; negative = behind (ignores holidays — backlog)
+              baseline_captured_now: !!baseCapturedNow[lotId] };
           });
         }
         return { statusCode: 200, body: JSON.stringify(out) };
+      }
+
+      // ── S3: one-time backfill of baselines for already-started active lots (admin only) ──
+      // Captures kind='backfill' = today's planEndDate for every ACTIVE lot that has started
+      // (any actual_start) and has no baseline yet. Returns a review report, one row per active
+      // lot, so the admin can eyeball and resetBaseline anything that looks wrong.
+      case 'backfillBaselines': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
+        const lots = await supabaseRequest('GET', 'sched_lots?status=eq.active&select=id,lot_number,community,builder_name,construction_start_date&order=community,lot_number');
+        const lr = lots.data || [];
+        const ids = lr.map(l => l.id);
+        const baseByLot = {};
+        if (ids.length) {
+          const bl = await supabaseRequest('GET', `field_ops_lot_baseline?lot_id=in.(${ids.join(',')})&select=lot_id,baseline_date,created_at&order=created_at.desc`);
+          (bl.data || []).forEach(r => { if (baseByLot[r.lot_id] === undefined) baseByLot[r.lot_id] = r.baseline_date; });
+        }
+        const report = [];
+        for (const l of lr) {
+          const tr = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${l.id}&select=bt_num,duration,lag,predecessors,actual_start,actual_finish,est_start_date,status&order=task_order`);
+          const ts = tr.data || [];
+          const started = ts.some(t => t.actual_start);
+          const s = l.construction_start_date ? ScheduleEngine.computeLotSchedule(ts, l.construction_start_date) : { planEndDate: null, projEndDate: null };
+          let baseDate = baseByLot[l.id] || null;
+          let captured = false;
+          if (baseDate == null && started && s.planEndDate) {
+            await supabaseRequest('POST', 'field_ops_lot_baseline', { lot_id: l.id, baseline_date: s.planEndDate, kind: 'backfill', created_by: 'admin' });
+            baseDate = s.planEndDate; captured = true;
+          }
+          report.push({ lot: l.lot_number, subdivision: l.community, builder: l.builder_name,
+            started: !!started, baseline_date: baseDate, captured_now: captured,
+            projEndDate: s.projEndDate || null,
+            behind_wd: baseDate ? _behindWd(baseDate, s.projEndDate || null) : null });
+        }
+        return { statusCode: 200, body: JSON.stringify({ lots: report.length, captured: report.filter(r => r.captured_now).length, report }) };
+      }
+
+      // ── S3: admin reset of a frozen baseline (admin only; reason REQUIRED) ──
+      // Inserts kind='reset' = today's recomputed planEndDate with the reason. Never updates/
+      // deletes — the reset row becomes the new latest (current) baseline.
+      case 'resetBaseline': {
+        { const ga = _requireAdmin(payload); if (!ga.ok) return { statusCode: ga.status, body: JSON.stringify({ error: ga.error, permanent: true, admin_reauth: true }) }; }
+        const { lot_id, reason } = payload;
+        if (!lot_id) return { statusCode: 400, body: JSON.stringify({ error: 'lot_id is required' }) };
+        if (!reason || !String(reason).trim()) return { statusCode: 400, body: JSON.stringify({ error: 'A reason is required to reset a baseline.' }) };
+        const base = await _computePlanEnd(lot_id);
+        if (!base) return { statusCode: 400, body: JSON.stringify({ error: 'Cannot compute a planned completion for this lot (no start date or tasks).' }) };
+        const r = await supabaseRequest('POST', 'field_ops_lot_baseline', { lot_id, baseline_date: base, kind: 'reset', reason: String(reason).trim(), created_by: 'admin' });
+        if (r.error) return dbFail(r);
+        return { statusCode: 200, body: JSON.stringify({ success: true, baseline_date: base }) };
       }
 
 
@@ -1588,6 +1701,8 @@ exports.handler = async function(event) {
         // touch the lot so last_task_update reflects this activity (no stage write).
         if (lot_id) {
           await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: stamp });
+          // S3: freeze the baseline the first time construction starts (any actual_start here).
+          if (updates.some(u => u && u.actual_start !== undefined)) { try { await _captureBaselineIfStarted(lot_id, 'capture'); } catch (_) {} }
         }
         return { statusCode: 200, body: JSON.stringify({ done, failed }) };
       }
@@ -1615,6 +1730,8 @@ exports.handler = async function(event) {
         if (_zeroRows(r)) return notFound('This task no longer exists on the lot. Contact the office.');
         if (lot_id) {
           await supabaseRequest('PATCH', `sched_lots?id=eq.${lot_id}`, { last_task_update: new Date().toISOString() });
+          // S3: freeze the baseline the first time construction starts.
+          if (actual_start !== undefined) { try { await _captureBaselineIfStarted(lot_id, 'capture'); } catch (_) {} }
         }
         return { statusCode: 200, body: JSON.stringify(r.data) };
       }
@@ -2141,6 +2258,8 @@ exports.handler = async function(event) {
           await supabaseRequest('DELETE', `sched_lots?id=eq.${lot_id}`);
           return { statusCode: 500, body: JSON.stringify({ error: 'task insert failed: ' + ins.error }) };
         }
+        // S3: a migrated lot can arrive ALREADY STARTED (historical actuals) — freeze its baseline now.
+        if ((completed || []).some(c => c && c.actual_start)) { try { await _captureBaselineIfStarted(lot_id, 'capture'); } catch (_) {} }
 
         const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${template_id}&select=*`);
         const tgates = gRes.data || [];
