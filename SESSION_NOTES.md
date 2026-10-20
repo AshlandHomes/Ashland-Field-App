@@ -28,6 +28,17 @@ LandIQ table.**
 
 ---
 
+## 2026-10-20 — DECISION: frozen baseline counts from the SCHEDULED construction start (manager view S3, Dev)
+
+The frozen baseline completion (dev_field_ops_lot_baseline, S3) is the engine planEndDate computed
+from the lot's **scheduled `construction_start_date`**, NOT from the actual first start. A lot that
+starts LATE therefore reads as **behind** from day one — intended. The baseline is captured the
+moment construction actually begins (first `actual_start`) but its VALUE is the plan measured from
+the scheduled start. Verified on Dev: HP Lot 13 (scheduled start Aug 10) froze baseline 2026-12-17;
+after a late/slow start the phone shows projected Feb 26 2027 = "51d behind". Design kept as-is.
+
+---
+
 ## 2026-10-20 — PIN/login security hardening — DEV chain built + LIVE hotfix SHIPPED (merge `389a75a`)
 
 **The hole:** the Netlify function trusted only the shared `X-Api-Secret`, which `/.netlify/functions/
