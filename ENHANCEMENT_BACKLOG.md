@@ -5,6 +5,19 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🟡 2026-10-21 — manager view: calibrate "behind" on LIVE data before launch
+
+From the Dev backfill review (29 lots): 18 of 24 started lots were >5 working days behind. If most
+lots trip the "Needs attention" threshold the card is noise. BEFORE the manager view goes live:
+1. Run backfillBaselines' review report on LIVE data; use it to CLOSE finished-but-still-'active'
+   lots, then calibrate the behind-threshold (maybe > N wd, or a %, not a flat 5).
+2. Report enhancement: a lot whose PROJECTED completion is already in the PAST (e.g. CO Lot 16:
+   proj 2026-07-13, behind -364) is almost certainly finished-not-closed — show it as
+   "check: finished?" (distinct from the baseline-age "check: still active?" flag). Never auto-close;
+   the office decides.
+
+---
+
 ## 🟡 2026-10-21 — manager view: "why is this lot behind?" — delay-reason rule (AGREED, not built)
 
 The manager "Needs attention" card shows the LATEST delay reason next to "X days behind", or
