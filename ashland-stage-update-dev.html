@@ -518,11 +518,15 @@ async function verifyPinOffline(builder,pin){
 }
 
 async function loadBuilders(){
-  const bs=await sbRead('getBuilders',{})||[];
-  const list=bs.filter(b=>!b.is_admin);
+  // One login list for everyone: builders + managers (getLoginList; names only, no credentials).
+  const list=await sbRead('getLoginList',{})||[];
   const el=document.getElementById('builder-list');
-  if(!list.length){el.innerHTML='<div class="empty">No builders found.</div>';return;}
-  el.innerHTML=list.map(b=>'<button class="bbtn" onclick="pickBuilder(\''+b.name.replace(/'/g,"\\'")+'\')">'+b.name+'</button>').join('');
+  if(!list.length){el.innerHTML='<div class="empty">No one to sign in yet.</div>';return;}
+  el.innerHTML=list.map(p=>{
+    const nm=String(p.name).replace(/'/g,"\\'");
+    const tag=(p.kind==='manager')?' <span style="font-size:11px;opacity:.7;font-weight:400">· Manager</span>':'';
+    return '<button class="bbtn" onclick="pickBuilder(\''+nm+'\')">'+p.name+tag+'</button>';
+  }).join('');
 }
 function pickBuilder(name){currentBuilder=name;pinEntry='';document.getElementById('pin-name').textContent=name;document.getElementById('pinerr').textContent='';renderPin();showScreen('screen-pin');}
 function toBuilders(){currentBuilder=null;pinEntry='';_tempForSet='';showScreen('screen-builders');}

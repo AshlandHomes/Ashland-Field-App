@@ -595,6 +595,30 @@ exports.handler = async function(event) {
         return { statusCode: 200, body: JSON.stringify(rows) };
       }
 
+      // ── Manager view S-a: one login list for everyone (builders + managers) ──
+      // Pre-auth name list for the field-app login screen — names only, NO credentials (same
+      // exposure as the existing builder list). Builders (non-admin) + users holding a manager
+      // role (field_manager / super_user). verifyPin then authenticates either kind by name.
+      case 'getLoginList': {
+        const br = await supabaseRequest('GET', 'field_ops_builders?select=name,is_admin&order=name');
+        const builderNames = new Set();
+        const out = [];
+        (br.data || []).forEach(b => { if (!b.is_admin && b.name) { builderNames.add(b.name); out.push({ name: b.name, kind: 'builder' }); } });
+        // manager users: roles field_manager / super_user
+        const rr = await supabaseRequest('GET', "field_ops_roles?select=id,key&key=in.(field_manager,super_user)");
+        const roleIds = (rr.data || []).map(r => r.id);
+        if (roleIds.length) {
+          const ur = await supabaseRequest('GET', `field_ops_user_roles?role_id=in.(${roleIds.join(',')})&select=user_id`);
+          const uids = [...new Set((ur.data || []).map(x => x.user_id))];
+          if (uids.length) {
+            const us = await supabaseRequest('GET', `field_ops_users?id=in.(${uids.join(',')})&status=eq.active&select=display_name`);
+            (us.data || []).forEach(u => { if (u.display_name && !builderNames.has(u.display_name)) out.push({ name: u.display_name, kind: 'manager' }); });
+          }
+        }
+        out.sort((a, b) => a.name.localeCompare(b.name));
+        return { statusCode: 200, body: JSON.stringify(out) };
+      }
+
       case 'updateBuilderPin': {
         // Admin "Set PIN" (+ the bulk subdivision save, which sends subdivisions only).
         // Payload still uses the legacy key names (pin_hash/temp_pin hold CLEARTEXT from the
