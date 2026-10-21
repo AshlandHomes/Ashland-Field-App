@@ -5,6 +5,25 @@ Deferred work, captured so it isn't lost. NOT built. Newest first.
 
 ---
 
+## 🟡 2026-10-21 — manager view: "why is this lot behind?" — delay-reason rule (AGREED, not built)
+
+The manager "Needs attention" card shows the LATEST delay reason next to "X days behind", or
+"No reason given". Rules agreed:
+- Ask for a reason ONLY on a late FINISH — never on a late start.
+- A finish is late only if it misses the finish the schedule expected BEFORE that task started —
+  i.e. the finish computed from its PREDECESSORS' dates, not from its own actual start. A first task
+  with no predecessors uses the scheduled `construction_start_date`. (This is stricter/clearer than
+  today's "actual_finish > projected finish" trigger — a task pushed back by a late predecessor that
+  then finishes on its REVISED date is NOT late; the reason was already captured on the task in front.)
+- Reuse the existing modal + `sched_task_delays` (no new table). Keep the CRITICAL-PATH-only gate
+  unless there's a reason to widen it — decide when we see how often "No reason given" shows.
+- Card data: latest `sched_task_delays` row per lot_id (order created_at desc) → reason_label;
+  none → "No reason given". Read-only; no schema change needed for the card itself.
+- Known gap: late STARTS still won't carry a reason (no finish event) — a lot can read behind with
+  "No reason given". Accepted for v1.
+
+---
+
 ## 🔴 2026-10-20 — HIGH — read actions aren't server-gated, and the API secret is handed to every client
 
 The Netlify function (`/.netlify/functions/supabase`) authorizes requests ONLY by a shared
