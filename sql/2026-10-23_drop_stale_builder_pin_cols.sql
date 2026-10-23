@@ -24,9 +24,12 @@
 -- SAFETY. Field-ops-owned table only. ZERO LandIQ tables. No grants/RLS change.
 -- CLEAR first (NULL/zero/false) so the drop can't silently mask a live writer, then
 -- DROP. One transaction, all-or-nothing, behind a DO-block that RAISEs if ANY of the
--- columns is already gone (migration already applied) OR if the hashed credential on
--- dev_field_ops_users is MISSING for a builder that still carries a cleartext PIN
--- here (would mean S1a never finished for that row — STOP, do not drop the only copy).
+-- columns is already gone (migration already applied) OR if a builder that still
+-- carries ANY old cleartext credential here has NO credential at all on its linked
+-- user (u.pin_hash AND u.temp_pin_hash both NULL) — or no linked user. That is the
+-- only true orphan: S1a never landed a credential for that person, so dropping would
+-- destroy the only copy. A builder who moved temp -> permanent on the user (old temp
+-- leftover, user now has pin_hash) is FULLY migrated and must NOT trip the check.
 --
 -- ROLLBACK is a RE-ADD of empty columns only — the cleartext values are NOT
 -- recoverable, which is intended (they are stale and duplicative; the real,
@@ -50,15 +53,18 @@ WHERE table_schema='public' AND table_name='dev_field_ops_builders'
 ORDER BY column_name;
 */
 
--- A2. Coverage: every builder that STILL carries a cleartext PIN/temp here must
---     have the matching HASH on its linked user. Expect orphans = 0. A non-zero
---     here means S1a didn't finish for someone — DO NOT run Block B until it's 0.
+-- A2. COVERAGE GATE. A builder is a true orphan ONLY if it still carries ANY old
+--     cleartext credential here AND its linked user has NO credential at all
+--     (pin_hash AND temp_pin_hash both NULL), or has no linked user. A builder who
+--     moved temp -> permanent on the user (old temp leftover, user now has a hash) is
+--     fully migrated and does NOT count. Expect orphans = 0. Non-zero => STOP, do NOT
+--     run Block B.
 /*
 SELECT count(*) AS orphans
 FROM dev_field_ops_builders b
 LEFT JOIN dev_field_ops_users u ON u.id = b.user_id
-WHERE ( (NULLIF(b.pin_hash,'') IS NOT NULL AND u.pin_hash      IS NULL)
-     OR (NULLIF(b.temp_pin,'') IS NOT NULL AND u.temp_pin_hash IS NULL) );
+WHERE ( NULLIF(b.pin_hash,'') IS NOT NULL OR NULLIF(b.temp_pin,'') IS NOT NULL )
+  AND ( u.id IS NULL OR (u.pin_hash IS NULL AND u.temp_pin_hash IS NULL) );
 */
 
 -- A3. Sanity: how many builder rows still carry cleartext / lock state (context only).
@@ -87,14 +93,17 @@ BEGIN
     RAISE EXCEPTION 'ABORT: column(s) already gone on dev_field_ops_builders (%). Migration already applied?', missing;
   END IF;
 
-  -- Pre-check 2: no builder depends on this as its ONLY credential copy.
+  -- Pre-check 2: no builder depends on this as its ONLY credential copy. A true
+  -- orphan carries old cleartext here AND has no credential at all on its linked
+  -- user (both hashes NULL), or no linked user. A builder migrated temp -> permanent
+  -- on the user does NOT count.
   SELECT count(*) INTO orphans
   FROM dev_field_ops_builders b
   LEFT JOIN dev_field_ops_users u ON u.id = b.user_id
-  WHERE ( (NULLIF(b.pin_hash,'') IS NOT NULL AND u.pin_hash      IS NULL)
-       OR (NULLIF(b.temp_pin,'') IS NOT NULL AND u.temp_pin_hash IS NULL) );
+  WHERE ( NULLIF(b.pin_hash,'') IS NOT NULL OR NULLIF(b.temp_pin,'') IS NOT NULL )
+    AND ( u.id IS NULL OR (u.pin_hash IS NULL AND u.temp_pin_hash IS NULL) );
   IF orphans > 0 THEN
-    RAISE EXCEPTION 'ABORT: % builder(s) carry a cleartext PIN with no hash on dev_field_ops_users — migrate before dropping the only copy.', orphans;
+    RAISE EXCEPTION 'ABORT: % builder(s) carry cleartext here with NO credential on dev_field_ops_users — migrate before dropping the only copy.', orphans;
   END IF;
 END $$;
 
