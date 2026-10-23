@@ -519,9 +519,17 @@ async function _afterLogin(res, name, pin){
   await saveSession(name, pin, _meRoles, _meToken);
   if(_isManager()) enterManager(); else enterApp();
 }
-function enterManager(){
-  if(!_meToken || _tokenExpired(_meToken)){ _managerReauth('Your manager session expired — sign in again.'); return; }
-  try{ document.getElementById('mgr-who').textContent=currentBuilder||''; }catch(e){}
+// The manager token's source of truth is the persisted session (so a reload — and a test that
+// edits it — are honored); _meToken is the in-memory mirror.
+function _mgrToken(){ try{ return (loadSession()||{}).token || _meToken || null; }catch(e){ return _meToken||null; } }
+async function enterManager(){
+  if(!_isOnline){ _managerReauth('Manager view needs an internet connection.'); return; }
+  const tok=_mgrToken();
+  if(!tok || _tokenExpired(tok)){ _managerReauth('Your manager session expired — sign in again.'); return; }  // obvious reject, no round-trip
+  // SERVER-VALIDATE: a revoked/expired/tampered token must never render the manager home.
+  let r=null; try{ r=await sbCallRaw('getManagerPing',{token:tok}); }catch(e){ r=null; }
+  if(!r || !r.ok){ _managerReauth('Your manager session expired — sign in again.'); return; }
+  try{ document.getElementById('mgr-who').textContent=currentBuilder||r.display_name||''; }catch(e){}
   showScreen('screen-manager');   // stub for S-b; real cards + lots in S-d/S-e
 }
 
