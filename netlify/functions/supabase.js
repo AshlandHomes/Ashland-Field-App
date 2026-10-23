@@ -203,6 +203,78 @@ async function _captureBaselineIfStarted(lotId) {
   return true;
 }
 
+// ── SINGLE SOURCE OF TRUTH for stage — mutates each lot in `lots`, setting reported_stage /
+// true_stage / no_stages / stage_unavailable / hold_gate_name / hold_message from LIVE task +
+// gate state via ScheduleEngine.computeStage (the SAME path the in-lot badge uses). Shared by
+// getScheduleLots AND the manager view so neither re-derives stage. Fetch failure for a lot/
+// template leaves that lot blanked (stage_unavailable) rather than trusting a stale stored value.
+async function _attachServerStages(lots) {
+  const lotsWithTpl = lots.filter(l => l.template_id);
+  if (!lotsWithTpl.length) return lots;
+  const stageMapByTpl = {};
+  const gateDefsByTpl  = {};
+  const tplIds = [...new Set(lotsWithTpl.map(l => l.template_id))];
+  await Promise.all(tplIds.map(async (tid) => {
+    try {
+      const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${tid}&select=id,stage_code,stage_label,is_manual,stage_order&order=stage_order`);
+      if (smRes.error) return;
+      const sm = smRes.data || [];
+      const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${tid}&select=id,bt_num`);
+      if (tkRes.error) return;
+      const btById = {}; (tkRes.data || []).forEach(t => { btById[t.id] = t.bt_num; });
+      let joins = [];
+      if (sm.length) {
+        const jRes = await supabaseRequest('GET', `sched_stage_map_tasks?stage_map_id=in.(${sm.map(s => s.id).join(',')})&select=stage_map_id,task_id`);
+        if (jRes.error) return;
+        joins = jRes.data || [];
+      }
+      const trig = {}; joins.forEach(j => { (trig[j.stage_map_id] = trig[j.stage_map_id] || []).push(btById[j.task_id]); });
+      stageMapByTpl[tid] = sm.map(s => ({ code: s.stage_code, label: s.stage_label, is_manual: s.is_manual, order: s.stage_order, triggers: (trig[s.id] || []).filter(x => x != null) }));
+      const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${tid}&select=id,name,hold_stage_code,status_message,hold_task_bt_nums`);
+      gateDefsByTpl[tid] = gRes.error ? [] : (gRes.data || []).map(g => ({ source_gate_id: g.id, name: g.name, hold_stage_code: g.hold_stage_code, status_message: g.status_message, hold_task_bt_nums: g.hold_task_bt_nums || [] }));
+    } catch (e) { /* leave tid undefined -> fallback to stored for its lots */ }
+  }));
+  const finishedByLot = {};
+  const confirmBySrcByLot = {};
+  const fetchedLots = {};
+  const CHUNK = 8;
+  const lotIds = lotsWithTpl.map(l => l.id);
+  for (let i = 0; i < lotIds.length; i += CHUNK) {
+    const slice = lotIds.slice(i, i + CHUNK);
+    const inList = slice.join(',');
+    try {
+      const [tRes, gsRes] = await Promise.all([
+        supabaseRequest('GET', `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,status&limit=100000`),
+        supabaseRequest('GET', `sched_lot_gate_state?lot_id=in.(${inList})&select=lot_id,source_gate_id,confirmed&limit=100000`),
+      ]);
+      if (tRes.error || gsRes.error) continue;
+      (tRes.data || []).forEach(t => { if (t.status === 'finished') { (finishedByLot[t.lot_id] = finishedByLot[t.lot_id] || {})[t.bt_num] = true; } });
+      (gsRes.data || []).forEach(s => { (confirmBySrcByLot[s.lot_id] = confirmBySrcByLot[s.lot_id] || {})[s.source_gate_id] = !!s.confirmed; });
+      slice.forEach(id => { fetchedLots[id] = true; });
+    } catch (e) { /* fallback for this chunk */ }
+  }
+  lots.forEach(l => {
+    if (!l.template_id) return;
+    const sm = stageMapByTpl[l.template_id];
+    if (sm === undefined || !fetchedLots[l.id]) { l.reported_stage = null; l.true_stage = null; l.stage_unavailable = true; return; }
+    if (!sm.length) { l.no_stages = true; l.reported_stage = null; l.true_stage = null; return; }
+    const finished = finishedByLot[l.id] || {};
+    const confirmBySrc = confirmBySrcByLot[l.id] || {};
+    const gates = (gateDefsByTpl[l.template_id] || []).map(g => {
+      const bts = (g.hold_task_bt_nums || []).map(Number).filter(n => !isNaN(n));
+      const released = bts.length ? bts.every(bt => finished[bt]) : !!confirmBySrc[g.source_gate_id];
+      return { threshold: g.hold_stage_code, released, name: g.name, statusMessage: g.status_message };
+    });
+    const st = ScheduleEngine.computeStage(sm, finished, { gates, manualCode: l.manual_stage || undefined });
+    l.reported_stage = (st.reportedCode === '—') ? null : st.reportedCode;
+    l.true_stage = st.trueCode || null;
+    l.no_stages = false;
+    l.hold_gate_name = st.held ? (st.blockingName || null) : null;
+    l.hold_message   = st.held ? (st.blockingMessage || null) : null;
+  });
+  return lots;
+}
+
 // ── actual-date entry guard ──────────────────────────────────────────────
 // Authoritative backstop for the rule ScheduleEngine.validateDateEntry enforces:
 // actual_start/actual_finish must fall in [construction_start, today] and finish
@@ -1174,100 +1246,67 @@ exports.handler = async function(event) {
       case 'getScheduleLots': {
         const r = await supabaseRequest('GET', 'sched_lots?select=*&order=created_at.desc');
         const lots = r.data || [];
-        // ── SINGLE SOURCE OF TRUTH: reported_stage / true_stage / no_stages / hold
-        // surfacing are COMPUTED here from each lot's LIVE task + gate state, via the
-        // shared engine — the SAME computation the in-lot badge uses — so the list and
-        // the detail view can never disagree. (Previously the list trusted the stored
-        // reported_stage column, floored blanks, and surfaced holds separately; that
-        // stored copy drifted whenever it wasn't rewritten after a task synced.) The
-        // engine already applies the first-stage floor and the hold-gate cap, so this one
-        // call replaces both old blocks. Step 3 removes the now-redundant writers.
-        //
-        // SAFETY: a lot is recomputed ONLY when we successfully fetched its template's
-        // stage map AND its tasks/gates. On any fetch failure we leave that lot's STORED
-        // reported_stage/true_stage untouched (fallback) — never worse than before.
-        const lotsWithTpl = lots.filter(l => l.template_id);
-        if (lotsWithTpl.length) {
-          // (a) per-TEMPLATE stage map (+ trigger bt_nums) and hold-gate DEFINITIONS —
-          //     fetched once per distinct template. undefined => fetch failed (skip lot).
-          const stageMapByTpl = {};   // tid -> [{code,label,is_manual,order,triggers:[bt]}]
-          const gateDefsByTpl  = {};  // tid -> [{source_gate_id,name,hold_stage_code,status_message,hold_task_bt_nums}]
-          const tplIds = [...new Set(lotsWithTpl.map(l => l.template_id))];
-          await Promise.all(tplIds.map(async (tid) => {
-            try {
-              const smRes = await supabaseRequest('GET', `sched_template_stage_map?template_id=eq.${tid}&select=id,stage_code,stage_label,is_manual,stage_order&order=stage_order`);
-              if (smRes.error) return;                       // leave undefined -> lots on this tpl keep stored value
-              const sm = smRes.data || [];
-              const tkRes = await supabaseRequest('GET', `sched_template_tasks?template_id=eq.${tid}&select=id,bt_num`);
-              if (tkRes.error) return;
-              const btById = {}; (tkRes.data || []).forEach(t => { btById[t.id] = t.bt_num; });
-              let joins = [];
-              if (sm.length) {
-                const jRes = await supabaseRequest('GET', `sched_stage_map_tasks?stage_map_id=in.(${sm.map(s => s.id).join(',')})&select=stage_map_id,task_id`);
-                if (jRes.error) return;
-                joins = jRes.data || [];
-              }
-              const trig = {}; joins.forEach(j => { (trig[j.stage_map_id] = trig[j.stage_map_id] || []).push(btById[j.task_id]); });
-              stageMapByTpl[tid] = sm.map(s => ({ code: s.stage_code, label: s.stage_label, is_manual: s.is_manual, order: s.stage_order, triggers: (trig[s.id] || []).filter(x => x != null) }));
-              const gRes = await supabaseRequest('GET', `sched_template_gates?template_id=eq.${tid}&select=id,name,hold_stage_code,status_message,hold_task_bt_nums`);
-              gateDefsByTpl[tid] = gRes.error ? [] : (gRes.data || []).map(g => ({ source_gate_id: g.id, name: g.name, hold_stage_code: g.hold_stage_code, status_message: g.status_message, hold_task_bt_nums: g.hold_task_bt_nums || [] }));
-            } catch (e) { /* leave tid undefined -> fallback to stored for its lots */ }
-          }));
+        // SINGLE SOURCE OF TRUTH: stage fields computed from live task+gate state via the shared
+        // engine (same path the in-lot badge + the manager view use). See _attachServerStages.
+        await _attachServerStages(lots);
+        return { statusCode: 200, body: JSON.stringify(lots) };
+      }
 
-          // (b) per-lot LIVE finished-task map + manual gate confirmations. Chunked by
-          //     lot_id (tiny columns; ~100 tasks/lot => 8 lots stays well under PostgREST's
-          //     1000-row cap). A chunk that errors leaves its lots out of `fetchedLots`.
-          const finishedByLot = {};        // lot_id -> {bt: true}
-          const confirmBySrcByLot = {};    // lot_id -> {source_gate_id: confirmed}
-          const fetchedLots = {};          // lot_id -> true when its tasks+gates fetched OK
-          const CHUNK = 8;
-          const lotIds = lotsWithTpl.map(l => l.id);
-          for (let i = 0; i < lotIds.length; i += CHUNK) {
-            const slice = lotIds.slice(i, i + CHUNK);
-            const inList = slice.join(',');
-            try {
-              const [tRes, gsRes] = await Promise.all([
-                // &limit lifts PostgREST's 1000-row cap (via Range in supabaseRequest), so a
-                // chunk with many tasks/lot can't silently truncate -> undercount finished.
-                supabaseRequest('GET', `sched_lot_tasks?lot_id=in.(${inList})&select=lot_id,bt_num,status&limit=100000`),
-                supabaseRequest('GET', `sched_lot_gate_state?lot_id=in.(${inList})&select=lot_id,source_gate_id,confirmed&limit=100000`),
-              ]);
-              if (tRes.error || gsRes.error) continue;       // leave these lots un-fetched -> fallback
-              (tRes.data || []).forEach(t => { if (t.status === 'finished') { (finishedByLot[t.lot_id] = finishedByLot[t.lot_id] || {})[t.bt_num] = true; } });
-              (gsRes.data || []).forEach(s => { (confirmBySrcByLot[s.lot_id] = confirmBySrcByLot[s.lot_id] || {})[s.source_gate_id] = !!s.confirmed; });
-              slice.forEach(id => { fetchedLots[id] = true; });
-            } catch (e) { /* fallback for this chunk */ }
-          }
-
-          // (c) compute each lot's stage with the shared engine (SAME path as the in-lot
-          //     badge). Skip (keep stored) when the template map or the lot's rows weren't
-          //     fetched — never clobber on incomplete data.
-          lots.forEach(l => {
-            if (!l.template_id) return;                      // no stage concept
-            const sm = stageMapByTpl[l.template_id];
-            // FETCH FAILURE (template map or the lot's rows unavailable): do NOT fall back
-            // to the stored reported_stage — it is no longer maintained, so it would drift
-            // and lie. Blank it (honest "couldn't load") rather than resurface the exact
-            // drift bug this refactor removes. `stage_unavailable` lets readers tell this
-            // apart from a genuinely stageless template (no_stages -> N/A).
-            if (sm === undefined || !fetchedLots[l.id]) { l.reported_stage = null; l.true_stage = null; l.stage_unavailable = true; return; }
-            if (!sm.length) { l.no_stages = true; l.reported_stage = null; l.true_stage = null; return; }  // template opted out of stages -> N/A
-            const finished = finishedByLot[l.id] || {};
-            const confirmBySrc = confirmBySrcByLot[l.id] || {};
-            const gates = (gateDefsByTpl[l.template_id] || []).map(g => {
-              const bts = (g.hold_task_bt_nums || []).map(Number).filter(n => !isNaN(n));
-              const released = bts.length ? bts.every(bt => finished[bt]) : !!confirmBySrc[g.source_gate_id];   // TASK vs MANUAL release
-              return { threshold: g.hold_stage_code, released, name: g.name, statusMessage: g.status_message };
-            });
-            const st = ScheduleEngine.computeStage(sm, finished, { gates, manualCode: l.manual_stage || undefined });
-            l.reported_stage = (st.reportedCode === '—') ? null : st.reportedCode;
-            l.true_stage = st.trueCode || null;
-            l.no_stages = false;
-            l.hold_gate_name = st.held ? (st.blockingName || null) : null;   // hold surfacing (admin status + export)
-            l.hold_message   = st.held ? (st.blockingMessage || null) : null;
+      // ── Manager view S-c: one gated read, server-only numbers, flags pre-computed ──
+      // The screen NEVER re-derives: stage/hold from _attachServerStages (same engine as the
+      // builder app), projected completion + frozen baseline + behind_wd from the baseline path,
+      // last_task_update + latest delay reason straight from the DB. needs_attention + a short
+      // reasons[] are decided HERE so the UI only renders words.
+      case 'getManagerNeedsAttention': {
+        const g = await _requireManager(payload && payload.token);
+        if (!g.ok) return { statusCode: g.status, body: JSON.stringify({ error: g.error, permanent: true }) };
+        const BEHIND_WD_THRESHOLD = 5;   // working days behind the frozen baseline
+        const STALE_DAYS = 7;            // calendar days since the last builder update
+        const lr = await supabaseRequest('GET', 'sched_lots?status=eq.active&select=id,lot_number,community,builder_name,construction_start_date,template_id,manual_stage,last_task_update&order=community,lot_number');
+        const lots = lr.data || [];
+        await _attachServerStages(lots);                                  // reported_stage/true_stage/hold_gate_name/hold_message
+        const ids = lots.map(l => l.id);
+        const baseByLot = {};
+        if (ids.length) {
+          const bl = await supabaseRequest('GET', `field_ops_lot_baseline?lot_id=in.(${ids.join(',')})&select=lot_id,baseline_date,created_at&order=created_at.desc`);
+          (bl.data || []).forEach(r => { if (baseByLot[r.lot_id] === undefined) baseByLot[r.lot_id] = r.baseline_date; });
+        }
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const todayYmd = ScheduleEngine.ymd(today);
+        const out = [];
+        for (const l of lots) {
+          const tr = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${l.id}&select=bt_num,duration,lag,predecessors,actual_start,actual_finish,est_start_date,status&order=task_order`);
+          const ts = tr.data || [];
+          const started = ts.some(t => t.actual_start);
+          const s = l.construction_start_date ? ScheduleEngine.computeLotSchedule(ts, l.construction_start_date) : { planEndDate: null, projEndDate: null };
+          const baseline_date = baseByLot[l.id] || null;
+          const behind_wd = baseline_date ? _behindWd(baseline_date, s.projEndDate || null) : null;
+          const dr = await supabaseRequest('GET', `sched_task_delays?lot_id=eq.${l.id}&select=reason_label&order=created_at.desc&limit=1`);
+          const latest_reason = ((dr.data || [])[0] || {}).reason_label || null;
+          const days_since_update = l.last_task_update ? Math.round((today - new Date(l.last_task_update)) / 86400000) : null;
+          const past_projected = !!(s.projEndDate && s.projEndDate < todayYmd);
+          const reasons = [];
+          if (started && behind_wd != null && behind_wd <= -BEHIND_WD_THRESHOLD) reasons.push('behind');   // not-started never counts as behind
+          if (days_since_update != null && days_since_update > STALE_DAYS) reasons.push('quiet');
+          if (l.hold_gate_name) reasons.push('held');
+          if (past_projected) reasons.push('check_finished');
+          out.push({
+            lot: l.lot_number, subdivision: l.community, builder: l.builder_name,
+            reported_stage: l.reported_stage || null, true_stage: l.true_stage || null,
+            hold_gate_name: l.hold_gate_name || null, hold_message: l.hold_message || null,
+            projEndDate: s.projEndDate || null, baseline_date, behind_wd,
+            last_task_update: l.last_task_update || null, days_since_update,
+            latest_reason, started, past_projected,
+            needs_attention: reasons.length > 0, reasons
           });
         }
-        return { statusCode: 200, body: JSON.stringify(lots) };
+        const has = k => out.filter(x => x.reasons.indexOf(k) >= 0).length;
+        return { statusCode: 200, body: JSON.stringify({
+          thresholds: { behind_wd: BEHIND_WD_THRESHOLD, stale_days: STALE_DAYS },
+          counts: { total: out.length, needs_attention: out.filter(x => x.needs_attention).length,
+                    behind: has('behind'), quiet: has('quiet'), held: has('held'), check_finished: has('check_finished') },
+          lots: out
+        }) };
       }
 
       case 'deleteScheduleLot': {
