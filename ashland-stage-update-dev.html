@@ -697,7 +697,16 @@ async function verifyPinOffline(builder,pin){
 
 async function loadBuilders(){
   // One login list for everyone: builders + managers (getLoginList; names only, no credentials).
-  const list=await sbRead('getLoginList',{})||[];
+  let list=await sbRead('getLoginList',{})||[];
+  // OFFLINE FALLBACK (regression fix): getLoginList needs the network, and offline it is
+  // served only if it happened to be cached. A builder who has logged in ON THIS DEVICE must
+  // be able to sign in offline regardless — and the device already knows exactly who that is:
+  // the keys of afo_creds_v1 (everyone with a stored offline credential, i.e. everyone who can
+  // complete an offline PIN). When the server list is empty/unreachable, render from that store.
+  // Managers are server-only (they never get an offline cred), so they correctly don't appear.
+  if(!list.length){
+    try{ list=Object.keys(_loadCreds()).map(n=>({name:n,kind:'builder'})).sort((a,b)=>a.name.localeCompare(b.name)); }catch(e){ list=[]; }
+  }
   const el=document.getElementById('builder-list');
   if(!list.length){el.innerHTML='<div class="empty">No one to sign in yet.</div>';return;}
   el.innerHTML=list.map(p=>{
