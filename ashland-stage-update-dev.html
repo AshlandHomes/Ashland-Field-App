@@ -522,15 +522,83 @@ async function _afterLogin(res, name, pin){
 // The manager token's source of truth is the persisted session (so a reload — and a test that
 // edits it — are honored); _meToken is the in-memory mirror.
 function _mgrToken(){ try{ return (loadSession()||{}).token || _meToken || null; }catch(e){ return _meToken||null; } }
+let _mgrData=null, _mgrBuilderFilter='';
 async function enterManager(){
   if(!_isOnline){ _managerReauth('Manager view needs an internet connection.'); return; }
   const tok=_mgrToken();
   if(!tok || _tokenExpired(tok)){ _managerReauth('Your manager session expired — sign in again.'); return; }  // obvious reject, no round-trip
-  // SERVER-VALIDATE: a revoked/expired/tampered token must never render the manager home.
-  let r=null; try{ r=await sbCallRaw('getManagerPing',{token:tok}); }catch(e){ r=null; }
-  if(!r || !r.ok){ _managerReauth('Your manager session expired — sign in again.'); return; }
-  try{ document.getElementById('mgr-who').textContent=currentBuilder||r.display_name||''; }catch(e){}
-  showScreen('screen-manager');   // stub for S-b; real cards + lots in S-d/S-e
+  try{ document.getElementById('mgr-who').textContent=currentBuilder||''; }catch(e){}
+  showScreen('screen-manager');
+  await loadManager();   // the data call is also the server-side token validation
+}
+function _mEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function _mfmt(ymd){ return ymd?fmt(new Date(ymd+'T00:00:00')):'—'; }
+function _behindWords(w,started){
+  if(!started) return 'not started';
+  if(w==null) return '—';
+  const n=Math.abs(w);
+  if(w<0) return n+' day'+(n===1?'':'s')+' behind';
+  if(w>0) return n+' day'+(n===1?'':'s')+' ahead';
+  return 'on track';
+}
+function _whyLine(x){
+  const p=[];
+  if(x.reasons.indexOf('behind')>=0){ const n=Math.abs(x.behind_wd); p.push(n+' day'+(n===1?'':'s')+' behind'); }
+  if(x.reasons.indexOf('held')>=0) p.push('Held ('+(x.hold_gate_name||'gate')+')');
+  if(x.reasons.indexOf('quiet')>=0) p.push('no update in '+x.days_since_update+' day'+(x.days_since_update===1?'':'s'));
+  return p.join(' · ') || 'needs attention';
+}
+async function loadManager(){
+  const body=document.getElementById('mgr-body'); if(!body) return;
+  body.innerHTML='<div class="loading">Loading…</div>';
+  let data=null; try{ data=await sbCallRaw('getManagerNeedsAttention',{token:_mgrToken()}); }catch(e){ data=null; }
+  if(data===null){ body.innerHTML='<div style="padding:20px 2px;color:var(--muted)">Can’t reach the server. <button class="bbtn" style="margin-top:10px" onclick="loadManager()">Try again</button></div>'; return; }
+  if(!data.counts){ _managerReauth('Your manager session expired — sign in again.'); return; }   // only gated failure is auth
+  _mgrData=data; renderManager();
+}
+function _mgrSetBuilder(v){ _mgrBuilderFilter=v||''; renderManager(); }
+function openManagerLot(id){ try{_toast('Lot detail — coming soon');}catch(e){} }   // S-e builds the read-only lot screen
+function renderManager(){
+  const d=_mgrData, body=document.getElementById('mgr-body'); if(!d||!body) return;
+  const CARD='border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:#fff';
+  // NEEDS ATTENTION (exclude "check: finished?"-only lots — they get their own group)
+  const urgent=d.lots.filter(x=>x.needs_attention && x.reasons.some(r=>r!=='check_finished'));
+  const tier=x=> x.reasons.indexOf('behind')>=0?0 : (x.reasons.indexOf('held')>=0?1:2);
+  urgent.sort((a,b)=>{ const ta=tier(a),tb=tier(b); if(ta!==tb) return ta-tb;
+    if(ta===0) return (a.behind_wd||0)-(b.behind_wd||0);               // most days behind first
+    if(ta===2) return (b.days_since_update||0)-(a.days_since_update||0); // longest quiet first
+    return 0; });
+  const checkOnly=d.lots.filter(x=>x.needs_attention && x.reasons.length===1 && x.reasons[0]==='check_finished');
+  let h='<div style="font-weight:700;font-size:15px;margin:2px 0 10px">Needs attention '+d.counts.needs_attention+' of '+d.counts.total+'</div>';
+  if(!urgent.length){ h+='<div style="color:var(--muted);font-size:13px;margin-bottom:8px">Nothing urgent right now.</div>'; }
+  h+=urgent.map(x=>'<div style="'+CARD+'" onclick="openManagerLot(\''+x.id+'\')">'
+      +'<div style="font-weight:700;font-size:14px">'+_mEsc(x.lot)+' · '+_mEsc(x.subdivision||'')+(x.builder?' · '+_mEsc(x.builder):'')+'</div>'
+      +'<div style="font-size:13px;color:#b45309;margin-top:2px">'+_mEsc(_whyLine(x))+'</div>'
+      +'<div style="font-size:12px;color:#6b7280;margin-top:2px">'+_mEsc(x.latest_reason||'No reason given')+'</div></div>').join('');
+  if(checkOnly.length){
+    h+='<div style="font-weight:700;margin:16px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#374151">Check: finished?</div>';
+    h+=checkOnly.map(x=>'<div style="'+CARD+';opacity:.75" onclick="openManagerLot(\''+x.id+'\')">'
+      +'<div style="font-weight:700;font-size:14px">'+_mEsc(x.lot)+' · '+_mEsc(x.subdivision||'')+'</div>'
+      +'<div style="font-size:13px;color:#6b7280;margin-top:2px">completion date passed ('+_mfmt(x.projEndDate)+') — check if finished</div></div>').join('');
+  }
+  // ALL LOTS by subdivision + builder filter
+  h+='<div style="font-weight:700;margin:18px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#374151">All lots</div>';
+  const builders=[...new Set(d.lots.map(x=>x.builder).filter(Boolean))].sort();
+  h+='<select onchange="_mgrSetBuilder(this.value)" style="margin:0 0 10px;padding:6px 8px;font-size:14px;width:100%;font-family:inherit"><option value="">All builders</option>'
+    +builders.map(b=>'<option value="'+_mEsc(b)+'"'+(_mgrBuilderFilter===b?' selected':'')+'>'+_mEsc(b)+'</option>').join('')+'</select>';
+  const rows=d.lots.filter(x=> !_mgrBuilderFilter || x.builder===_mgrBuilderFilter);
+  const bySub={}; rows.forEach(x=>{ const k=x.subdivision||'—'; (bySub[k]=bySub[k]||[]).push(x); });
+  Object.keys(bySub).sort().forEach(sub=>{
+    h+='<div style="font-weight:600;margin:10px 0 2px">'+_mEsc(sub)+'</div>';
+    h+=bySub[sub].map(x=>'<div style="display:flex;gap:8px;justify-content:space-between;align-items:baseline;padding:7px 2px;border-bottom:1px solid #f1f5f9;font-size:13px;cursor:pointer" onclick="openManagerLot(\''+x.id+'\')">'
+      +'<span style="font-weight:600;min-width:70px">'+_mEsc(x.lot)+'</span>'
+      +'<span style="color:#6b7280;flex:1">'+_mEsc(x.builder||'')+'</span>'
+      +'<span style="color:#374151">'+(x.reported_stage?('stage '+_mEsc(x.reported_stage)):'—')+'</span>'
+      +'<span style="color:#374151">'+(x.projEndDate?('done '+_mfmt(x.projEndDate)):'—')+'</span>'
+      +'<span style="font-weight:600;min-width:84px;text-align:right">'+_mEsc(_behindWords(x.behind_wd,x.started))+'</span>'
+      +'</div>').join('');
+  });
+  body.innerHTML=h;
 }
 
 // PERSISTENT offline credential — SURVIVES LOGOUT (this is the fix). A builder in the

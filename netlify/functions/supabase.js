@@ -1291,7 +1291,7 @@ exports.handler = async function(event) {
           if (l.hold_gate_name) reasons.push('held');
           if (past_projected) reasons.push('check_finished');
           out.push({
-            lot: l.lot_number, subdivision: l.community, builder: l.builder_name,
+            id: l.id, lot: l.lot_number, subdivision: l.community, builder: l.builder_name,
             reported_stage: l.reported_stage || null, true_stage: l.true_stage || null,
             hold_gate_name: l.hold_gate_name || null, hold_message: l.hold_message || null,
             projEndDate: s.projEndDate || null, baseline_date, behind_wd,
