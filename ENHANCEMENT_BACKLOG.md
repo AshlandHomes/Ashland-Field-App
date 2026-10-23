@@ -347,3 +347,20 @@ touch LandIQ's `app_users`; our identity is `field_ops_users`.)
   these tables in phase (a) (additive, nothing gated), so no GRANT is needed yet. When the
   app first reads them (gating phase / admin console), add `GRANT` to `service_role` per
   the CLAUDE_CODE_BUILD_SPEC new-table checklist, or the service key silently sees nothing.
+
+## admin-dev hold re-derivation — collapse to the server's conclusion (admin-only, display-only)
+
+- **admin-dev re-derives the HOLD conclusion client-side** in `openStageModal`
+  (`admin-dev.html:1263-1264` manualGates/gatesOpen; `:1326-1333` picks its own blocking
+  gate + "Held at X — actually Y"). This is a SECOND computation of a fact the server already
+  owns via `computeStage` (`hold_gate_name` / `hold_message` / the held cap) and CAN disagree —
+  the modal banner excludes task-driven gates the server counts. **Collapse:** the modal should
+  take the held/blocked CONCLUSION from the server's `hold_gate_name` / `hold_message`, and use
+  the raw gate rows only for the per-gate chip display (pure display of source data). Stage
+  itself is NOT re-derived (read from the server) — only the hold conclusion is. Non-blocking;
+  do as a dedicated admin-dev cleanup step.
+
+- **Move hold AGING to the server.** `holdDays` / `holdSince` (`admin-dev.html:1269-1285`, via
+  `ScheduleEngine.wdBetween` over raw actual_finish) has NO server equivalent today — it's
+  admin-only. Lift it into a server helper so builder / admin / manager could all show ONE
+  aging number from one source. Lower priority than the conclusion collapse above.

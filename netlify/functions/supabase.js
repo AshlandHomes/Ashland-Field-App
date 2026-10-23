@@ -203,6 +203,35 @@ async function _captureBaselineIfStarted(lotId) {
   return true;
 }
 
+// ── SHARED baseline + behind annotation — the ONE calculation for BOTH the manager
+// view and the builder phone, so "behind" is the same number on both screens from the
+// same code. Mutates each lot in place: baseline_date (frozen, latest row), projEndDate
+// (shared engine over the lot's tasks + construction_start_date), started (any
+// actual_start), behind_wd (working days; NEGATIVE = behind). behind_wd is NULL when the
+// lot hasn't started or has no frozen baseline yet — there is nothing to be behind on, so
+// the UI says "not started" rather than inventing a 0. Per-lot task fetch mirrors the
+// freeze path. Callers pass only the lots that need it (manager: active lots; builder:
+// the active subset) to keep the per-lot fetch bounded.
+async function _attachBaselineBehind(lots) {
+  if (!lots || !lots.length) return lots;
+  const ids = lots.map(l => l.id);
+  const baseByLot = {};
+  const bl = await supabaseRequest('GET', `field_ops_lot_baseline?lot_id=in.(${ids.join(',')})&select=lot_id,baseline_date,created_at&order=created_at.desc`);
+  (bl.data || []).forEach(r => { if (baseByLot[r.lot_id] === undefined) baseByLot[r.lot_id] = r.baseline_date; });  // latest row per lot wins
+  for (const l of lots) {
+    const tr = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${l.id}&select=bt_num,duration,lag,predecessors,actual_start,actual_finish,est_start_date,status&order=task_order`);
+    const ts = tr.data || [];
+    const started = ts.some(t => t.actual_start);
+    const s = l.construction_start_date ? ScheduleEngine.computeLotSchedule(ts, l.construction_start_date) : { projEndDate: null };
+    const baseline_date = baseByLot[l.id] || null;
+    l.baseline_date = baseline_date;
+    l.projEndDate = s.projEndDate || null;
+    l.started = started;
+    l.behind_wd = (started && baseline_date) ? _behindWd(baseline_date, s.projEndDate || null) : null;
+  }
+  return lots;
+}
+
 // ── SINGLE SOURCE OF TRUTH for stage — mutates each lot in `lots`, setting reported_stage /
 // true_stage / no_stages / stage_unavailable / hold_gate_name / hold_message from LIVE task +
 // gate state via ScheduleEngine.computeStage (the SAME path the in-lot badge uses). Shared by
@@ -1249,6 +1278,11 @@ exports.handler = async function(event) {
         // SINGLE SOURCE OF TRUTH: stage fields computed from live task+gate state via the shared
         // engine (same path the in-lot badge + the manager view use). See _attachServerStages.
         await _attachServerStages(lots);
+        // S-f: baseline_date + behind_wd from the SAME helper the manager view uses, so the
+        // phone's "behind" IS the manager card's "behind" — no second calculation. Only active
+        // lots carry it (a closed/not-started lot has no meaningful behind; keeps the per-lot
+        // fetch bounded). The phone reads curLot.behind_wd / curLot.started off these.
+        await _attachBaselineBehind(lots.filter(l => l.status === 'active'));
         return { statusCode: 200, body: JSON.stringify(lots) };
       }
 
@@ -1265,28 +1299,17 @@ exports.handler = async function(event) {
         const lr = await supabaseRequest('GET', 'sched_lots?status=eq.active&select=id,lot_number,community,builder_name,construction_start_date,template_id,manual_stage,last_task_update&order=community,lot_number');
         const lots = lr.data || [];
         await _attachServerStages(lots);                                  // reported_stage/true_stage/hold_gate_name/hold_message
-        const ids = lots.map(l => l.id);
-        const baseByLot = {};
-        if (ids.length) {
-          const bl = await supabaseRequest('GET', `field_ops_lot_baseline?lot_id=in.(${ids.join(',')})&select=lot_id,baseline_date,created_at&order=created_at.desc`);
-          (bl.data || []).forEach(r => { if (baseByLot[r.lot_id] === undefined) baseByLot[r.lot_id] = r.baseline_date; });
-        }
+        await _attachBaselineBehind(lots);                                // baseline_date/projEndDate/started/behind_wd — SAME helper getScheduleLots uses (one calc)
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const todayYmd = ScheduleEngine.ymd(today);
         const out = [];
         for (const l of lots) {
-          const tr = await supabaseRequest('GET', `sched_lot_tasks?lot_id=eq.${l.id}&select=bt_num,duration,lag,predecessors,actual_start,actual_finish,est_start_date,status&order=task_order`);
-          const ts = tr.data || [];
-          const started = ts.some(t => t.actual_start);
-          const s = l.construction_start_date ? ScheduleEngine.computeLotSchedule(ts, l.construction_start_date) : { planEndDate: null, projEndDate: null };
-          const baseline_date = baseByLot[l.id] || null;
-          const behind_wd = baseline_date ? _behindWd(baseline_date, s.projEndDate || null) : null;
           const dr = await supabaseRequest('GET', `sched_task_delays?lot_id=eq.${l.id}&select=reason_label&order=created_at.desc&limit=1`);
           const latest_reason = ((dr.data || [])[0] || {}).reason_label || null;
           const days_since_update = l.last_task_update ? Math.round((today - new Date(l.last_task_update)) / 86400000) : null;
-          const past_projected = !!(s.projEndDate && s.projEndDate < todayYmd);
+          const past_projected = !!(l.projEndDate && l.projEndDate < todayYmd);
           const reasons = [];
-          if (started && behind_wd != null && behind_wd <= -BEHIND_WD_THRESHOLD) reasons.push('behind');   // not-started never counts as behind
+          if (l.started && l.behind_wd != null && l.behind_wd <= -BEHIND_WD_THRESHOLD) reasons.push('behind');   // not-started never counts as behind
           if (days_since_update != null && days_since_update > STALE_DAYS) reasons.push('quiet');
           if (l.hold_gate_name) reasons.push('held');
           if (past_projected) reasons.push('check_finished');
@@ -1295,9 +1318,9 @@ exports.handler = async function(event) {
             construction_start_date: l.construction_start_date || null,   // S-e: read-only lot screen runs the shared engine from this (single source: sched_lots)
             reported_stage: l.reported_stage || null, true_stage: l.true_stage || null,
             hold_gate_name: l.hold_gate_name || null, hold_message: l.hold_message || null,
-            projEndDate: s.projEndDate || null, baseline_date, behind_wd,
+            projEndDate: l.projEndDate || null, baseline_date: l.baseline_date || null, behind_wd: l.behind_wd,
             last_task_update: l.last_task_update || null, days_since_update,
-            latest_reason, started, past_projected,
+            latest_reason, started: l.started, past_projected,
             needs_attention: reasons.length > 0, reasons
           });
         }

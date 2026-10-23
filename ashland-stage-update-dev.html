@@ -1148,8 +1148,10 @@ function renderSchedule(){
   const weeksLeft=(wdLeft/5).toFixed(1);
   const isClosed=(curLot.status==='closed');
   const isStamped=!!curLot.completion_stamped_at;
-  // Health delta: positive = ahead, negative = behind. Freeze at stamp if all done.
-  const healthDelta=isStamped?(curLot.completion_health_delta||0):(planEnd-projEnd);
+  // S-f: the behind/ahead number is the SERVER value curLot.behind_wd (frozen baseline
+  // vs projected — the SAME number the manager card shows), NOT a phone-side planEnd-projEnd.
+  // Built in the stat-card section below with not-started + pending-sync guards so the phone
+  // never invents a number from stale/unsynced data. A completed lot keeps its frozen stamp.
   const stageNum=parseFloat(_rep)||0;
   const noStages=!!curLot.no_stages;   // template defines no stage milestones -> "N/A" (matches admin table + export)
 
@@ -1163,8 +1165,25 @@ function renderSchedule(){
     +'</div>';
 
   // ── Stat cards (Items 5+6) ──
-  const hdCls=healthDelta>0?'ahead':(healthDelta<0?'behind':'');
-  const hdTxt=healthDelta>0?('+'+healthDelta+'d ahead'):(healthDelta<0?(Math.abs(healthDelta)+'d behind'):'On track');
+  // Behind/ahead = server curLot.behind_wd (negative = behind). Guards, in order:
+  // completed lots show their frozen stamp; offline / unsynced shows "⏳ pending sync"
+  // (never a stale number); not-started shows "not started" (no baseline yet, no number).
+  let hdCls='', hdTxt;
+  if(isStamped){
+    const d=curLot.completion_health_delta||0;
+    hdCls=d>0?'ahead':(d<0?'behind':'');
+    hdTxt=d>0?('+'+d+'d ahead'):(d<0?(Math.abs(d)+'d behind'):'On track');
+  } else if(_stagePending){
+    hdTxt='⏳ pending sync';
+  } else if(!curLot.started){
+    hdTxt='Not started';
+  } else if(curLot.behind_wd==null){
+    hdTxt='—';
+  } else {
+    const w=curLot.behind_wd, n=Math.abs(w);
+    hdCls=w<0?'behind':(w>0?'ahead':'');
+    hdTxt=w<0?(n+'d behind'):(w>0?('+'+n+'d ahead'):'On track');
+  }
   const startFmt=curLot.construction_start_date?fmt(new Date(curLot.construction_start_date+'T00:00:00')):'—';
   const cardCount=curLot.scheduled_close_date?5:4;
   h+='<div class="stat-cards cards-'+cardCount+'">'
@@ -1658,7 +1677,7 @@ async function _refreshLotStageBadge(){
       const lots = await sbCallRaw('getScheduleLots', {});
       const fresh = Array.isArray(lots) && lots.find(l => l && l.id===lotId);
       if (fresh && curLot && curLot.id===lotId){
-        ['reported_stage','true_stage','no_stages','stage_unavailable','hold_gate_name','hold_message'].forEach(k => { curLot[k] = fresh[k]; });
+        ['reported_stage','true_stage','no_stages','stage_unavailable','hold_gate_name','hold_message','behind_wd','baseline_date','projEndDate','started'].forEach(k => { curLot[k] = fresh[k]; });  // S-f: behind_wd refreshes with the badge
       }
     } catch(e){}
   }

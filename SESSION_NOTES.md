@@ -395,3 +395,40 @@ flag-resolution state machine + both UIs). Non-realtime + swallowed-fetch-errors
 - **KI-10** — stale-task "was due" date computed outside the engine (low; decide with KI-9).
 - **KI-11** — no distinct "actual closed-on" date (`scheduled_close_date` overloaded).
 - **KI-12** — optional: fold canceled lots into the closed group too.
+
+---
+
+## 2026-10-23 — Manager view v1 (S-d → S-f) + single-source enforcement
+
+### Standing rule locked (Collin): no duplicate data sets
+Every manager field reads the single central source. Any new table/column needs approval
+first with a reason it can't come from existing data. Full data-source audit done this
+session (every getManagerNeedsAttention field → table.column or shared server fn; confirmed
+nothing cached into a manager store).
+
+### S-d — manager home UI (commit beacb64)
+Count header "Needs attention N of M"; severity-sorted cards (behind→held→quiet, excl.
+check-finished-only); "Check: finished?" group; all-lots-by-subdivision + builder filter.
+
+### S-e — read-only lot screen (commit ca40dee)
+screen-mgr-lot: zero edit controls, "Read-only" chip. Tasks from getScheduleLotTasks (same
+read as builder openLot); per-task projected dates via shared ScheduleEngine.computeLotSchedule;
+header facts from _mgrData. construction_start_date now carried on the manager payload (single
+source sched_lots). Own _mgrLot/_mgrLotId vars — never touches builder TASKS/act/curLot.
+
+### Stale builder PIN columns — DROPPED on Dev (sql/2026-10-23_drop_stale_builder_pin_cols.sql)
+Since S1b flipped all PIN reads/writes to dev_field_ops_users, the columns pin_hash / temp_pin /
+failed_attempts / is_locked on dev_field_ops_builders were read/written by nothing (only scrubbed
+from API output). Cleared + dropped. Corrected A2: orphans 0; Block B: success; verification
+PASS; builder login (Dennis Duncan) verified working after the drop. Coverage gate fixed to flag
+a true orphan only (old cleartext here AND no credential at all on the linked user) — a builder
+who moved temp→permanent on the user (e.g. Stephen Connor) is fully migrated, not an orphan.
+LIVE equivalent waits for DB separation, after live S1a/S1b, same script vs field_ops_builders.
+
+### S-f — phone behind-switch (THIS commit)
+getScheduleLots + getManagerNeedsAttention both call one new shared helper _attachBaselineBehind
+(baseline_date / projEndDate / started / behind_wd) — ONE calculation, so the builder's "behind"
+IS the manager card's "behind". The phone's Health card reads curLot.behind_wd and no longer
+computes planEnd−projEnd. Not-started → "Not started" (no number); offline/unsynced → "⏳ pending
+sync" (never a stale/invented number); completed lot keeps its frozen stamp. behind_wd refreshes
+with the stage badge after a sync. Ships with the manager view, never split. sw cache v7→v8.

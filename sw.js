@@ -17,7 +17,7 @@
 // install so a cold offline launch has them even before the network-first path has
 // run once.
 
-const CACHE_NAME = 'ashland-field-ops-v7';
+const CACHE_NAME = 'ashland-field-ops-v8';
 
 // Precache the app shell, its JS modules, and icons so an OFFLINE cold-start has a
 // guaranteed shell to serve — not dependent on the network-first path having cached
