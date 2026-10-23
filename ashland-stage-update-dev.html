@@ -412,6 +412,10 @@ html,body{overscroll-behavior-y:contain}
     </div>
     <div id="mgr-body" style="padding:24px 4px;color:var(--muted);font-size:14px">Manager view — coming soon.</div>
   </div>
+  <div class="screen" id="screen-mgr-lot">
+    <button class="back" onclick="backToManager()">← Manager</button>
+    <div id="mgrlot-view" style="margin-top:4px"><div class="loading">Loading…</div></div>
+  </div>
   <div class="screen" id="screen-lots">
     <button class="back" onclick="backToSubs()">← Subdivisions</button>
     <div class="topbar" style="margin-top:4px">
@@ -557,7 +561,72 @@ async function loadManager(){
   _mgrData=data; renderManager();
 }
 function _mgrSetBuilder(v){ _mgrBuilderFilter=v||''; renderManager(); }
-function openManagerLot(id){ try{_toast('Lot detail — coming soon');}catch(e){} }   // S-e builds the read-only lot screen
+
+// ── S-e: READ-ONLY lot screen for managers ───────────────────────────────
+// A manager taps a lot and sees the SAME facts the builder sees — but this path
+// NEVER builds an edit control. Tasks + gates come from getScheduleLotTasks (the
+// identical server read the builder's openLot uses); per-task projected dates are
+// derived by the SHARED engine (ScheduleEngine.computeLotSchedule) over those same
+// rows, from the lot's construction_start_date carried on the manager payload. Lot-
+// level stage / completion / pace / hold / latest reason come straight from the
+// server-computed manager record (_mgrData) — nothing is recomputed or stored here.
+// Kept in its own vars so a manager viewing a lot can never touch the builder's
+// editable TASKS/act/curLot globals.
+let _mgrLot=null, _mgrLotId=null;
+async function openManagerLot(id){
+  _mgrLotId=id;
+  _mgrLot=((_mgrData&&_mgrData.lots)||[]).find(x=>x.id===id)||null;
+  showScreen('screen-mgr-lot');
+  const v=document.getElementById('mgrlot-view'); if(v) v.innerHTML='<div class="loading">Loading…</div>';
+  if(!_isOnline){ _managerReauth('Manager view needs an internet connection.'); return; }
+  let data=null; try{ data=await sbCallRaw('getScheduleLotTasks',{lot_id:id}); }catch(e){ data=null; }
+  if(data===null){ if(v) v.innerHTML='<div style="padding:20px 2px;color:var(--muted)">Can’t reach the server. <button class="bbtn" style="margin-top:10px" onclick="openManagerLot(\''+_mEsc(id)+'\')">Try again</button></div>'; return; }
+  renderManagerLot(data.tasks||[]);
+}
+function backToManager(){ showScreen('screen-manager'); }
+function renderManagerLot(rows){
+  const v=document.getElementById('mgrlot-view'); if(!v) return;
+  const L=_mgrLot||{};
+  const start=L.construction_start_date||null;
+  if(start){ try{ ScheduleEngine.computeLotSchedule(rows, start); }catch(e){} }   // mutates rows -> _projected_date; same engine the server + builder use
+  const BOX='flex:1;min-width:110px;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px';
+  let h='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 4px">'
+    +'<div style="font-weight:700;font-size:17px">'+_mEsc(L.lot||'')+'</div>'
+    +'<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;border:1px solid #d1d5db;border-radius:999px;padding:2px 8px">Read-only</span></div>'
+    +'<div style="font-size:13px;color:#6b7280;margin-bottom:12px">'+_mEsc(L.subdivision||'')+(L.builder?' · '+_mEsc(L.builder):'')+'</div>';
+  const bw=_behindWords(L.behind_wd,L.started);
+  const bwcol=(L.behind_wd!=null&&L.behind_wd<0)?'#b45309':((L.behind_wd!=null&&L.behind_wd>0)?'#15803d':'#374151');
+  h+='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+    +'<div style="'+BOX+'"><div style="font-size:11px;color:#6b7280">Stage</div><div style="font-weight:700">'+(L.reported_stage?_mEsc(L.reported_stage):'—')+'</div></div>'
+    +'<div style="'+BOX+'"><div style="font-size:11px;color:#6b7280">Completion</div><div style="font-weight:700">'+_mfmt(L.projEndDate)+'</div></div>'
+    +'<div style="'+BOX+'"><div style="font-size:11px;color:#6b7280">Pace</div><div style="font-weight:700;color:'+bwcol+'">'+_mEsc(bw)+'</div></div></div>';
+  if(L.hold_gate_name){ h+='<div style="border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;padding:8px 10px;margin-bottom:12px;font-size:13px"><b>Held</b> · '+_mEsc(L.hold_gate_name)+(L.hold_message?' — '+_mEsc(L.hold_message):'')+'</div>'; }
+  if(L.latest_reason){ h+='<div style="font-size:12px;color:#6b7280;margin-bottom:12px">Latest delay reason: '+_mEsc(L.latest_reason)+'</div>'; }
+  const byPhase={}, order=[], pname={};
+  rows.forEach(t=>{ const p=t.phase_order; if(!(p in byPhase)){ byPhase[p]=[]; order.push(p); } byPhase[p].push(t); pname[p]=t.phase_name; });
+  order.sort((a,b)=>a-b);
+  if(!rows.length){ h+='<div style="color:var(--muted);font-size:13px">No tasks on this lot.</div>'; }
+  order.forEach(p=>{
+    const list=byPhase[p].slice().sort((a,b)=>(a.task_order-b.task_order)||(a.bt_num-b.bt_num));
+    const done=list.filter(t=>t.status==='finished').length;
+    h+='<div style="display:flex;justify-content:space-between;font-weight:700;background:#f8fafc;border-radius:8px;padding:7px 10px;margin:12px 0 2px;font-size:13px"><span>Phase '+_mEsc(p)+' · '+_mEsc(pname[p]||('Phase '+p))+'</span><span style="color:#6b7280">'+done+'/'+list.length+'</span></div>';
+    h+=list.map(t=>{
+      const st=t.status;
+      const tag= st==='finished'?'<span style="color:#15803d;font-weight:600">Finished</span>'
+               : st==='started' ?'<span style="color:#b45309;font-weight:600">Started</span>'
+               :                  '<span style="color:#9ca3af">Not started</span>';
+      let date;
+      if(st==='finished'&&t.actual_finish) date='Done '+_mfmt(t.actual_finish);
+      else if(st==='started'&&t.actual_start) date='Started '+_mfmt(t.actual_start)+(t._projected_date?' · projected done '+_mfmt(t._projected_date):'');
+      else date=t._projected_date?('projected '+_mfmt(t._projected_date)):(t.est_start_date?('target '+_mfmt(t.est_start_date)):'—');
+      return '<div style="padding:7px 2px;border-bottom:1px solid #f1f5f9">'
+        +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">'
+        +'<span style="font-size:13px"><span style="color:#9ca3af">#'+_mEsc(t.bt_num)+'</span> '+_mEsc(t.name)+(t.is_critical?' <span title="critical" style="color:#dc2626">●</span>':'')+'</span>'+tag+'</div>'
+        +'<div style="font-size:12px;color:#6b7280;margin-top:1px">'+_mEsc(date)+'</div></div>';
+    }).join('');
+  });
+  v.innerHTML=h;
+}
 function renderManager(){
   const d=_mgrData, body=document.getElementById('mgr-body'); if(!d||!body) return;
   const CARD='border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:#fff';

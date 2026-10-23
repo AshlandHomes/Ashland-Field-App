@@ -1292,6 +1292,7 @@ exports.handler = async function(event) {
           if (past_projected) reasons.push('check_finished');
           out.push({
             id: l.id, lot: l.lot_number, subdivision: l.community, builder: l.builder_name,
+            construction_start_date: l.construction_start_date || null,   // S-e: read-only lot screen runs the shared engine from this (single source: sched_lots)
             reported_stage: l.reported_stage || null, true_stage: l.true_stage || null,
             hold_gate_name: l.hold_gate_name || null, hold_message: l.hold_message || null,
             projEndDate: s.projEndDate || null, baseline_date, behind_wd,
