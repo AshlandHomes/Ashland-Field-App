@@ -432,3 +432,23 @@ IS the manager card's "behind". The phone's Health card reads curLot.behind_wd a
 computes planEnd−projEnd. Not-started → "Not started" (no number); offline/unsynced → "⏳ pending
 sync" (never a stale/invented number); completed lot keeps its frozen stamp. behind_wd refreshes
 with the stage badge after a sync. Ships with the manager view, never split. sw cache v7→v8.
+
+### S-f — phone behind-switch (commit a42a560) + offline-login regression fix (commit 4eb0a35)
+Both reads feed one shared helper _attachBaselineBehind; phone Health card reads server
+behind_wd (not-started → "Not started"; offline/unsynced → "⏳ pending sync"). Fixed a
+regression where S-a's getLoginList left the offline login list empty: loadBuilders now
+falls back to afo_creds_v1 (on-device builders) when the server list is unavailable.
+Verified: CT Lot 31 −34, CT Lot 33 +1, HP Lot 14 not-started matched across server/manager/
+builder; offline Dennis login + "⏳ pending sync" both PASS.
+
+### S-g — delay-reason rule (THIS commit)
+Reason is prompted on a late FINISH only, never a late start. "Late" = actual finish AFTER
+the finish the schedule expected BEFORE the task started — _expectedFinishYmd(n): the SAME
+shared engine the server uses (ScheduleEngine.computeFieldSchedule → the same computeSchedule
+core as computeLotSchedule) run projected over a COPY of `act` with THIS task removed, so its
+early-start is driven by predecessors' actual finishes (or the construction_start floor for a
+predecessor-less task). A task that merely started late is never prompted; a task pushed back
+by a late predecessor that finishes on its revised date is NOT late. Critical-path gate kept
+(t._crit). Same modal / reason list / sched_task_delays; days_late stored against the expected
+finish; modal label now "Expected finish". Bulk-push delay inheritance unchanged (copies the
+stored rows verbatim). sw cache v9→v10.

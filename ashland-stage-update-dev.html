@@ -2078,6 +2078,21 @@ async function startTask(n){
   if(!av.ok){alert(av.message);return;}
   act[n]={started:true,finished:false,start:v,finish:null};renderSchedule();await saveTask(t);
 }
+// S-g: the finish the schedule expected for task n BEFORE it started — from its
+// PREDECESSORS only (this task's own actual_start ignored). Same shared engine the
+// server uses: ScheduleEngine.computeFieldSchedule feeds the SAME computeSchedule core as
+// the server's computeLotSchedule — not a new phone-only calculation. In projected mode a
+// started task's early-start is floored at its own actual_start (engine), so we run it over
+// a COPY of `act` with THIS task removed: its early-start then comes from predecessors'
+// actual finishes, or — for a predecessor-less task — the construction-start floor (=
+// construction_start_date). Pure read: computeFieldSchedule builds its own task copy and
+// does NOT mutate TASKS / _projected_ef. Returns the expected finish as YYYY-MM-DD, or null.
+function _expectedFinishYmd(n){
+  const actNoSelf={}; Object.keys(act).forEach(k=>{ if(String(k)!==String(n)) actNoSelf[k]=act[k]; });
+  const r=ScheduleEngine.computeFieldSchedule(TASKS, actNoSelf, startDate, 'projected');
+  const x=r&&r.byNum&&r.byNum[n];
+  return (x&&x.ef!=null)?ymd(offToDate(x.ef)):null;
+}
 async function finishTask(n){
   const t=bn[n];
   const today=todayYmd();
@@ -2168,29 +2183,34 @@ async function finishTask(n){
     return;
   }
 
-  // ── DELAY REASON — required IF AND ONLY IF the task is on the CRITICAL PATH
-  // AND actual finish > projected finish. A non-critical task has float, absorbs
-  // late finish into slack, and does NOT threaten completion — so no reason (no
-  // nagging). t._crit is the field engine's live-computed pure-CPM critical set
-  // (float ≤ 0) — the true computed critical path. Since force_critical was removed
-  // (2026-08-07) is_critical now equals this same pure-float set on both surfaces.
-  // Projected finish (not the frozen baseline) stays the reference. Reuses the
-  // existing delay machinery + fail-safe.
+  // ── DELAY REASON — S-g rule: required IF AND ONLY IF the task is on the CRITICAL
+  // PATH **and the FINISH is late against the date the schedule expected BEFORE this
+  // task started** (_expectedFinishYmd, below — driven by predecessors' actual finishes,
+  // this task's own actual_start IGNORED; a predecessor-less task uses construction_start).
+  // A task that merely STARTED late is never prompted; a task pushed back by a late
+  // predecessor that finishes on its revised date is NOT late (its expected finish already
+  // reflects the predecessor). A non-critical task has float and never threatens completion,
+  // so no reason (no nagging). t._crit is the field engine's live pure-CPM critical set
+  // (float ≤ 0). Reuses the existing modal + reason list + sched_task_delays + fail-safe;
+  // days_late is stored against that expected finish.
   let delayPayload=null;
-  if(t._crit && v > projYmd){
-    const daysLate=wdBetween(projYmd, v);
-    // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
-    // (tables not deployed, API error), let the finish go through without it.
-    let reasonsOk=true;
-    try{
-      if(!_drReasons){ _drReasons = await sbRead('getDelayReasons',{}); }
-      if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
-    }catch(e){ reasonsOk=false; }
-    if(reasonsOk){
-      const picked=await openDelayReasonModal(n, t.name, projYmd, v, daysLate);
-      if(picked===null) return;              // cancelled -> abort the finish
-      delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
-                    days_late:daysLate, expected_done:projYmd, actual_finish:v};
+  if(t._crit){
+    const expYmd=_expectedFinishYmd(n);            // predecessor-expected finish; own start ignored
+    if(expYmd && v > expYmd){
+      const daysLate=wdBetween(expYmd, v);
+      // FAIL-SAFE: never trap the builder. If the reason list can't be loaded
+      // (tables not deployed, API error), let the finish go through without it.
+      let reasonsOk=true;
+      try{
+        if(!_drReasons){ _drReasons = await sbRead('getDelayReasons',{}); }
+        if(!Array.isArray(_drReasons) || !_drReasons.length) reasonsOk=false;
+      }catch(e){ reasonsOk=false; }
+      if(reasonsOk){
+        const picked=await openDelayReasonModal(n, t.name, expYmd, v, daysLate);
+        if(picked===null) return;              // cancelled -> abort the finish
+        delayPayload={reason_id:picked.id, reason_label:picked.label, note:picked.note,
+                      days_late:daysLate, expected_done:expYmd, actual_finish:v};
+      }
     }
   }
 
@@ -2223,14 +2243,14 @@ function wdBetweenYmd(a,b){
 
 // ── DELAY REASON MODAL ──
 let _drResolve=null, _drReasons=null;
-async function openDelayReasonModal(btNum, taskName, projYmd, actualYmd, daysLate){
+async function openDelayReasonModal(btNum, taskName, expectedYmd, actualYmd, daysLate){
   if(!Array.isArray(_drReasons)) _drReasons = [];
   return new Promise(res=>{
     _drResolve=res;
     const opts=_drReasons.map(r=>'<button class="dr-opt" data-id="'+r.id+'" data-label="'+String(r.label).replace(/"/g,'&quot;')+'">'+r.label+'</button>').join('');
     const html='<div id="dr-overlay" class="dr-overlay"><div class="dr-modal">'
       +'<div class="dr-title">Why was this late?</div>'
-      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Projected finish '+projYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
+      +'<div class="dr-sub">#'+btNum+' '+taskName+'<br>Expected finish '+expectedYmd+' \u00b7 finished '+actualYmd+' \u00b7 <strong>'+daysLate+' working day'+(daysLate===1?'':'s')+' late</strong></div>'
       +'<div class="dr-opts">'+opts+'</div>'
       +'<textarea id="dr-note" class="dr-note" placeholder="Optional note (required if you choose Other)\u2026"></textarea>'
       +'<div id="dr-warn" style="display:none;color:#c0392b;font-size:12px;margin-top:6px">A note is required when choosing \u201cOther\u201d.</div>'
