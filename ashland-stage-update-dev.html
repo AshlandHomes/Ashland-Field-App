@@ -403,6 +403,15 @@ html,body{overscroll-behavior-y:contain}
     <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:4px 0 10px">Choose a subdivision</div>
     <div id="subs-list"><div class="loading">Loading…</div></div>
   </div>
+  <div class="screen" id="screen-manager">
+    <div class="topbar">
+      <div class="who">Manager<br><b id="mgr-who"></b></div>
+      <div style="display:flex;gap:8px">
+        <button class="signout" onclick="signOut()">Sign Out</button>
+      </div>
+    </div>
+    <div id="mgr-body" style="padding:24px 4px;color:var(--muted);font-size:14px">Manager view — coming soon.</div>
+  </div>
   <div class="screen" id="screen-lots">
     <button class="back" onclick="backToSubs()">← Subdivisions</button>
     <div class="topbar" style="margin-top:4px">
@@ -485,12 +494,36 @@ async function _pinHash(builder,pin){
     let h=5381; const s='afo:'+builder+':'+pin; for(let i=0;i<s.length;i++){h=((h<<5)+h+s.charCodeAt(i))|0;} return 'f'+(h>>>0).toString(16);
   }
 }
-async function saveSession(builder,pin){
-  try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ builder:builder, pinHash:await _pinHash(builder,pin), savedAt:Date.now() })); }catch(e){}
+async function saveSession(builder,pin,roles,token){
+  try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ builder:builder, pinHash:await _pinHash(builder,pin), roles:roles||[], token:token||null, savedAt:Date.now() })); }catch(e){}
   await saveOfflineCred(builder,pin);   // persist the credential too — it must SURVIVE logout
 }
 function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||'null'); }catch(e){ return null; } }
 function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+
+// ── session ROLE / TOKEN (manager view) ──────────────────────────────────────
+// Managers log in through the SAME screen as builders; roles (from verifyPin) decide the home.
+let _meRoles=[], _meToken=null;
+function _isMgrRoles(roles){ return Array.isArray(roles) && (roles.indexOf('field_manager')>=0 || roles.indexOf('super_user')>=0); }
+function _isManager(){ return _isMgrRoles(_meRoles); }
+// read a token's exp WITHOUT verifying (server still verifies) — just to know when to re-prompt.
+function _tokenExpired(tok){ try{ const p=JSON.parse(atob(String(tok).split('.')[0].replace(/-/g,'+').replace(/_/g,'/'))); return !p.exp || Date.now()>p.exp; }catch(e){ return true; } }
+// WRITE GUARD: managers never mutate (belt-and-suspenders — they also get no edit UI).
+function _managerBlocked(){ if(_isManager()){ try{_toast('Read-only — managers can’t make changes');}catch(e){} return true; } return false; }
+// expired/invalid/absent manager token -> back to the login list with a message, never a blank screen.
+function _managerReauth(msg){ try{clearSession();}catch(e){} _meRoles=[]; _meToken=null; currentBuilder=null; pinEntry='';
+  showScreen('screen-builders'); try{loadBuilders();}catch(e){} if(msg){ try{_toast(msg);}catch(e){} } }
+// route after a successful ONLINE login (verifyPin returned roles + a token on a non-temp login).
+async function _afterLogin(res, name, pin){
+  _meRoles = (res && res.roles) || []; _meToken = (res && res.token) || null;
+  await saveSession(name, pin, _meRoles, _meToken);
+  if(_isManager()) enterManager(); else enterApp();
+}
+function enterManager(){
+  if(!_meToken || _tokenExpired(_meToken)){ _managerReauth('Your manager session expired — sign in again.'); return; }
+  try{ document.getElementById('mgr-who').textContent=currentBuilder||''; }catch(e){}
+  showScreen('screen-manager');   // stub for S-b; real cards + lots in S-d/S-e
+}
 
 // PERSISTENT offline credential — SURVIVES LOGOUT (this is the fix). A builder in the
 // field logs out / closes the app and must still be able to log back in with NO signal.
@@ -560,8 +593,7 @@ async function tryPin(){
     catch(e){ _isOnline=false; try{startReconnectWatch();updateSyncStatus();}catch(_){} return tryPin(); }  // network died mid-login -> offline verify
     if(res&&res.valid){
       if(res.is_temp){_tempForSet=pinEntry;startSetPin();return;}   // remember the temp PIN to PROVE it when setting the new one
-      await saveSession(currentBuilder,pinEntry);   // remember for offline re-launch
-      enterApp();
+      await _afterLogin(res, currentBuilder, pinEntry);   // store roles+token, route by role (manager vs builder)
     } else if(res&&res.locked){
       document.getElementById('pinerr').textContent='🔒 Locked — too many attempts. Contact your admin to unlock.';
       pinEntry='';renderPin();
@@ -572,7 +604,11 @@ async function tryPin(){
     return;
   }
   // OFFLINE: verify against the locally stored hash from the last online login.
-  if(await verifyPinOffline(currentBuilder,pinEntry)){ enterApp(); }
+  if(await verifyPinOffline(currentBuilder,pinEntry)){
+    const _s=loadSession();
+    if(_s && _isMgrRoles(_s.roles)){ _managerReauth('Manager view needs an internet connection.'); return; }  // manager view is server-only
+    enterApp();
+  }
   else { _pinWrong('Incorrect PIN — offline'); }
 }
 
@@ -613,7 +649,14 @@ async function setPinKey(k){
     if(setPinConfirm.length===4){
       if(setPinConfirm!==setPinEntry){err.textContent='PINs don’t match. Try again.';setPinEntry='';setPinConfirm='';setPinStage='new';setTimeout(renderSetPin,900);return;}
       const r=await sbCall('setBuilderPin',{name:currentBuilder,pin:setPinEntry,temp_pin:_tempForSet});
-      if(r&&r.success){_tempForSet='';await saveSession(currentBuilder,setPinEntry);enterApp();return;}
+      if(r&&r.success){
+        _tempForSet='';
+        // re-verify with the NEW pin to obtain roles + the login token, then route by role.
+        let vr=null; try{ vr=await sbCall('verifyPin',{name:currentBuilder,pin:setPinEntry}); }catch(e){}
+        if(vr&&vr.valid){ await _afterLogin(vr, currentBuilder, setPinEntry); }
+        else { await saveSession(currentBuilder,setPinEntry); enterApp(); }
+        return;
+      }
       // Refusal — plain words per reason. _tempForSet is KEPT for on-screen retries (same_as_temp
       // / bad_new_pin / network); it is cleared only when we send them back to log in (the temp is
       // wrong, expired, or locked and can't be recovered on this screen) or on success.
@@ -671,7 +714,7 @@ async function checkPendingResolutions(){
     }
   }
 }
-function signOut(){clearSession();currentBuilder=null;pinEntry='';curSub=null;myLots=[];showScreen('screen-builders');}
+function signOut(){clearSession();currentBuilder=null;pinEntry='';curSub=null;myLots=[];_meRoles=[];_meToken=null;showScreen('screen-builders');loadBuilders();}
 async function refreshView(){
   const active=document.querySelector('.screen.active');if(!active)return;
   const id=active.id;
@@ -865,7 +908,7 @@ async function _checkUndoAffordance(id){
   }catch(e){}
 }
 // 5d: tap "Undo schedule copy" → preview (same trimmed style as the push), confirm → apply.
-async function openUndoSchedule(){
+async function openUndoSchedule(){ if(_managerBlocked())return;
   if(!curLot) return;
   if(!_isOnline){ await _okModal('Undo needs a connection', 'Try again when you’re back online.'); return; }
   const lotId=curLot.id, lotNum=curLot.lot_number;
@@ -1828,7 +1871,7 @@ function updateCacheStatus(){
   _cacheStatusFade = setTimeout(() => { el.style.display = 'none'; }, 5000);   // fade the good news
 }
 
-async function saveTask(t){
+async function saveTask(t){ if(_managerBlocked())return;
   const a=act[t.num];
   const type=a.finished?'finish':(a.started?'start':'undo');
   await queueAndSync({ type:type, apiAction:'updateScheduleLotTask',
@@ -2447,7 +2490,7 @@ function _bpBusy(label){
   return true;
 }
 
-async function _bpApplyNote(){
+async function _bpApplyNote(){ if(_managerBlocked())return;
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length){alert('Select at least one lot.');return;}
   if(!_bpBusy('Posting…')) return;                   // disable + spinner; ignore a second tap
@@ -2523,7 +2566,7 @@ function openBulkPushTask(btNum){
   _bpIncludeNote=false; _bpNoteText=''; _bpNoteFlag='none'; _bpStructure=false;
   _bpRenderPicker();
 }
-function openBulkPushLot(){
+function openBulkPushLot(){ if(_managerBlocked())return;
   if(!curLot){alert('Open a lot first.');return;}
   const cand=_bpCandidateLots();
   if(!cand.length){alert('No other active lots in '+(SUB_NAMES[curLot.community]||curLot.community)+' to push to.');return;}
@@ -2872,7 +2915,7 @@ function _bpShortReason(err){
 // targets (ready, no blockers in the preview) are attempted; 'blocked'/'unavailable'/'error'
 // targets are skipped and still get their status push below (D-3). A per-target failure never
 // blocks or hides the others. Returns { [lotId]: { lot_number, copied, reason?, permanentFail? } }.
-async function _bpRunStructureCopy(chosen){
+async function _bpRunStructureCopy(chosen){ if(_managerBlocked())return;
   const out={};
   for(const t of chosen){
     const entry=_bpStructPreviews[t.id];
@@ -2894,7 +2937,7 @@ async function _bpRunStructureCopy(chosen){
   }
   return out;
 }
-async function _bpApply(){
+async function _bpApply(){ if(_managerBlocked())return;
   const chosen=_bpTargets.filter(l=>_bpSelected[l.id]);
   if(!chosen.length) return;
   if(!_bpBusy(_isOnline?'Pushing…':'Queuing…')) return;   // disable + spinner on tap; ignore a second tap
