@@ -452,3 +452,13 @@ by a late predecessor that finishes on its revised date is NOT late. Critical-pa
 (t._crit). Same modal / reason list / sched_task_delays; days_late stored against the expected
 finish; modal label now "Expected finish". Bulk-push delay inheritance unchanged (copies the
 stored rows verbatim). sw cache v9→v10.
+
+## 2026-10-24 — MANAGER VIEW v1 COMPLETE on Dev (S-a → S-g)
+The whole chain verified on Dev: S-a one login list; S-b role routing + write guards; S-c
+gated getManagerNeedsAttention; S-d manager home; S-e read-only lot screen; S-f phone
+behind-switch (shared behind_wd) + offline-login regression fix; S-g delay-reason on late
+FINISH vs predecessor-expected finish. Single-source rule held throughout (no manager store;
+one shared engine; one baseline/behind helper). Delay-modal dates now use the app short
+format. **Go-live gate list recorded in ENHANCEMENT_BACKLOG ("MANAGER VIEW — GO-LIVE GATES").**
+Follow-ups pending Collin: Dev delay-reason cleanup (add "Permit / lot not ready", archive
+"Test"/"Test 28"); live reason-list junk is a read-only check awaiting his run.

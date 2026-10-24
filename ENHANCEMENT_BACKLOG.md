@@ -364,3 +364,41 @@ touch LandIQ's `app_users`; our identity is `field_ops_users`.)
   `ScheduleEngine.wdBetween` over raw actual_finish) has NO server equivalent today — it's
   admin-only. Lift it into a server helper so builder / admin / manager could all show ONE
   aging number from one source. Lower priority than the conclusion collapse above.
+
+## MANAGER VIEW — GO-LIVE GATES (plan; manager view is COMPLETE + verified on Dev)
+
+Recommended order. Size = small / medium / large. "Dep" = hard dependency.
+
+HARD BLOCKERS (in order):
+1. **Live S1a/S1b/S2 + baseline-table SQL** — medium. Dep: none. Promote the already-Dev-verified
+   SQL to LIVE (unprefixed): users PIN columns + migrate live builder PINs → users (hashed);
+   verify_login / set_pin / claim_temp_pin RPCs; manager_view permission + manager role; and the
+   field_ops_lot_baseline table. Everything per-user depends on this existing live.
+2. **Per-user server auth / read-gating** — large. Dep: 1. Today every client is handed the shared
+   API_SHARED_SECRET via /config, so writes aren't identity-bound and manager read-only is only
+   enforced CLIENT-side. Bind writes to the logged-in user's signed token → server identity →
+   permission checks, so a manager is refused mutations by the SERVER, not just the missing UI.
+   This is the real security blocker for launch.
+3. **Offline PIN cache → signed token** — medium. Dep: 2. Offline today trusts a local PIN hash;
+   under per-user auth the offline path must carry/refresh a signed login token so offline writes
+   sync WITH identity. (Builders offline must keep working exactly as today.)
+4. **Manager-view code promote (Dev → main)** — medium. Dep: 1, 2 (3 for offline correctness).
+   Ship S-a…S-g. sw cache bump; generate-live.js strips DEV banner.
+5. **Live baseline backfill + review report + threshold calibration** — medium. Dep: 1 (table), 4
+   (code live). Run backfillBaselines on live, review the report (first_actual_start, stale_check),
+   then calibrate BEHIND_WD_THRESHOLD / STALE_DAYS against real live data BEFORE managers see
+   numbers.
+6. **Delete Dev Test Manager + provision real live managers** — small. Dep: 1. Remove the Dev test
+   manager; grant the manager role to the actual people on live.
+7. **Live stale-PIN-column drop** — small. Dep: 1 + confirm live reads come from field_ops_users.
+   Same script as sql/2026-10-23_drop_stale_builder_pin_cols.sql vs field_ops_builders (unprefixed).
+8. **Live delay-reason list cleanup** — small. Dep: read-only check of live sched_delay_reasons
+   first (add "Permit / lot not ready"; archive any junk like "Test"/"Test 28" if present live).
+
+PARALLEL / NON-BLOCKING:
+- **admin-dev hold collapse + move hold aging to server** — medium. Anytime; correctness/single-source.
+- **DB separation from LandIQ** — large, strategic. The standing shared-DB risk. Does NOT strictly
+  block manager view v1 read-only launch IF (2) + RLS are airtight, but it's the biggest debt and
+  the proper home for field-ops-only tables. If it is done FIRST, it reorders everything: items 1/7
+  run against the separated DB and the dev_/'' prefix split goes away. Decision needed:
+  launch-then-separate, or separate-then-launch.
